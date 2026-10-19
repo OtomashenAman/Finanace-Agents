@@ -43,7 +43,8 @@ uv run poe docker-up
 - Backend:  http://localhost:8088 (docs at `/docs`)
 - Postgres: localhost:5434 (user/password/db: `finance` / `finance` / `finance_acc`)
 
-> **Windows / macOS Docker:** if hot reload doesn't pick up edits, set `DOCKER_FILE_POLLING=true` in `.env`.
+> **Docker Desktop (Windows, macOS and Linux):** its VM file sharing can drop file-change events, so hot reload
+> may serve stale files. Set `DOCKER_FILE_POLLING=true` in `.env` and run `docker compose up -d` to recreate the containers.
 
 ### Signing in
 Set `DEMO_ADMIN_PASSWORD` in `.env`, run `uv run poe seed`, then sign in at http://localhost:8081
@@ -53,6 +54,17 @@ Auth model: argon2id password hashes, short-lived JWT access token + rotating re
 in `HttpOnly` `SameSite=Lax` cookies (set `COOKIE_SECURE=true` behind HTTPS). Refresh-token reuse
 revokes the whole login, failed logins lock the account, and every auth event is written to
 `audit_events`. API: `POST /api/v1/auth/login|refresh|logout`, `GET /api/v1/auth/me`.
+
+### Agent catalog
+Each agent is one class in `src/app/agent_catalog/agents/<agent>.py`, registered in
+`src/app/agent_catalog/registry.py` (`AGENTS`). `uv run poe sync-agents` upserts the registry into
+the `agents` table (it also runs in `poe db-up` and in the production `migrate` service).
+
+To add an agent: create the file, add the class to `AGENTS`, run `uv run poe sync-agents`. The
+catalog and the overview's *Active Agents* KPI pick it up automatically. A test fails if an agent
+file is not registered. Code owns names/descriptions; admins own `is_active` (toggle on the catalog
+card) and `agent_assignments` (which user may prepare/review which agent). Agents removed from the
+registry are retired, never deleted.
 
 ### Viewing the database
 - **VS Code:** accept the recommended extensions (*SQLTools* + *SQLTools PostgreSQL*), open the

@@ -2,10 +2,17 @@ import uuid
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import Enum, ForeignKey, String, text
+from sqlalchemy import ForeignKey, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from src.app.common.models import Base, CreatedAtMixin, TimestampMixin, UUIDPrimaryKeyMixin
+from src.app.common.models import (
+    Base,
+    CreatedAtMixin,
+    TimestampMixin,
+    UUIDPrimaryKeyMixin,
+    enum_check,
+    string_enum,
+)
 
 
 class UserRole(StrEnum):
@@ -16,22 +23,13 @@ class UserRole(StrEnum):
 
 class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "users"
+    __table_args__ = (enum_check("role", UserRole, name="user_role"),)  # ck_users_user_role
     # load server defaults (timestamps) after INSERT
     __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012 - SQLAlchemy class config
 
     email: Mapped[str] = mapped_column(String(320), unique=True)  # always stored lowercase
     full_name: Mapped[str] = mapped_column(String(200))
-    role: Mapped[UserRole] = mapped_column(
-        # VARCHAR + CHECK instead of a native enum: adding roles later needs no ALTER TYPE
-        Enum(
-            UserRole,
-            name="user_role",
-            native_enum=False,
-            create_constraint=True,
-            length=32,
-            values_callable=lambda roles: [r.value for r in roles],
-        )
-    )
+    role: Mapped[UserRole] = mapped_column(string_enum(UserRole, 32))
     password_hash: Mapped[str] = mapped_column(String(255))
     is_active: Mapped[bool] = mapped_column(default=True, server_default=text("true"))
     failed_login_attempts: Mapped[int] = mapped_column(default=0, server_default=text("0"))

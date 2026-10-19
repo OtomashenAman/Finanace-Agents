@@ -8,9 +8,7 @@ export function LoginPage() {
         <BrandPanel />
 
         <section className="border-border bg-card px-8 py-10 sm:px-12 md:rounded-r-[28px] md:border md:border-l-0 md:px-[70px] md:py-[72px]">
-          <p className="text-[15px] font-semibold text-primary">
-            <span className="mr-2">01</span>Login and authentication
-          </p>
+          <p className="text-[15px] font-semibold text-primary">Login and authentication</p>
           <h1 className="mt-6 text-4xl font-bold tracking-tight text-brand-navy">Welcome back</h1>
           <div className="max-w-[412px]">
             <LoginForm />

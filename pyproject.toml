@@ -149,12 +149,13 @@ typecheck = { sequence = ["_typecheck-backend", "_typecheck-frontend"], help = "
 check = { sequence = ["lint", "format-check", "typecheck", "test"], help = "Everything CI runs" }
 
 # database
-db-up = { sequence = [{ cmd = "docker compose up -d --wait db" }, "migrate"], help = "Start Postgres/pgvector (:5434) + migrate" }
+db-up = { sequence = [{ cmd = "docker compose up -d --wait db" }, "migrate", "sync-agents"], help = "Start Postgres/pgvector (:5434), migrate, sync agents" }
 db-down = { cmd = "docker compose stop db", help = "Stop the db container (data kept)" }
 db-shell = { script = "scripts.dev:db_shell", help = "psql inside the db container" }
 migrate = { cmd = "alembic upgrade head", help = "Apply migrations" }
 downgrade = { cmd = "alembic downgrade -1", help = "Roll back one migration" }
 seed = { cmd = "python -m src.app.cli.seed", help = "Create demo Finance Admin (--reset-password to reset/unlock)" }
+sync-agents = { cmd = "python -m src.app.cli.sync_agents", help = "Upsert agent_catalog/registry.py into the agents table" }
 
 [tool.poe.tasks.migration]
 help = "Autogenerate a migration: poe migration \"add runs table\""

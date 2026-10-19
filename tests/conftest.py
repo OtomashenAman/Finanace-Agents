@@ -2,7 +2,7 @@
 
 import asyncio
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 
 import asyncpg
 import pytest
@@ -41,10 +41,14 @@ async def _ensure_test_database() -> None:
 asyncio.run(_ensure_test_database())
 command.upgrade(Config("alembic.ini"), "head")  # same schema path as production
 
-from src.app.core.db import get_sessionmaker  # noqa: E402 - must follow env setup
+from src.app.agent_catalog.service import sync_registry  # noqa: E402 - must follow env setup
+from src.app.auth.models import User, UserRole  # noqa: E402
+from src.app.auth.security import hash_password  # noqa: E402
+from src.app.core.db import get_sessionmaker  # noqa: E402
 from src.app.main import app  # noqa: E402
 
-TABLES = ("audit_events", "refresh_tokens", "users")
+TABLES = ("audit_events", "agent_assignments", "agents", "refresh_tokens", "users")
+DEFAULT_PASSWORD = "Correct-Horse-Battery-1"
 
 
 @pytest.fixture(autouse=True)
@@ -64,3 +68,49 @@ async def db() -> AsyncIterator[AsyncSession]:
 async def client() -> AsyncIterator[AsyncClient]:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
+
+
+MakeUser = Callable[..., Awaitable[User]]
+ClientFactory = Callable[..., Awaitable[AsyncClient]]
+
+
+@pytest.fixture
+def make_user(db: AsyncSession) -> MakeUser:
+    async def _make(email: str, role: UserRole = UserRole.PREPARER) -> User:
+        user = User(
+            email=email,
+            full_name=email.split("@")[0].replace(".", " ").title(),
+            role=role,
+            password_hash=hash_password(DEFAULT_PASSWORD),
+        )
+        db.add(user)
+        await db.commit()
+        return user
+
+    return _make
+
+
+@pytest.fixture
+async def signed_in_client() -> AsyncIterator[ClientFactory]:
+    """`await signed_in_client(user)` -> a separate client logged in as that user."""
+    clients: list[AsyncClient] = []
+
+    async def _client(user: User) -> AsyncClient:
+        c = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+        clients.append(c)
+        r = await c.post(
+            "/api/v1/auth/login", json={"email": user.email, "password": DEFAULT_PASSWORD}
+        )
+        assert r.status_code == 200, r.text
+        return c
+
+    yield _client
+    for c in clients:
+        await c.aclose()
+
+
+@pytest.fixture
+async def synced_agents(db: AsyncSession) -> None:
+    """Agents table populated from the code registry."""
+    await sync_registry(db)
+    await db.commit()

@@ -1,9 +1,11 @@
 import { hashKey, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
+import { AUTH_ME_KEY } from "@/lib/query-client"
+
 import { authApi } from "./api"
 
 export const authKeys = {
-  me: ["auth", "me"] as const,
+  me: AUTH_ME_KEY,
 }
 
 export function useCurrentUser() {

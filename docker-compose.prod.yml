@@ -37,7 +37,8 @@ services:
 
   migrate:
     <<: *backend
-    command: ["alembic", "upgrade", "head"]
+    # Schema first, then the agent catalog from the code registry
+    command: ["sh", "-c", "alembic upgrade head && python -m src.app.cli.sync_agents"]
     restart: "no"
     depends_on:
       db:
