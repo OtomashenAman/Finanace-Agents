@@ -44,3 +44,6 @@ def require_roles(*roles: UserRole) -> Callable[[User], Awaitable[User]]:
         return user
 
     return checker
+
+
+AdminUser = Annotated[User, Depends(require_roles(UserRole.FINANCE_ADMIN))]

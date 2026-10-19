@@ -62,7 +62,7 @@ async def test_invalid_period_is_rejected(
 async def test_non_admin_counts_only_own_agents_and_gets_no_admin_controls(
     make_user: MakeUser, signed_in_client: ClientFactory, db: AsyncSession
 ) -> None:
-    preparer = await make_user("ap.analyst@example.com", UserRole.PREPARER)
+    preparer = await make_user("ap.analyst@example.com", UserRole.USER)
     for key in ("ap_invoice", "expense_audit"):
         agent = await db.scalar(select(Agent).where(Agent.key == key))
         assert agent is not None

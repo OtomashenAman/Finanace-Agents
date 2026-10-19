@@ -3,10 +3,9 @@
     uv run poe seed                    # create if missing
     uv run poe seed --reset-password   # also reset passwords and unlock
 
-Users (all share DEMO_ADMIN_PASSWORD):
-  finance.admin@example.com  Finance Admin (oversight)
-  ap.analyst@example.com     preparer for AP Invoice
-  ap.approver@example.com    reviewer for AP Invoice
+Users (both share DEMO_ADMIN_PASSWORD):
+  finance.admin@example.com  Finance Admin (every agent, user management)
+  demo.user@example.com      user: preparer + reviewer for AP Invoice
 """
 
 import argparse
@@ -24,10 +23,8 @@ from src.app.core.db import get_engine, get_sessionmaker
 
 # email, full name, role, (agent key, capacity) assignments
 DEMO_TEAM: list[tuple[str, str, UserRole, list[tuple[str, AgentCapacity]]]] = [
-    ("ap.analyst@example.com", "AP Analyst", UserRole.PREPARER,
-     [("ap_invoice", AgentCapacity.PREPARER)]),
-    ("ap.approver@example.com", "AP Approver", UserRole.REVIEWER,
-     [("ap_invoice", AgentCapacity.REVIEWER)]),
+    ("demo.user@example.com", "Demo User", UserRole.USER,
+     [("ap_invoice", AgentCapacity.PREPARER), ("ap_invoice", AgentCapacity.REVIEWER)]),
 ]  # fmt: skip
 
 

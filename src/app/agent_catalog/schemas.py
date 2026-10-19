@@ -13,7 +13,7 @@ class AgentOut(BaseModel):
     reviewer: str
     is_active: bool
     has_workspace: bool  # input/result/review screens implemented
-    # What the current user may do with this agent (empty for Finance Admin oversight)
+    # What the current user may do with this agent (Finance Admin: always both)
     my_capacities: list[AgentCapacity]
 
 

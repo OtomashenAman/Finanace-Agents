@@ -67,6 +67,10 @@ def visible_agent_ids(user: User) -> Select[tuple[uuid.UUID]]:
     return select(_visible_agents(user).subquery().c.id)
 
 
+# Finance Admin can do everything a user can, on every agent, without assignments
+ADMIN_CAPACITIES = frozenset(AgentCapacity)
+
+
 async def _capacities(session: AsyncSession, user: User) -> dict[uuid.UUID, list[AgentCapacity]]:
     rows = await session.execute(
         select(AgentAssignment.agent_id, AgentAssignment.capacity).where(
@@ -82,6 +86,14 @@ async def _capacities(session: AsyncSession, user: User) -> dict[uuid.UUID, list
 def _has_workspace(key: str) -> bool:
     definition = get_agent_definition(key)
     return definition is not None and definition.has_workspace()
+
+
+def _capacities_for(
+    user: User, agent: Agent, assigned: dict[uuid.UUID, list[AgentCapacity]]
+) -> list[AgentCapacity]:
+    if user.role == UserRole.FINANCE_ADMIN:
+        return list(ADMIN_CAPACITIES)
+    return assigned.get(agent.id, [])
 
 
 def _to_out(agent: Agent, capacities: list[AgentCapacity]) -> AgentOut:
@@ -102,7 +114,7 @@ def _to_out(agent: Agent, capacities: list[AgentCapacity]) -> AgentOut:
 async def list_agents(session: AsyncSession, user: User) -> list[AgentOut]:
     agents = await session.scalars(_visible_agents(user).order_by(Agent.sort_order))
     capacities = await _capacities(session, user)
-    return [_to_out(agent, capacities.get(agent.id, [])) for agent in agents]
+    return [_to_out(agent, _capacities_for(user, agent, capacities)) for agent in agents]
 
 
 async def get_agent(session: AsyncSession, user: User, key: str) -> AgentOut:
@@ -110,7 +122,7 @@ async def get_agent(session: AsyncSession, user: User, key: str) -> AgentOut:
     if agent is None:
         raise AgentNotFoundError
     capacities = await _capacities(session, user)
-    return _to_out(agent, capacities.get(agent.id, []))
+    return _to_out(agent, _capacities_for(user, agent, capacities))
 
 
 async def count_active_agents(session: AsyncSession, user: User) -> int:
@@ -131,4 +143,4 @@ async def set_agent_active(
         agent.is_active = is_active
         event = "agent.activated" if is_active else "agent.deactivated"
         record_event(session, event, ctx, actor_id=actor.id, agent_key=key)
-    return _to_out(agent, [])
+    return _to_out(agent, list(ADMIN_CAPACITIES))

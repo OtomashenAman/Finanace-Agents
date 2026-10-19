@@ -22,7 +22,7 @@ async def admin(make_user: MakeUser) -> User:
 
 @pytest.fixture
 async def preparer(make_user: MakeUser) -> User:
-    return await make_user("ap.analyst@example.com", UserRole.PREPARER)
+    return await make_user("ap.analyst@example.com", UserRole.USER)
 
 
 async def assign(db: AsyncSession, user: User, key: str, capacity: AgentCapacity) -> None:
@@ -60,7 +60,7 @@ async def test_admin_sees_all_12_agents_in_catalog_order(
     assert first["primary_user"] == "AP Analyst"
     assert first["reviewer"] == "AP Approver"
     assert first["is_active"] is True
-    assert first["my_capacities"] == []
+    assert first["my_capacities"] == ["preparer", "reviewer"]  # admin can do everything
 
 
 async def test_preparer_sees_only_assigned_active_agents(

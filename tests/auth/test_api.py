@@ -27,7 +27,7 @@ async def user(db: AsyncSession) -> User:
     user = User(
         email=EMAIL,
         full_name="AP Analyst",
-        role=UserRole.PREPARER,
+        role=UserRole.USER,
         password_hash=hash_password(PASSWORD),
     )
     db.add(user)
@@ -67,7 +67,7 @@ async def test_login_sets_httponly_cookies_and_returns_user(
     assert r.status_code == 200
     body = r.json()
     assert body["email"] == EMAIL
-    assert body["role"] == "preparer"
+    assert body["role"] == "user"
     assert "password_hash" not in body
 
     access = set_cookie(r, "facc_access")

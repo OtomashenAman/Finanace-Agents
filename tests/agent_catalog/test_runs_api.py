@@ -43,14 +43,14 @@ async def assign(
 
 @pytest.fixture
 async def preparer(make_user: MakeUser, db: AsyncSession) -> User:
-    user = await make_user("ap.analyst@example.com", UserRole.PREPARER)
+    user = await make_user("ap.analyst@example.com", UserRole.USER)
     await assign(db, user, AgentCapacity.PREPARER)
     return user
 
 
 @pytest.fixture
 async def reviewer(make_user: MakeUser, db: AsyncSession) -> User:
-    user = await make_user("ap.approver@example.com", UserRole.REVIEWER)
+    user = await make_user("ap.approver@example.com", UserRole.USER)
     await assign(db, user, AgentCapacity.REVIEWER)
     return user
 
@@ -301,7 +301,7 @@ async def test_review_requires_reviewer_assignment(
     signed_in_client: ClientFactory,
     fake_llm: FakeLLM,
 ) -> None:
-    other = await make_user("other.analyst@example.com", UserRole.PREPARER)
+    other = await make_user("other.analyst@example.com", UserRole.USER)
     await assign(db, other, AgentCapacity.PREPARER)
     run = await act(prep, await analyzed_run(prep), "submit")
 
@@ -317,19 +317,35 @@ async def test_unassigned_user_cannot_see_runs(
     make_user: MakeUser, prep: AsyncClient, signed_in_client: ClientFactory
 ) -> None:
     run = await new_run(prep)
-    outsider = await signed_in_client(await make_user("x@example.com", UserRole.PREPARER))
+    outsider = await signed_in_client(await make_user("x@example.com", UserRole.USER))
     assert (await outsider.get(RUNS)).status_code == 404
     assert (await outsider.get(f"{RUNS}/{run['id']}")).status_code == 404
 
 
-async def test_admin_can_view_but_not_prepare(
-    admin: User, prep: AsyncClient, signed_in_client: ClientFactory
+async def test_admin_can_view_prepare_and_review_without_assignment(
+    admin: User, prep: AsyncClient, signed_in_client: ClientFactory, fake_llm: FakeLLM
 ) -> None:
-    await new_run(prep, PDF_EXAMPLE)
+    users_run = await act(prep, await analyzed_run(prep), "submit")
     c = await signed_in_client(admin)
     runs = (await c.get(RUNS)).json()
     assert runs[0]["business_reference"] == "INV-2048"
-    assert (await c.post(RUNS)).status_code == 403
+    assert (await c.get(f"{RUNS}/{users_run['id']}")).json()["permissions"]["can_review"] is True
+
+    run = await act(c, await analyzed_run(c, invoice_number="INV-9001"), "submit")
+    assert run["permissions"]["can_review"] is True
+
+
+async def test_admin_may_approve_own_run_and_it_is_audited(
+    admin: User, signed_in_client: ClientFactory, db: AsyncSession, fake_llm: FakeLLM
+) -> None:
+    c = await signed_in_client(admin)
+    run = await act(c, await analyzed_run(c), "submit")
+    run = await act(c, run, "reviews", decision="approved", comment="Checked myself.")
+    assert run["status"] == "approved"
+
+    event = await db.scalar(select(AuditEvent).where(AuditEvent.event_type == "run.approved"))
+    assert event is not None
+    assert event.details["self_review"] is True
 
 
 async def test_only_drafts_can_be_deleted(

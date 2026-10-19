@@ -3,6 +3,7 @@ import { Inbox, LoaderCircle } from "lucide-react"
 import { AppPage } from "@/components/layout/app-page"
 import { Alert } from "@/components/ui/alert"
 import { useCurrentUser } from "@/features/auth/hooks"
+import { isAdmin } from "@/features/auth/roles"
 
 import { AgentCard } from "./components/agent-card"
 import { useAgents } from "./hooks"
@@ -10,7 +11,6 @@ import { useAgents } from "./hooks"
 export function CatalogPage() {
   const { data: user } = useCurrentUser()
   const { data: agents, isPending, isError } = useAgents()
-  const isAdmin = user?.role === "finance_admin"
 
   return (
     <AppPage
@@ -37,7 +37,7 @@ export function CatalogPage() {
       {agents && agents.length > 0 && (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {agents.map((agent) => (
-            <AgentCard key={agent.key} agent={agent} canManage={isAdmin} />
+            <AgentCard key={agent.key} agent={agent} canManage={isAdmin(user)} />
           ))}
         </div>
       )}

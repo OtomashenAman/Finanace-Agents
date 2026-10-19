@@ -153,5 +153,6 @@ async def review_run(
     user: CurrentUser,
     ctx: RequestContextDep,
 ) -> RunDetail:
-    """Approve, reject or request changes (assigned reviewer, never the preparer)."""
+    """Approve, reject or request changes (assigned reviewer; only a Finance Admin may review
+    their own run)."""
     return await service.review_run(session, user, key, run_id, body, ctx)

@@ -2,7 +2,7 @@ import { ApiError, apiRequest } from "@/lib/api"
 
 import type { LoginFormValues } from "./schema"
 
-export type UserRole = "finance_admin" | "preparer" | "reviewer"
+export type UserRole = "finance_admin" | "user"
 
 export interface User {
   id: string

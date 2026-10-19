@@ -59,7 +59,7 @@ from src.app.agent_catalog.runs.schemas import (
     RunPermissions,
     RunSummary,
 )
-from src.app.agent_catalog.service import visible_agent_ids
+from src.app.agent_catalog.service import ADMIN_CAPACITIES, visible_agent_ids
 from src.app.audit.service import record_event
 from src.app.auth.models import User, UserRole
 from src.app.common.clock import utcnow
@@ -100,18 +100,22 @@ class AgentAccess:
 
 
 async def _access(session: AsyncSession, user: User, key: str) -> AgentAccess:
-    """The agent as this user may see it: admins see all, others only assigned active agents."""
+    """The agent as this user may see it: admins see all (with every capacity), others only
+    assigned active agents."""
     agent = await session.scalar(select(Agent).where(Agent.key == key, Agent.retired_at.is_(None)))
     definition = get_agent_definition(key)
     if agent is None or definition is None:
         raise AgentNotFoundError
-    capacities = frozenset(
-        await session.scalars(
-            select(AgentAssignment.capacity).where(
-                AgentAssignment.user_id == user.id, AgentAssignment.agent_id == agent.id
+    if user.role == UserRole.FINANCE_ADMIN:
+        capacities = ADMIN_CAPACITIES
+    else:
+        capacities = frozenset(
+            await session.scalars(
+                select(AgentAssignment.capacity).where(
+                    AgentAssignment.user_id == user.id, AgentAssignment.agent_id == agent.id
+                )
             )
         )
-    )
     access = AgentAccess(agent, definition, user, capacities)
     if not access.is_admin and (not capacities or not agent.is_active):
         raise AgentNotFoundError
@@ -275,7 +279,7 @@ async def _detail(
         can_submit=is_owner and is_allowed(run.status, RunAction.SUBMIT),
         can_review=(
             AgentCapacity.REVIEWER in access.capacities
-            and not is_owner
+            and (access.is_admin or not is_owner)
             and is_allowed(run.status, RunAction.REVIEW)
         ),
         can_delete=is_owner and is_allowed(run.status, RunAction.DELETE),
@@ -674,7 +678,9 @@ async def review_run(
     run, detail = await _load(session, access, run_id, lock=True)
     if AgentCapacity.REVIEWER not in access.capacities:
         raise RunPermissionError("You are not assigned as a reviewer for this agent.")
-    if run.preparer_id == user.id:
+    # Segregation of duties for users; a Finance Admin may approve their own run (audited)
+    self_review = run.preparer_id == user.id
+    if self_review and not access.is_admin:
         raise RunPermissionError("You can't review a run you prepared (segregation of duties).")
     ensure_allowed(run.status, RunAction.REVIEW)
     assert run.result_hash is not None  # noqa: S101 - set on submit
@@ -697,6 +703,7 @@ async def review_run(
         actor_id=user.id,
         run=run.reference,
         result_hash=run.result_hash,
+        self_review=self_review,
     )
     await session.commit()
     return await _detail(session, access, run, detail)

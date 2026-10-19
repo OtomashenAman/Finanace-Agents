@@ -93,7 +93,7 @@ ClientFactory = Callable[..., Awaitable[AsyncClient]]
 
 @pytest.fixture
 def make_user(db: AsyncSession) -> MakeUser:
-    async def _make(email: str, role: UserRole = UserRole.PREPARER) -> User:
+    async def _make(email: str, role: UserRole = UserRole.USER) -> User:
         user = User(
             email=email,
             full_name=email.split("@")[0].replace(".", " ").title(),

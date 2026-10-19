@@ -16,9 +16,8 @@ from src.app.common.models import (
 
 
 class UserRole(StrEnum):
-    FINANCE_ADMIN = "finance_admin"
-    PREPARER = "preparer"
-    REVIEWER = "reviewer"
+    FINANCE_ADMIN = "finance_admin"  # every agent, user management, settings
+    USER = "user"  # only the agents (and capacities) an admin assigns
 
 
 class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):

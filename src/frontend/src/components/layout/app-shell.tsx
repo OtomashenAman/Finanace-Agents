@@ -13,12 +13,15 @@ import {
   type LucideIcon,
 } from "lucide-react"
 
+import { useCurrentUser } from "@/features/auth/hooks"
+import { isAdmin } from "@/features/auth/roles"
 import { cn } from "@/lib/utils"
 
 interface NavItem {
   label: string
   icon: LucideIcon
   to?: string // undefined = not built yet
+  adminOnly?: boolean
 }
 
 const NAV: NavItem[] = [
@@ -28,7 +31,7 @@ const NAV: NavItem[] = [
   { label: "Approvals", icon: CircleCheck },
   { label: "Audit Trail", icon: History },
   { label: "Data Sources", icon: Database },
-  { label: "Admin Settings", icon: Settings },
+  { label: "Admin Settings", icon: Settings, to: "/admin/users", adminOnly: true },
 ]
 
 function Brand() {
@@ -41,10 +44,12 @@ function Brand() {
 }
 
 function Nav({ onNavigate }: { onNavigate?: () => void }) {
+  const { data: user } = useCurrentUser()
+  const items = NAV.filter((item) => !item.adminOnly || isAdmin(user))
   const base = "flex items-center gap-3 rounded-lg px-4 py-3 text-[15px] transition-colors"
   return (
     <nav aria-label="Main" className="space-y-1.5">
-      {NAV.map(({ label, icon: Icon, to }) =>
+      {items.map(({ label, icon: Icon, to }) =>
         to ? (
           <NavLink
             key={label}

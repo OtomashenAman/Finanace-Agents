@@ -70,8 +70,12 @@ registry are retired, never deleted.
 Implemented for **AP Invoice** so far; other agents show "workspace coming soon" until their
 folder gets an `input_schema`, `run_model` and `analyze()` (see `agents/ap_invoice/`).
 
-- Demo team from `uv run poe seed` (password = `DEMO_ADMIN_PASSWORD`): `ap.analyst@example.com`
-  prepares AP Invoice runs, `ap.approver@example.com` reviews them; the Finance Admin only oversees.
+- Roles: **Finance Admin** prepares and approves on every agent (own runs included, audited as
+  `self_review`) and manages users under Admin Settings (`/admin/users`, API `/api/v1/users`);
+  a **User** only gets the agents and capacities (prepare / approve) an admin assigns, and can
+  never approve their own run.
+- Demo users from `uv run poe seed` (password = `DEMO_ADMIN_PASSWORD`): `finance.admin@example.com`
+  and `demo.user@example.com` (prepares and approves AP Invoice runs).
 - Each agent stores its fields as typed columns in its own table (`ap_invoice_runs`); the common
   lifecycle, findings, documents, LLM calls and reviews live in `agent_runs`, `run_flags`,
   `run_documents`, `run_narratives` and `run_reviews`.

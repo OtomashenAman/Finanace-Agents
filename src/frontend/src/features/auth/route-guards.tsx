@@ -3,6 +3,7 @@ import { Navigate, Outlet, useLocation } from "react-router"
 import { FullPageError, FullPageSpinner } from "@/components/full-page-status"
 
 import { useCurrentUser } from "./hooks"
+import { isAdmin } from "./roles"
 
 /** Only allow same-app paths as post-login targets (no open redirects). */
 function safeRedirect(target: unknown): string {
@@ -30,5 +31,12 @@ export function GuestOnly() {
     const from = (location.state as { from?: unknown } | null)?.from
     return <Navigate to={safeRedirect(from)} replace />
   }
+  return <Outlet />
+}
+
+/** Finance Admin-only routes (nested inside <RequireAuth>); others go back to the overview. */
+export function RequireAdmin() {
+  const { data: user } = useCurrentUser()
+  if (!isAdmin(user)) return <Navigate to="/overview" replace />
   return <Outlet />
 }

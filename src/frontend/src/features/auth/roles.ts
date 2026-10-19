@@ -2,8 +2,12 @@ import type { User, UserRole } from "./api"
 
 export const ROLE_LABELS: Record<UserRole, string> = {
   finance_admin: "Finance Admin",
-  preparer: "Preparer",
-  reviewer: "Reviewer",
+  user: "User",
+}
+
+/** Finance Admin: every agent, user management and admin settings */
+export function isAdmin(user: User | null | undefined): boolean {
+  return user?.role === "finance_admin"
 }
 
 /** "Finance Admin" -> "FA" (shown in the header avatar, as in the mock-ups) */
