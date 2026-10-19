@@ -2,13 +2,15 @@
 
 import asyncio
 import os
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from typing import Any
 
 import asyncpg
 import pytest
 from alembic import command
 from alembic.config import Config
 from httpx import ASGITransport, AsyncClient
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +27,7 @@ _test_url = _base_url.set(database=_test_db)
 os.environ["DATABASE_URL"] = _test_url.render_as_string(hide_password=False)
 os.environ["ENVIRONMENT"] = "test"
 os.environ["COOKIE_SECURE"] = "false"
+os.environ["LLM_PROVIDER"] = "none"  # tests never call a real LLM; use the fake_llm fixture
 get_settings.cache_clear()
 
 
@@ -45,9 +48,23 @@ from src.app.agent_catalog.service import sync_registry  # noqa: E402 - must fol
 from src.app.auth.models import User, UserRole  # noqa: E402
 from src.app.auth.security import hash_password  # noqa: E402
 from src.app.core.db import get_sessionmaker  # noqa: E402
+from src.app.core.llm.base import LLMError, LLMResult, LLMUsage  # noqa: E402
+from src.app.core.llm.factory import get_llm_provider  # noqa: E402
 from src.app.main import app  # noqa: E402
 
-TABLES = ("audit_events", "agent_assignments", "agents", "refresh_tokens", "users")
+TABLES = (
+    "run_reviews",
+    "run_narratives",
+    "run_documents",
+    "run_flags",
+    "ap_invoice_runs",
+    "agent_runs",
+    "audit_events",
+    "agent_assignments",
+    "agents",
+    "refresh_tokens",
+    "users",
+)
 DEFAULT_PASSWORD = "Correct-Horse-Battery-1"
 
 
@@ -114,3 +131,51 @@ async def synced_agents(db: AsyncSession) -> None:
     """Agents table populated from the code registry."""
     await sync_registry(db)
     await db.commit()
+
+
+class FakeLLM:
+    """Stands in for the LLM provider: returns `output` (validated against the schema) or raises."""
+
+    name = "fake"
+    model = "fake-model"
+
+    def __init__(self) -> None:
+        self.output: dict[str, Any] = {
+            "summary": "Invoice INV-2048 matches the PO but not the received amount.",
+            "key_points": ["Received amount differs by 11,500.00"],
+            "cited_fields": ["invoice_total", "received_amount"],
+            "cited_documents": [],
+            "missing_evidence": ["Goods receipt note"],
+            "ambiguities": [],
+        }
+        self.error: Exception | None = None
+        self.calls: list[tuple[str, str]] = []
+        self.schemas: list[type[BaseModel]] = []
+
+    async def generate_structured[T: BaseModel](
+        self, *, system: str, user: str, schema: type[T]
+    ) -> LLMResult[T]:
+        self.calls.append((system, user))
+        self.schemas.append(schema)
+        if self.error:
+            raise self.error
+        try:
+            output = schema.model_validate(self.output)
+        except ValidationError as exc:  # a real provider can't return off-schema output
+            raise LLMError("Model returned no structured output") from exc
+        return LLMResult(
+            output=output,
+            provider=self.name,
+            model=self.model,
+            request_id="req_test",
+            usage=LLMUsage(input_tokens=120, output_tokens=40, cached_tokens=0),
+            latency_ms=5,
+        )
+
+
+@pytest.fixture
+def fake_llm() -> Iterator[FakeLLM]:
+    fake = FakeLLM()
+    app.dependency_overrides[get_llm_provider] = lambda: fake
+    yield fake
+    app.dependency_overrides.pop(get_llm_provider, None)

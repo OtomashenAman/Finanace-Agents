@@ -4,7 +4,8 @@ import { Toaster } from "sonner"
 
 import { AppShell } from "@/components/layout/app-shell"
 import { CatalogPage } from "@/features/agent-catalog/catalog-page"
-import { WorkspacePage } from "@/features/agent-catalog/workspace-page"
+import { RunPage } from "@/features/agent-catalog/workspace/run-page"
+import { WorkspacePage } from "@/features/agent-catalog/workspace/workspace-page"
 import { LoginPage } from "@/features/auth/login-page"
 import { GuestOnly, RequireAuth } from "@/features/auth/route-guards"
 import { OverviewPage } from "@/features/overview/overview-page"
@@ -22,6 +23,7 @@ const router = createBrowserRouter([
           { path: "/overview", element: <OverviewPage /> },
           { path: "/catalog", element: <CatalogPage /> },
           { path: "/catalog/:agentKey", element: <WorkspacePage /> },
+          { path: "/catalog/:agentKey/runs/:runId", element: <RunPage /> },
         ],
       },
     ],

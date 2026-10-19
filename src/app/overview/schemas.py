@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime
 
 from pydantic import BaseModel
@@ -11,12 +12,14 @@ class OverviewKpis(BaseModel):
 
 
 class WorklistItem(BaseModel):
-    """One run needing attention (filled once the runs module exists)."""
+    """One open run needing attention."""
 
+    run_id: uuid.UUID
     agent_key: str
     agent_name: str
-    reference: str  # e.g. INV-2048
-    status: str  # e.g. requires_review, policy_exception
+    reference: str  # business reference (e.g. INV-2048) or RUN-01048
+    status: str
+    status_label: str
     priority: str
     created_at: datetime
 

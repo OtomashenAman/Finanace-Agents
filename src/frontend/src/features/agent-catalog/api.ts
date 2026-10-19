@@ -11,6 +11,7 @@ export interface Agent {
   primary_user: string
   reviewer: string
   is_active: boolean
+  has_workspace: boolean
   my_capacities: AgentCapacity[]
 }
 

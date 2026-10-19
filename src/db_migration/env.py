@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 # Every feature's models must be imported so autogenerate sees all tables
 import src.app.agent_catalog.models
+import src.app.agent_catalog.registry  # imports every agent, and with it each agent's run table
+import src.app.agent_catalog.runs.models
 import src.app.audit.models
 import src.app.auth.models  # noqa: F401
 from src.app.common.models import Base

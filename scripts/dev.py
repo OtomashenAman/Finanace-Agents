@@ -34,7 +34,7 @@ def init_env() -> None:
         print(".env already exists - leaving it untouched")
         return
     shutil.copyfile(example, env)
-    print("Created .env from .env.example - fill in SECRET_KEY / ANTHROPIC_API_KEY")
+    print("Created .env from .env.example - fill in SECRET_KEY / AZURE_OPENAI_API_KEY")
 
 
 def db_shell() -> None:

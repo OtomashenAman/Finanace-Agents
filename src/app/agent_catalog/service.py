@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.agent_catalog.exceptions import AgentNotFoundError
 from src.app.agent_catalog.models import Agent, AgentAssignment, AgentCapacity
-from src.app.agent_catalog.registry import REGISTRY
+from src.app.agent_catalog.registry import REGISTRY, get_agent_definition
 from src.app.agent_catalog.schemas import AgentOut
 from src.app.audit.service import record_event
 from src.app.auth.models import User, UserRole
@@ -62,6 +62,11 @@ def _visible_agents(user: User) -> Select[Agent]:
     return query
 
 
+def visible_agent_ids(user: User) -> Select[tuple[uuid.UUID]]:
+    """Ids of agents the user may see (for filtering other features' data)."""
+    return select(_visible_agents(user).subquery().c.id)
+
+
 async def _capacities(session: AsyncSession, user: User) -> dict[uuid.UUID, list[AgentCapacity]]:
     rows = await session.execute(
         select(AgentAssignment.agent_id, AgentAssignment.capacity).where(
@@ -74,6 +79,11 @@ async def _capacities(session: AsyncSession, user: User) -> dict[uuid.UUID, list
     return capacities
 
 
+def _has_workspace(key: str) -> bool:
+    definition = get_agent_definition(key)
+    return definition is not None and definition.has_workspace()
+
+
 def _to_out(agent: Agent, capacities: list[AgentCapacity]) -> AgentOut:
     return AgentOut(
         key=agent.key,
@@ -84,6 +94,7 @@ def _to_out(agent: Agent, capacities: list[AgentCapacity]) -> AgentOut:
         primary_user=agent.primary_user,
         reviewer=agent.reviewer,
         is_active=agent.is_active,
+        has_workspace=_has_workspace(agent.key),
         my_capacities=sorted(capacities),
     )
 

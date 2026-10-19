@@ -1,6 +1,6 @@
 # Production stack: Postgres + migrations + FastAPI (workers) + nginx (static SPA + /api proxy)
 #   uv run poe docker-prod-up   (or: docker compose -f docker-compose.prod.yml up -d --build)
-# Requires a real .env (POSTGRES_PASSWORD, SECRET_KEY, ANTHROPIC_API_KEY, ...)
+# Requires a real .env (POSTGRES_PASSWORD, SECRET_KEY, AZURE_OPENAI_API_KEY, ...)
 # Only the frontend (nginx) port is published; backend and db stay on the internal network.
 
 name: finance-acc-prod

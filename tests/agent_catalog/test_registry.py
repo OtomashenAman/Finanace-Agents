@@ -12,16 +12,15 @@ from src.app.agent_catalog.registry import AGENTS, REGISTRY
 def _agent_classes_in_package() -> list[type[BaseAgent]]:
     found = []
     for module_info in pkgutil.iter_modules(agents_pkg.__path__):
-        if module_info.name == "base":
-            continue
         module = importlib.import_module(f"{agents_pkg.__name__}.{module_info.name}")
         classes = [
             obj
             for obj in vars(module).values()
             if inspect.isclass(obj) and issubclass(obj, BaseAgent) and obj is not BaseAgent
         ]
-        assert len(classes) == 1, f"{module_info.name}.py must define exactly one agent"
-        found.append(classes[0])
+        # Modules without an agent are helpers (base, fields); one agent per module at most
+        assert len(classes) <= 1, f"{module_info.name} must define at most one agent"
+        found.extend(classes)
     return found
 
 

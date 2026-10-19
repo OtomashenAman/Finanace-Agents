@@ -1,11 +1,11 @@
 # Finance Agent Command Center (FinanceACC)
 
-12 AI finance agents with deterministic rule engines, guarded Claude narratives,
+12 AI finance agents with deterministic rule engines, guarded LLM narratives,
 maker-checker approvals and an immutable audit trail.
 
 | Layer | Stack |
 |---|---|
-| Backend | Python 3.12, FastAPI, SQLAlchemy 2 (async), Alembic, Pydantic v2, Anthropic SDK, `uv` |
+| Backend | Python 3.12, FastAPI, SQLAlchemy 2 (async), Alembic, Pydantic v2, Azure OpenAI (pluggable LLM layer), `uv` |
 | Database | PostgreSQL 16 + pgvector (same image locally, in CI and in prod) |
 | Frontend | React 19, TypeScript, Vite, Tailwind CSS v4, shadcn/ui |
 | Runtime | Docker multi-stage images, nginx (prod), GitHub Actions CI |
@@ -66,6 +66,21 @@ file is not registered. Code owns names/descriptions; admins own `is_active` (to
 card) and `agent_assignments` (which user may prepare/review which agent). Agents removed from the
 registry are retired, never deleted.
 
+### Agent workspace (Input → Result → Review)
+Implemented for **AP Invoice** so far; other agents show "workspace coming soon" until their
+folder gets an `input_schema`, `run_model` and `analyze()` (see `agents/ap_invoice/`).
+
+- Demo team from `uv run poe seed` (password = `DEMO_ADMIN_PASSWORD`): `ap.analyst@example.com`
+  prepares AP Invoice runs, `ap.approver@example.com` reviews them; the Finance Admin only oversees.
+- Each agent stores its fields as typed columns in its own table (`ap_invoice_runs`); the common
+  lifecycle, findings, documents, LLM calls and reviews live in `agent_runs`, `run_flags`,
+  `run_documents`, `run_narratives` and `run_reviews`.
+- Uploads: only the extracted text and the file's SHA-256 are stored, never the file. Supported:
+  text-based PDF, XLSX, CSV/TSV, DOCX, TXT. Scanned PDFs and images are rejected (no OCR yet).
+- LLM: pluggable (`LLM_PROVIDER=azure_openai | none`, see `.env.example`). It only explains
+  engine results; output is schema-validated, may cite only real fields/documents, and every figure
+  it quotes is checked against the source data. With `none`, runs work without explanations.
+
 ### Viewing the database
 - **VS Code:** accept the recommended extensions (*SQLTools* + *SQLTools PostgreSQL*), open the
   SQLTools sidebar and pick **FinanceACC (local docker)**. It's preconfigured in `.vscode/settings.json`.
@@ -99,7 +114,7 @@ All tool caches (pytest, ruff, mypy, coverage) go to a single git-ignored `.cach
 ## Production
 
 ```bash
-uv run poe env-init         # then set real SECRET_KEY, POSTGRES_PASSWORD, ANTHROPIC_API_KEY
+uv run poe env-init         # then set real SECRET_KEY, POSTGRES_PASSWORD, AZURE_OPENAI_API_KEY
 uv run poe docker-prod-up   # docker compose -f docker-compose.prod.yml up -d --build
 ```
 
@@ -142,5 +157,5 @@ Only the frontend port (`FRONTEND_PORT`, default 8081) is published.
 ## Conventions
 - Secrets live only in `.env` (git-ignored). Add every new variable to `.env.example`.
 - Money arithmetic uses `Decimal`, never `float`. Timestamps are timezone-aware (ruff `DTZ` enforces this).
-- Claude is used only for narratives and extraction. It never does finance arithmetic, approvals or postings.
+- The LLM is used only for narratives. It never does finance arithmetic, approvals or postings.
 - Backend API routes live under `/api/v1/...` so the dev proxy and nginx forward them.

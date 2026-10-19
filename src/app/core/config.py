@@ -29,6 +29,20 @@ class Settings(BaseSettings):
     # Overview
     review_sla_hours: int = 24
 
+    # LLM (pluggable provider; "none" disables narratives but runs still work)
+    llm_provider: Literal["azure_openai", "none"] = "none"
+    llm_timeout_seconds: float = 60
+    llm_max_output_tokens: int = 1500
+    azure_openai_api_key: SecretStr | None = None
+    azure_openai_endpoint: str | None = None
+    azure_openai_api_version: str = "2025-01-01-preview"
+    azure_openai_deployment: str | None = None
+
+    # Uploads: only extracted text (+ SHA-256) is kept, never the file
+    upload_max_bytes: int = 10 * 1024 * 1024
+    upload_max_files_per_run: int = 10
+    extracted_text_max_chars: int = 200_000
+
     # Demo seed user (uv run poe seed)
     demo_admin_email: str = "finance.admin@example.com"
     demo_admin_name: str = "Finance Admin"
@@ -37,6 +51,22 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment == "production"
+
+    @model_validator(mode="after")
+    def _check_llm_config(self) -> Self:
+        if self.llm_provider == "azure_openai":
+            missing = [
+                name
+                for name, value in (
+                    ("AZURE_OPENAI_API_KEY", self.azure_openai_api_key),
+                    ("AZURE_OPENAI_ENDPOINT", self.azure_openai_endpoint),
+                    ("AZURE_OPENAI_DEPLOYMENT", self.azure_openai_deployment),
+                )
+                if not value
+            ]
+            if missing:
+                raise ValueError(f"LLM_PROVIDER=azure_openai requires {', '.join(missing)}")
+        return self
 
     @model_validator(mode="after")
     def _check_production_secrets(self) -> Self:

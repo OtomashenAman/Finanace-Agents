@@ -4,17 +4,22 @@ const API_BASE = `${import.meta.env.VITE_API_BASE_URL ?? "/api"}/v1`
 export class ApiError extends Error {
   readonly status: number
   readonly code: string
+  /** Per-field messages from a 422 validation error, keyed by field name */
+  readonly fieldErrors: Record<string, string>
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, fieldErrors: Record<string, string> = {}) {
     super(message)
     this.name = "ApiError"
     this.status = status
     this.code = code
+    this.fieldErrors = fieldErrors
   }
 }
 
 interface RequestOptions extends Omit<RequestInit, "body" | "headers"> {
   json?: unknown
+  /** multipart upload; the browser sets the Content-Type boundary itself */
+  form?: FormData
   headers?: Record<string, string>
   /** Auth endpoints themselves must not trigger the refresh-and-retry dance */
   skipAuthRefresh?: boolean
@@ -23,11 +28,16 @@ interface RequestOptions extends Omit<RequestInit, "body" | "headers"> {
 async function toApiError(res: Response): Promise<ApiError> {
   let code = "http_error"
   let message = `Request failed (${res.status}).`
+  const fieldErrors: Record<string, string> = {}
   try {
     const { detail } = (await res.json()) as { detail?: unknown }
     if (Array.isArray(detail)) {
       code = "validation_error"
       message = "Please check the highlighted fields."
+      for (const item of detail as { loc?: unknown[]; msg?: string }[]) {
+        const field = item.loc?.at(-1)
+        if (typeof field === "string" && item.msg) fieldErrors[field] = item.msg
+      }
     } else if (typeof detail === "string") {
       message = detail
     } else if (detail && typeof detail === "object") {
@@ -38,7 +48,7 @@ async function toApiError(res: Response): Promise<ApiError> {
   } catch {
     // non-JSON error body: keep the generic message
   }
-  return new ApiError(res.status, code, message)
+  return new ApiError(res.status, code, message, fieldErrors)
 }
 
 // One in-flight refresh per tab, shared by every request that got a 401
@@ -56,7 +66,7 @@ function refreshSession(): Promise<boolean> {
 
 export async function apiRequest<T>(
   path: string,
-  { json, headers, skipAuthRefresh = false, ...init }: RequestOptions = {},
+  { json, form, headers, skipAuthRefresh = false, ...init }: RequestOptions = {},
 ): Promise<T> {
   const send = async () => {
     try {
@@ -68,7 +78,7 @@ export async function apiRequest<T>(
           ...(json !== undefined && { "Content-Type": "application/json" }),
           ...headers,
         },
-        body: json !== undefined ? JSON.stringify(json) : undefined,
+        body: form ?? (json !== undefined ? JSON.stringify(json) : undefined),
       })
     } catch {
       throw new ApiError(0, "network_error", "Can't reach the server. Check your connection and try again.")

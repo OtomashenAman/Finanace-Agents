@@ -1,30 +1,9 @@
+import { Link } from "react-router"
 import { Inbox } from "lucide-react"
 
-import { cn } from "@/lib/utils"
+import { StatusBadge } from "@/features/agent-catalog/workspace/components/status-badge"
 
 import type { WorklistItem } from "../api"
-
-const STATUS_LABELS: Record<string, string> = {
-  requires_review: "Requires Review",
-  policy_exception: "Policy Exception",
-  reconciliation: "Reconciliation",
-  pending_approval: "Pending Approval",
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const label = STATUS_LABELS[status] ?? status.replace(/_/g, " ")
-  const positive = status === "requires_review"
-  return (
-    <span
-      className={cn(
-        "inline-flex min-w-36 justify-center rounded px-3 py-1.5 text-xs font-semibold",
-        positive ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-800",
-      )}
-    >
-      {label}
-    </span>
-  )
-}
 
 export function WorklistCard({ items }: { items: WorklistItem[] }) {
   return (
@@ -44,10 +23,20 @@ export function WorklistCard({ items }: { items: WorklistItem[] }) {
       ) : (
         <ul className="divide-y">
           {items.map((item) => (
-            <li key={`${item.agent_key}-${item.reference}`} className="grid grid-cols-[1fr_auto] items-center gap-3 py-3.5 sm:grid-cols-[1.2fr_1fr_auto]">
-              <span className="font-semibold text-brand-navy">{item.agent_name}</span>
-              <span className="hidden text-sm text-muted-foreground sm:inline">{item.reference}</span>
-              <StatusBadge status={item.status} />
+            <li key={item.run_id}>
+              <Link
+                to={`/catalog/${item.agent_key}/runs/${item.run_id}`}
+                className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-md py-3.5 hover:bg-secondary/40 sm:grid-cols-[1.2fr_1fr_auto]"
+              >
+                <span className="font-semibold text-brand-navy">
+                  {item.agent_name}
+                  {item.priority === "high" && (
+                    <span className="ml-2 align-middle text-xs font-semibold text-red-700">High priority</span>
+                  )}
+                </span>
+                <span className="hidden text-sm text-muted-foreground sm:inline">{item.reference}</span>
+                <StatusBadge status={item.status} label={item.status_label} className="min-w-36" />
+              </Link>
             </li>
           ))}
         </ul>

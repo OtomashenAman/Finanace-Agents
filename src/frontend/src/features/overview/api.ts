@@ -1,3 +1,4 @@
+import type { RunStatus } from "@/features/agent-catalog/workspace/api"
 import { apiRequest } from "@/lib/api"
 
 export interface OverviewKpis {
@@ -8,11 +9,13 @@ export interface OverviewKpis {
 }
 
 export interface WorklistItem {
+  run_id: string
   agent_key: string
   agent_name: string
   reference: string
-  status: string
-  priority: string
+  status: RunStatus
+  status_label: string
+  priority: "normal" | "high"
   created_at: string
 }
 
