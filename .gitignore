@@ -1,0 +1,28 @@
+# Secrets / environment
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.venv
+
+# Tooling caches (pytest, ruff, mypy, coverage) - all configured in pyproject.toml
+.cache/
+
+# Local data
+uploads/
+logs/
+*.log
+
+# Editors / OS
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+.DS_Store

@@ -1,0 +1,25 @@
+# Same line endings on Linux, macOS and Windows checkouts.
+# LF everywhere: shell entrypoints, Dockerfiles and nginx.conf break inside
+# Linux containers if Windows git converts them to CRLF.
+* text=auto eol=lf
+
+# Windows-only scripts keep CRLF
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+
+# Binary files: never touch
+*.pdf   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.webp  binary
+*.woff  binary
+*.woff2 binary
+*.xlsx  binary
+
+# Lockfiles: don't show huge diffs
+uv.lock                         linguist-generated=true -diff
+src/frontend/package-lock.json  linguist-generated=true -diff

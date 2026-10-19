@@ -1,0 +1,75 @@
+# Production stack: Postgres + migrations + FastAPI (workers) + nginx (static SPA + /api proxy)
+#   uv run poe docker-prod-up   (or: docker compose -f docker-compose.prod.yml up -d --build)
+# Requires a real .env (POSTGRES_PASSWORD, SECRET_KEY, ANTHROPIC_API_KEY, ...)
+# Only the frontend (nginx) port is published; backend and db stay on the internal network.
+
+name: finance-acc-prod
+
+x-backend: &backend
+  build:
+    context: .
+    dockerfile: src/Dockerfile
+    target: runtime
+  image: finance-acc-backend:${IMAGE_TAG:-latest}
+  env_file: .env
+  environment:
+    ENVIRONMENT: production
+    DEBUG: "false"
+    DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-finance}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/${POSTGRES_DB:-finance_acc}
+  networks: [internal]
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-finance}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-finance_acc}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [internal]
+
+  migrate:
+    <<: *backend
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  backend:
+    <<: *backend
+    restart: always
+    environment:
+      ENVIRONMENT: production
+      DEBUG: "false"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-finance}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/${POSTGRES_DB:-finance_acc}
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  frontend:
+    build:
+      context: ./src/frontend
+      target: runtime
+    image: finance-acc-frontend:${IMAGE_TAG:-latest}
+    restart: always
+    ports:
+      - "${FRONTEND_PORT:-8081}:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks: [internal]
+
+networks:
+  internal:
+
+volumes:
+  pgdata:

@@ -1,0 +1,24 @@
+# Ignore rules for src/Dockerfile (paths are relative to the build context = repo root).
+# Backend image only needs pyproject, uv.lock, alembic.ini, src/app, src/db_migration
+.git
+.github
+.env
+.env.*
+!.env.example
+.venv
+**/__pycache__
+**/*.py[oc]
+.cache
+scripts
+.gitattributes
+.vscode
+uploads
+logs
+
+src/frontend
+tests
+requrement.*
+README.md
+Makefile
+docker-compose*.yml
+src/Dockerfile*
