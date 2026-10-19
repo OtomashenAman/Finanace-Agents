@@ -7,6 +7,11 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+# Every feature's models must be imported so autogenerate sees all tables
+import src.app.audit.models
+import src.app.auth.models  # noqa: F401
+from src.app.common.models import Base
+
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
@@ -22,11 +27,7 @@ if not database_url:
     raise RuntimeError("DATABASE_URL is not set")
 config.set_main_option("sqlalchemy.url", database_url)
 
-# add your model's MetaData object here
-# for 'autogenerate' support
-# from myapp import mymodel
-# target_metadata = mymodel.Base.metadata
-target_metadata = None
+target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:

@@ -30,6 +30,7 @@ On Linux/macOS, `make <task>` is an optional shortcut for the same thing.
 git clone <repo-url> && cd FinanceACC
 uv run poe setup        # .env from .env.example, Python + npm deps
 uv run poe db-up        # Postgres/pgvector on localhost:5434 + migrations
+uv run poe seed         # demo Finance Admin from DEMO_ADMIN_* in .env
 uv run poe dev-backend  # terminal 1 → http://localhost:8088/docs
 uv run poe dev-frontend # terminal 2 → http://localhost:8081
 ```
@@ -43,6 +44,15 @@ uv run poe docker-up
 - Postgres: localhost:5434 (user/password/db: `finance` / `finance` / `finance_acc`)
 
 > **Windows / macOS Docker:** if hot reload doesn't pick up edits, set `DOCKER_FILE_POLLING=true` in `.env`.
+
+### Signing in
+Set `DEMO_ADMIN_PASSWORD` in `.env`, run `uv run poe seed`, then sign in at http://localhost:8081
+as `finance.admin@example.com`. Locked out after 5 wrong attempts? `uv run poe seed --reset-password`.
+
+Auth model: argon2id password hashes, short-lived JWT access token + rotating refresh token, both
+in `HttpOnly` `SameSite=Lax` cookies (set `COOKIE_SECURE=true` behind HTTPS). Refresh-token reuse
+revokes the whole login, failed logins lock the account, and every auth event is written to
+`audit_events`. API: `POST /api/v1/auth/login|refresh|logout`, `GET /api/v1/auth/me`.
 
 ### Viewing the database
 - **VS Code:** accept the recommended extensions (*SQLTools* + *SQLTools PostgreSQL*), open the
@@ -97,8 +107,15 @@ Only the frontend port (`FRONTEND_PORT`, default 8081) is published.
 .
 ├── src/
 │   ├── app/                 # FastAPI backend (entrypoint: src/app/main.py)
+│   │   ├── core/            # infrastructure: config, db session, error handling
+│   │   ├── common/          # shared building blocks: Base model, mixins, request context
+│   │   ├── auth/            # feature: models, schemas, service, router, dependencies
+│   │   ├── audit/           # feature: audit events
+│   │   ├── cli/             # management commands (seed)
+│   │   └── router.py        # registers every feature router under /api/v1
 │   ├── db_migration/        # Alembic: env.py + versions/ (DB URL read from DATABASE_URL)
 │   ├── frontend/            # Vite + React app (own Dockerfile + nginx.conf)
+│   │   └── src/features/    # one folder per feature (auth, dashboard, ...)
 │   ├── Dockerfile           # backend image: targets dev | runtime (context = repo root)
 │   └── Dockerfile.dockerignore
 ├── tests/                   # pytest

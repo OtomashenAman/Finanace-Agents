@@ -1,59 +1,107 @@
 @import "tailwindcss";
 
+/* IBM Plex Sans, self-hosted (no external font CDN) */
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/ibm-plex-sans/700.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Design tokens (palette taken from the requirement mock-ups) */
+:root {
+  --background: #ffffff;
+  --foreground: #13294b;
+  --card: #ffffff;
+  --card-foreground: #13294b;
+  --popover: #ffffff;
+  --popover-foreground: #13294b;
+  --primary: #2563c9;
+  --primary-foreground: #ffffff;
+  --secondary: #eef3fa;
+  --secondary-foreground: #13294b;
+  --muted: #eef3fa;
+  --muted-foreground: #5b6b82;
+  --accent: #eef3fa;
+  --accent-foreground: #13294b;
+  --destructive: #c62828;
+  --destructive-foreground: #ffffff;
+  --border: #dce5f2;
+  --input: #d3dceb;
+  --ring: #2563c9;
+  --radius: 0.5rem;
+
+  /* Brand */
+  --brand-navy: #13294b;
+  --brand-navy-muted: #2f4a74;
+  --brand-navy-faint: #4a6390;
+  --brand-ice: #dbe5f4;
+  --brand-page: #eaf1fb;
+}
+
+.dark {
+  --background: #0d1b33;
+  --foreground: #e6edf8;
+  --card: #13294b;
+  --card-foreground: #e6edf8;
+  --popover: #13294b;
+  --popover-foreground: #e6edf8;
+  --primary: #4f86e0;
+  --primary-foreground: #ffffff;
+  --secondary: #1d3660;
+  --secondary-foreground: #e6edf8;
+  --muted: #1d3660;
+  --muted-foreground: #9fb0c9;
+  --accent: #1d3660;
+  --accent-foreground: #e6edf8;
+  --destructive: #ef5350;
+  --destructive-foreground: #ffffff;
+  --border: #24406d;
+  --input: #2b4a7a;
+  --ring: #4f86e0;
+}
+
+/* Expose tokens as Tailwind utilities: bg-primary, text-muted-foreground, bg-brand-navy ... */
+@theme inline {
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-brand-navy: var(--brand-navy);
+  --color-brand-navy-muted: var(--brand-navy-muted);
+  --color-brand-navy-faint: var(--brand-navy-faint);
+  --color-brand-ice: var(--brand-ice);
+  --color-brand-page: var(--brand-page);
+
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+}
+
 @layer base {
-  :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
-    --radius: 0.5rem;
-  }
-
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
-  }
-
   * {
-    border-color: hsl(var(--border));
+    @apply border-border;
   }
 
   body {
-    background-color: hsl(var(--background));
-    color: hsl(var(--foreground));
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-    margin: 0;
+    @apply m-0 bg-background font-sans text-foreground antialiased;
   }
 }

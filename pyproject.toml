@@ -11,11 +11,14 @@ dependencies = [
     "alembic>=1.20.0",
     "anthropic>=1.15.0",
     "asyncpg>=0.32.0",
+    "email-validator>=2.3.0",
     "fastapi>=0.147.0",
     "httpx>=0.28.1",
     "pgvector>=0.5.1",
+    "pwdlib[argon2]>=0.3.1",
     "pydantic>=2.14.1",
     "pydantic-settings>=2.16.0",
+    "pyjwt>=2.15.1",
     "python-multipart>=0.0.32",
     "sqlalchemy[asyncio]>=2.1.5",
     "uvicorn[standard]>=0.54.0",
@@ -98,6 +101,8 @@ quote-style = "double"
 cache_dir = ".cache/mypy"
 python_version = "3.12"
 files = ["src/app"]
+mypy_path = "."
+explicit_package_bases = true  # src/ has no __init__.py; modules are src.app.*
 exclude = ["src/db_migration/"]
 strict = true
 plugins = ["pydantic.mypy"]
@@ -149,6 +154,7 @@ db-down = { cmd = "docker compose stop db", help = "Stop the db container (data 
 db-shell = { script = "scripts.dev:db_shell", help = "psql inside the db container" }
 migrate = { cmd = "alembic upgrade head", help = "Apply migrations" }
 downgrade = { cmd = "alembic downgrade -1", help = "Roll back one migration" }
+seed = { cmd = "python -m src.app.cli.seed", help = "Create demo Finance Admin (--reset-password to reset/unlock)" }
 
 [tool.poe.tasks.migration]
 help = "Autogenerate a migration: poe migration \"add runs table\""
