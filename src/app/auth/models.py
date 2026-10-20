@@ -51,3 +51,15 @@ class RefreshToken(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     revoked_at: Mapped[datetime | None]
     user_agent: Mapped[str | None] = mapped_column(String(512))
     ip: Mapped[str | None] = mapped_column(String(45))
+
+
+class PasswordResetRequest(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
+    """ "Forgot password": waits in the Finance Admins' worklist until one sets a new password."""
+
+    __tablename__ = "password_reset_requests"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    ip: Mapped[str | None] = mapped_column(String(45))
+    resolved_at: Mapped[datetime | None]

@@ -324,3 +324,72 @@ async def test_malformed_slot_falls_back_to_the_plain_cookie(
     await login(client)
     r = await client.get(ME, headers={"X-Session-Slot": "../../etc"})
     assert r.json()["email"] == EMAIL
+
+
+# --- own password, forgot password ---------------------------------------------------------
+
+
+async def test_users_change_their_own_password_and_other_sessions_end(
+    client: AsyncClient, user: User, db: AsyncSession
+) -> None:
+    other = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+    try:
+        await login(other)
+        await login(client)
+        wrong = await client.post(
+            "/api/v1/auth/me/password",
+            json={"current_password": "nope", "new_password": "A-brand-new-pass-9"},
+        )
+        assert wrong.status_code == 401 and wrong.json()["detail"]["code"] == "wrong_password"
+        short = await client.post(
+            "/api/v1/auth/me/password", json={"current_password": PASSWORD, "new_password": "short"}
+        )
+        assert short.status_code == 422
+
+        r = await client.post(
+            "/api/v1/auth/me/password",
+            json={"current_password": PASSWORD, "new_password": "A-brand-new-pass-9"},
+        )
+        assert r.status_code == 204
+        assert (await client.post(REFRESH)).status_code == 204  # this session continues
+        assert (await other.post(REFRESH)).status_code == 401  # the other one ended
+        assert (await login(client, password="A-brand-new-pass-9")).status_code == 200
+    finally:
+        await other.aclose()
+
+
+async def test_forgot_password_asks_an_admin_without_revealing_accounts(
+    client: AsyncClient, user: User, db: AsyncSession
+) -> None:
+    from tests.conftest import DEFAULT_PASSWORD
+
+    known = await client.post("/api/v1/auth/password-reset-requests", json={"email": EMAIL})
+    unknown = await client.post(
+        "/api/v1/auth/password-reset-requests", json={"email": "nobody@example.com"}
+    )
+    assert known.status_code == unknown.status_code == 202
+    assert known.json() == unknown.json()
+    await client.post("/api/v1/auth/password-reset-requests", json={"email": EMAIL})  # again
+
+    admin = User(
+        email="admin@example.com",
+        full_name="Admin",
+        role=UserRole.FINANCE_ADMIN,
+        password_hash=hash_password(DEFAULT_PASSWORD),
+    )
+    db.add(admin)
+    await db.commit()
+    adm = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+    try:
+        await adm.post(LOGIN, json={"email": admin.email, "password": DEFAULT_PASSWORD})
+        items = (await adm.get("/api/v1/worklist")).json()["action"]
+        resets = [i for i in items if i["kind"] == "password_reset"]
+        assert [i["context"] for i in resets] == [EMAIL]  # one open request, not two
+        r = await adm.post(
+            f"/api/v1/users/{user.id}/password", json={"password": "Fresh-password-77"}
+        )
+        assert r.status_code == 200
+        items = (await adm.get("/api/v1/worklist")).json()["action"]
+        assert not [i for i in items if i["kind"] == "password_reset"]
+    finally:
+        await adm.aclose()

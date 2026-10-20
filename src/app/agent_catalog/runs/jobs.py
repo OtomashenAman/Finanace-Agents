@@ -127,20 +127,11 @@ WRITEBACK_JOB = "quickbooks.writeback"
 BILL_NOTE = "quickbooks.bill_approval_note"
 
 
-@handler(WRITEBACK_JOB)
-async def write_back(session: AsyncSession, payload: dict[str, Any], ctx: JobContext) -> None:
-    """Stamp the approval on the QuickBooks bill the run was prefilled from."""
-    action = await session.get(
-        ExternalAction, uuid.UUID(payload["action_id"]), with_for_update=True
-    )
-    if action is None or action.status == ActionStatus.SUCCEEDED:
-        return
-    run = await session.get(AgentRun, action.run_id)
-    snapshot = await session.get(RunSourceSnapshot, action.run_id)
-    if run is None or snapshot is None or snapshot.source_id is None:
-        action.status = ActionStatus.FAILED
-        action.error = "The run or its QuickBooks source is gone."
-        return
+BILL_CREATE = "quickbooks.bill_create"
+
+
+async def _approval_note(session: AsyncSession, run: AgentRun) -> tuple[str, str]:
+    """The marker identifying the run and the line written to QuickBooks."""
     approvals = list(
         await session.execute(
             select(User.full_name, RunReview.created_at)
@@ -155,10 +146,46 @@ async def write_back(session: AsyncSession, payload: dict[str, Any], ctx: JobCon
     line = (
         f"{marker} approved by {names} on {when:%Y-%m-%d} (result {(run.result_hash or '')[:12]})"
     )
-    try:
-        receipt = await data_sources.stamp_bill(
-            session, snapshot.source_id, str(snapshot.records["bill"]["external_id"]), marker, line
+    return marker, line
+
+
+async def _perform(
+    session: AsyncSession, action: ExternalAction, run: AgentRun, payload: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Do the write; None when there's nothing left to write to."""
+    marker, line = await _approval_note(session, run)
+    if action.kind == BILL_CREATE:
+        bill = payload["bill"]
+        target = data_sources.BillTarget(
+            **{**bill["target"], "source_id": uuid.UUID(bill["target"]["source_id"])}
         )
+        return await data_sources.create_bill(
+            session,
+            target,
+            doc_number=bill["doc_number"],
+            amount=Decimal(bill["amount"]),
+            note=line,
+        )
+    snapshot = await session.get(RunSourceSnapshot, action.run_id)
+    if snapshot is None or snapshot.source_id is None:
+        return None
+    return await data_sources.stamp_bill(
+        session, snapshot.source_id, str(snapshot.records["bill"]["external_id"]), marker, line
+    )
+
+
+@handler(WRITEBACK_JOB)
+async def write_back(session: AsyncSession, payload: dict[str, Any], ctx: JobContext) -> None:
+    """Write an approved run to the preparer's QuickBooks: stamp the approval on the bill it
+    was prefilled from, or create the bill for an invoice entered by hand."""
+    action = await session.get(
+        ExternalAction, uuid.UUID(payload["action_id"]), with_for_update=True
+    )
+    if action is None or action.status == ActionStatus.SUCCEEDED:
+        return
+    run = await session.get(AgentRun, action.run_id)
+    try:
+        receipt = await _perform(session, action, run, payload) if run else None
     except Exception as exc:
         action.error = f"{exc}"[:500]
         if ctx.final_attempt:
@@ -169,11 +196,15 @@ async def write_back(session: AsyncSession, payload: dict[str, Any], ctx: JobCon
                 "run.writeback_failed",
                 _SYSTEM,
                 actor_id=action.requested_by,
-                run=run.reference,
+                run=run.reference if run else None,
                 error=action.error,
             )
         await session.commit()
         raise RetryLater(action.error) from exc
+    if run is None or receipt is None:
+        action.status = ActionStatus.FAILED
+        action.error = "The run or its QuickBooks source is gone."
+        return
     action.status = ActionStatus.SUCCEEDED
     action.receipt = receipt
     action.error = None
@@ -186,4 +217,5 @@ async def write_back(session: AsyncSession, payload: dict[str, Any], ctx: JobCon
         run=run.reference,
         bill_id=receipt["bill_id"],
         already_present=receipt["already_present"],
+        created=action.kind == BILL_CREATE and not receipt["already_present"],
     )

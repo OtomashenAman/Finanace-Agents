@@ -14,6 +14,8 @@ export interface WorklistItem {
   agent_name: string
   reference: string
   entity_code: string | null
+  owner: string
+  exceptions: number
   status: RunStatus
   status_label: string
   priority: "normal" | "high"

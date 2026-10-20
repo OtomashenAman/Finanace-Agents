@@ -3,17 +3,21 @@
 - Every request gets an id (X-Request-ID, taken from the caller or generated), returned in the
   response and attached to every log line written while handling it.
 - log_format "json" writes one JSON object per line (for log shippers); "text" is for humans.
-- /metrics serves HTTP counters (per process) plus business gauges read from the database
-  (the same for every process), in the Prometheus text format.
+- /metrics serves HTTP counters plus business gauges read from the database (the same for
+  every process), in the Prometheus text format. With several server processes, set
+  metrics_dir: each process keeps its counters in a file there and a scrape, whichever
+  process answers it, sums them all.
 """
 
 import json
 import logging
+import os
 import re
 import time
 import uuid
 from collections import defaultdict
 from contextvars import ContextVar
+from pathlib import Path
 from typing import Any
 
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
@@ -60,13 +64,85 @@ def setup_logging(level: str, fmt: str) -> None:
     root.setLevel(level.upper())
 
 
-# --- metrics (this process) -------------------------------------------------------------
+# --- metrics ---------------------------------------------------------------------------
 
-_requests: dict[tuple[str, str, str], int] = defaultdict(int)
-_duration_sum: dict[tuple[str, str], float] = defaultdict(float)
-_duration_count: dict[tuple[str, str], int] = defaultdict(int)
 _BUCKETS = (0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0)
-_duration_buckets: dict[tuple[str, str, float], int] = defaultdict(int)
+_FLUSH_SECONDS = 1.0
+
+
+class HttpCounters:
+    """Request counts and latency histograms, keyed by (method, route[, status | bucket])."""
+
+    def __init__(self) -> None:
+        self.requests: dict[tuple[str, str, str], int] = defaultdict(int)
+        self.duration_sum: dict[tuple[str, str], float] = defaultdict(float)
+        self.duration_count: dict[tuple[str, str], int] = defaultdict(int)
+        self.duration_buckets: dict[tuple[str, str, float], int] = defaultdict(int)
+
+    def observe(self, method: str, route: str, status: int, elapsed: float) -> None:
+        self.requests[(method, route, str(status))] += 1
+        self.duration_sum[(method, route)] += elapsed
+        self.duration_count[(method, route)] += 1
+        for bucket in _BUCKETS:
+            if elapsed <= bucket:
+                self.duration_buckets[(method, route, bucket)] += 1
+
+    def to_json(self) -> dict[str, list[list[Any]]]:
+        return {
+            "requests": [[*k, v] for k, v in self.requests.items()],
+            "duration_sum": [[*k, v] for k, v in self.duration_sum.items()],
+            "duration_count": [[*k, v] for k, v in self.duration_count.items()],
+            "duration_buckets": [[*k, v] for k, v in self.duration_buckets.items()],
+        }
+
+    def add(self, data: dict[str, list[list[Any]]]) -> None:
+        for m, r, s, n in data.get("requests", []):
+            self.requests[(m, r, s)] += n
+        for m, r, v in data.get("duration_sum", []):
+            self.duration_sum[(m, r)] += v
+        for m, r, n in data.get("duration_count", []):
+            self.duration_count[(m, r)] += n
+        for m, r, b, n in data.get("duration_buckets", []):
+            self.duration_buckets[(m, r, float(b))] += n
+
+
+_counters = HttpCounters()  # this process
+_metrics_dir: Path | None = None
+# pid + a random part: a pid reused after a restart never adds to an old process's file
+_metrics_file = f"http-{os.getpid()}-{uuid.uuid4().hex[:8]}.json"
+_flushed_at = 0.0
+
+
+def configure_metrics(directory: str | None) -> None:
+    global _metrics_dir  # set once at startup
+    _metrics_dir = Path(directory) if directory else None
+    if _metrics_dir is not None:
+        _metrics_dir.mkdir(parents=True, exist_ok=True)
+
+
+def flush_metrics(*, force: bool = False) -> None:
+    """Write this process's counters to the shared directory (at most once a second)."""
+    global _flushed_at
+    if _metrics_dir is None or (not force and time.monotonic() - _flushed_at < _FLUSH_SECONDS):
+        return
+    _flushed_at = time.monotonic()
+    target = _metrics_dir / _metrics_file
+    tmp = target.with_suffix(".tmp")
+    tmp.write_text(json.dumps(_counters.to_json()))
+    tmp.replace(target)  # atomic: a scrape never reads half a file
+
+
+def _all_counters() -> HttpCounters:
+    if _metrics_dir is None:
+        return _counters
+    flush_metrics(force=True)
+    total = HttpCounters()
+    for path in _metrics_dir.glob("http-*.json"):
+        try:
+            total.add(json.loads(path.read_text()))
+        except (OSError, ValueError):
+            continue  # replaced or removed while reading: counted on the next scrape
+    return total
 
 
 def _route(request: Request) -> str:
@@ -98,12 +174,8 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
         finally:
             elapsed = time.perf_counter() - started
             route = _route(request)
-            _requests[(request.method, route, str(status))] += 1
-            _duration_sum[(request.method, route)] += elapsed
-            _duration_count[(request.method, route)] += 1
-            for bucket in _BUCKETS:
-                if elapsed <= bucket:
-                    _duration_buckets[(request.method, route, bucket)] += 1
+            _counters.observe(request.method, route, status, elapsed)
+            flush_metrics()
             access_log.info(
                 "%s %s %s %.0fms",
                 request.method,
@@ -133,23 +205,24 @@ def _labels(**labels: str) -> str:
 
 
 def http_metrics() -> list[str]:
+    c = _all_counters()
     lines = [
-        "# HELP finance_acc_http_requests_total HTTP requests handled by this process.",
+        "# HELP finance_acc_http_requests_total HTTP requests handled (all server processes).",
         "# TYPE finance_acc_http_requests_total counter",
         *[
             f"finance_acc_http_requests_total{_labels(method=m, route=r, status=s)} {n}"
-            for (m, r, s), n in sorted(_requests.items())
+            for (m, r, s), n in sorted(c.requests.items())
         ],
-        "# HELP finance_acc_http_request_duration_seconds Request latency (this process).",
+        "# HELP finance_acc_http_request_duration_seconds Request latency.",
         "# TYPE finance_acc_http_request_duration_seconds histogram",
     ]
-    for (m, r), count in sorted(_duration_count.items()):
+    for (m, r), count in sorted(c.duration_count.items()):
         series = "finance_acc_http_request_duration_seconds"
         for bucket in _BUCKETS:
             le = _labels(method=m, route=r, le=str(bucket))
-            lines.append(f"{series}_bucket{le} {_duration_buckets[(m, r, bucket)]}")
+            lines.append(f"{series}_bucket{le} {c.duration_buckets[(m, r, bucket)]}")
         lines.append(f"{series}_bucket{_labels(method=m, route=r, le='+Inf')} {count}")
-        lines.append(f"{series}_sum{_labels(method=m, route=r)} {_duration_sum[(m, r)]:.6f}")
+        lines.append(f"{series}_sum{_labels(method=m, route=r)} {c.duration_sum[(m, r)]:.6f}")
         lines.append(f"{series}_count{_labels(method=m, route=r)} {count}")
     return lines
 

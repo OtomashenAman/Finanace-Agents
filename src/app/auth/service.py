@@ -11,10 +11,11 @@ from src.app.auth.exceptions import (
     InvalidCredentialsError,
     InvalidRefreshTokenError,
 )
-from src.app.auth.models import RefreshToken, User
+from src.app.auth.models import PasswordResetRequest, RefreshToken, User
 from src.app.auth.security import (
     burn_password_check,
     create_access_token,
+    hash_password,
     hash_token,
     new_refresh_token,
     verify_password,
@@ -157,4 +158,81 @@ async def revoke_user_tokens(session: AsyncSession, user_id: uuid.UUID) -> None:
         update(RefreshToken)
         .where(RefreshToken.user_id == user_id, RefreshToken.revoked_at.is_(None))
         .values(revoked_at=utcnow())
+    )
+
+
+class WrongPasswordError(InvalidCredentialsError):
+    code = "wrong_password"
+    message = "Your current password isn't correct."
+
+
+async def change_password(
+    session: AsyncSession,
+    user: User,
+    current: str,
+    new: str,
+    keep_refresh: str | None,
+    ctx: RequestContext,
+) -> None:
+    """Change your own password; every other session of yours is signed out (commits)."""
+    valid, _ = verify_password(current, user.password_hash)
+    if not valid:
+        record_event(session, "auth.password_change_failed", ctx, actor_id=user.id)
+        await session.commit()
+        raise WrongPasswordError
+    user.password_hash = hash_password(new)
+    keep_family = None
+    if keep_refresh:
+        keep_family = await session.scalar(
+            select(RefreshToken.family_id).where(
+                RefreshToken.token_hash == hash_token(keep_refresh)
+            )
+        )
+    query = update(RefreshToken).where(
+        RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None)
+    )
+    if keep_family is not None:
+        query = query.where(RefreshToken.family_id != keep_family)
+    await session.execute(query.values(revoked_at=utcnow()))
+    record_event(session, "auth.password_changed", ctx, actor_id=user.id)
+    await session.commit()
+
+
+async def request_reset(session: AsyncSession, email: str, ctx: RequestContext) -> None:
+    """Forgot password: tell the Finance Admins (no email service). Same outcome whether or
+    not the account exists, so nobody can probe for accounts (commits)."""
+    user = await session.scalar(select(User).where(User.email == email.strip().lower()))
+    if user is None or not user.is_active:
+        record_event(session, "auth.password_reset_requested", ctx, email=email, known=False)
+        await session.commit()
+        return
+    open_request = await session.scalar(
+        select(PasswordResetRequest.id).where(
+            PasswordResetRequest.user_id == user.id, PasswordResetRequest.resolved_at.is_(None)
+        )
+    )
+    if open_request is None:  # one open request per person is enough
+        session.add(PasswordResetRequest(user_id=user.id, ip=ctx.ip))
+    record_event(
+        session, "auth.password_reset_requested", ctx, actor_id=user.id, user_id=str(user.id)
+    )
+    await session.commit()
+
+
+async def open_reset_requests(session: AsyncSession) -> list[tuple[PasswordResetRequest, User]]:
+    rows = await session.execute(
+        select(PasswordResetRequest, User)
+        .join(User, User.id == PasswordResetRequest.user_id)
+        .where(PasswordResetRequest.resolved_at.is_(None))
+        .order_by(PasswordResetRequest.created_at)
+    )
+    return [(r, u) for r, u in rows]
+
+
+async def resolve_reset_requests(session: AsyncSession, user_id: uuid.UUID) -> None:
+    """A new password was set for the user (caller commits)."""
+    await session.execute(
+        update(PasswordResetRequest)
+        .where(PasswordResetRequest.user_id == user_id, PasswordResetRequest.resolved_at.is_(None))
+        .values(resolved_at=utcnow())
     )

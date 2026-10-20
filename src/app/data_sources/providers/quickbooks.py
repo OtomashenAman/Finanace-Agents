@@ -4,6 +4,7 @@ import contextlib
 import urllib.parse
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
 import httpx
@@ -96,6 +97,15 @@ def authorization_url(app: AppCredentials, state: str) -> str:
 
 def client() -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=transport, timeout=get_settings().data_sync_timeout_seconds)
+
+
+def _fault(resp: httpx.Response) -> str:
+    """QuickBooks' own explanation of a rejected request, when it gives one."""
+    try:
+        errors = resp.json()["Fault"]["Error"]
+        return "; ".join(str(e.get("Detail") or e.get("Message")) for e in errors)[:300]
+    except (ValueError, KeyError, TypeError):
+        return f"HTTP {resp.status_code}"
 
 
 def _error_code(resp: httpx.Response) -> str | None:
@@ -192,7 +202,7 @@ class Api:
         if resp.status_code in (401, 403):
             raise ReauthorizationRequired("QuickBooks no longer accepts this connection.")
         if resp.is_error:
-            raise QuickBooksError(f"QuickBooks rejected the update ({resp.status_code}).")
+            raise QuickBooksError(f"QuickBooks rejected the update: {_fault(resp)}")
         result: dict[str, Any] = resp.json()
         return result
 
@@ -200,11 +210,56 @@ class Api:
         bill: dict[str, Any] = (await self._get(f"bill/{bill_id}")).get("Bill", {})
         return bill
 
-    async def set_bill_note(self, bill_id: str, sync_token: str, note: str) -> dict[str, Any]:
-        """Sparse update: only the private note changes (amounts, lines, accounts untouched)."""
-        body = {"Id": bill_id, "SyncToken": sync_token, "sparse": True, "PrivateNote": note}
-        bill: dict[str, Any] = (await self._post("bill", body)).get("Bill", {})
-        return bill
+    async def set_bill_note(self, bill: dict[str, Any], note: str) -> dict[str, Any]:
+        """Sparse update: only the private note changes (amounts, lines, accounts untouched).
+
+        QuickBooks requires VendorRef even on a sparse Bill update: the bill's own is resent.
+        """
+        body = {
+            "Id": bill["Id"],
+            "SyncToken": str(bill["SyncToken"]),
+            "sparse": True,
+            "VendorRef": bill["VendorRef"],
+            "PrivateNote": note,
+        }
+        updated: dict[str, Any] = (await self._post("bill", body)).get("Bill", {})
+        return updated
+
+    async def find_bill(self, vendor_id: str, doc_number: str) -> dict[str, Any] | None:
+        """The vendor's bill with this number (bill numbers are only unique per vendor)."""
+        quoted = doc_number.replace("\\", "\\\\").replace("'", "\\'")
+        statement = f"SELECT * FROM Bill WHERE DocNumber = '{quoted}'"  # noqa: S608 - escaped
+        rows = (await self._get("query", query=statement)).get("QueryResponse", {}).get("Bill", [])
+        return next((b for b in rows if (b.get("VendorRef") or {}).get("value") == vendor_id), None)
+
+    async def create_bill(
+        self,
+        *,
+        vendor_id: str,
+        account_id: str,
+        doc_number: str,
+        amount: Decimal,
+        note: str,
+        due_date: str | None = None,
+    ) -> dict[str, Any]:
+        """A one-line bill for the invoice total, expensed to one account."""
+        body: dict[str, Any] = {
+            "VendorRef": {"value": vendor_id},
+            "DocNumber": doc_number,
+            "PrivateNote": note,
+            "Line": [
+                {
+                    "DetailType": "AccountBasedExpenseLineDetail",
+                    "Amount": float(amount),
+                    "Description": f"Invoice {doc_number}",
+                    "AccountBasedExpenseLineDetail": {"AccountRef": {"value": account_id}},
+                }
+            ],
+        }
+        if due_date:
+            body["DueDate"] = due_date
+        created: dict[str, Any] = (await self._post("bill", body)).get("Bill", {})
+        return created
 
     async def company_name(self, realm_id: str) -> str | None:
         body = await self._get(f"companyinfo/{realm_id}")

@@ -45,6 +45,7 @@ class RetryLater(Exception):
 
 Handler = Callable[[AsyncSession, dict[str, Any], JobContext], Awaitable[None]]
 _HANDLERS: dict[str, Handler] = {}
+_DAILY: list[str] = []  # kinds the worker queues once a day (e.g. the audit retention purge)
 
 
 def handler(kind: str) -> Callable[[Handler], Handler]:
@@ -55,6 +56,27 @@ def handler(kind: str) -> Callable[[Handler], Handler]:
         return fn
 
     return register
+
+
+def daily(kind: str) -> Callable[[Handler], Handler]:
+    """Also run this handler once a day (queued by the workers; the date makes it unique)."""
+
+    def register(fn: Handler) -> Handler:
+        _DAILY.append(kind)
+        return fn
+
+    return register
+
+
+async def schedule_daily(session: AsyncSession) -> int:
+    """Queue today's run of each daily job unless already queued (commits). Returns how many."""
+    today = utcnow().date().isoformat()
+    queued = 0
+    for kind in _DAILY:
+        if await enqueue(session, kind, {"date": today}, dedupe_key=f"{kind}:{today}"):
+            queued += 1
+    await session.commit()
+    return queued
 
 
 def backoff(attempt: int) -> timedelta:
@@ -176,7 +198,7 @@ async def work_once(session: AsyncSession, worker: str, llm: LLMProvider) -> boo
 async def run_worker(
     sessionmaker: async_sessionmaker[AsyncSession], llm: LLMProvider, stop: asyncio.Event
 ) -> None:
-    """Poll for jobs until `stop` is set; recovers stale jobs every minute."""
+    """Poll for jobs until `stop` is set. Every minute: requeue stale jobs, queue daily ones."""
     worker = f"{socket.gethostname()}:{os.getpid()}"
     poll = get_settings().jobs_poll_seconds
     last_recovery = 0.0
@@ -187,6 +209,8 @@ async def run_worker(
             if loop_time - last_recovery > 60:
                 if recovered := await recover_stale(session):
                     log.warning("requeued %d stale job(s)", recovered)
+                if scheduled := await schedule_daily(session):
+                    log.info("queued %d daily job(s)", scheduled)
                 last_recovery = loop_time
             busy = await work_once(session, worker, llm)
         if not busy:

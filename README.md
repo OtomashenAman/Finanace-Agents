@@ -127,15 +127,26 @@ folder gets an `input_schema`, `run_model` and `analyze()` (see `agents/ap_invoi
   data source snapshot, the audit timeline and a SHA-256 manifest (the export is audited).
 - QuickBooks write-back: after approval the preparer can note the approval on the QuickBooks
   bill the run came from (`POST .../runs/{id}/write-back`, a background job; only the bill's
-  private note changes). The receipt is kept on the run (`run_actions`).
+  private note changes). For an invoice entered by hand (or from a PDF/upload), the preparer
+  picks one of their QuickBooks companies and an expense account and the bill is created there
+  (vendor matched by name from the last sync; if the vendor already has a bill with that
+  number, it is used instead of creating a second). The receipt is kept on the run
+  (`run_actions`).
 - Audit integrity: database triggers make `audit_events` append-only and chain every event to
   the previous one by SHA-256. `python -m src.app.cli.audit verify` (or Audit Trail as an admin)
   recomputes the chain; `... audit purge` removes events past `AUDIT_RETENTION_DAYS` and records
   the purge.
 - Observability: `X-Request-ID` on every response and log line, `LOG_FORMAT=json` for log
   shippers, `/ready` (database) next to `/health`, and `/metrics` for Prometheus (HTTP counters
-  plus queue, AI, approval, account and data source gauges; `METRICS_TOKEN`). Example scrape
+  plus queue, AI, approval, account and data source gauges; `METRICS_TOKEN`). With several
+  server processes set `METRICS_DIR` to a shared tmpfs directory (as in
+  `docker-compose.prod.yml`): each process keeps its counters there and every scrape sums
+  them. Example scrape
   config and alert rules: `ops/prometheus/`.
+- Header search (`GET /api/v1/search`, Ctrl/⌘ K): runs by number, headline or invoice number,
+  agents, pages and, for admins, people and legal entities, scoped like the rest of the app.
+  Help (`/help`) explains each role's tasks; My account (`/account`) changes the password;
+  "Forgot password?" on the sign-in page puts a reset request in the admins' worklist.
 - Sessions are per browser tab: the SPA sends its tab's id in `X-Session-Slot` and the httpOnly
   auth cookies are named after it, so an admin and a user can be signed in side by side. A new
   tab opens with the last account used; the user menu's "another account" icon signs in a

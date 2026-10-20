@@ -12,7 +12,7 @@ from src.app.auth.cookies import (
 from src.app.auth.dependencies import CurrentUser
 from src.app.auth.exceptions import InvalidRefreshTokenError
 from src.app.auth.models import User
-from src.app.auth.schemas import LoginRequest, UserOut
+from src.app.auth.schemas import LoginRequest, PasswordChange, ResetRequest, UserOut
 from src.app.common.context import RequestContextDep
 from src.app.common.schemas import ErrorResponse
 from src.app.core.db import SessionDep
@@ -85,3 +85,27 @@ async def logout(
 @router.get("/me", response_model=UserOut, responses=_UNAUTHORIZED)
 async def me(user: CurrentUser) -> User:
     return user
+
+
+@router.post("/me/password", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
+async def change_password(
+    body: PasswordChange,
+    session: SessionDep,
+    user: CurrentUser,
+    ctx: RequestContextDep,
+    refresh_token: RefreshCookie,
+) -> Response:
+    """Change your own password. Your other sessions are signed out; this one stays."""
+    await service.change_password(
+        session, user, body.current_password, body.new_password, refresh_token, ctx
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/password-reset-requests", status_code=status.HTTP_202_ACCEPTED)
+async def request_password_reset(
+    body: ResetRequest, session: SessionDep, ctx: RequestContextDep
+) -> dict[str, str]:
+    """Forgot password: a Finance Admin is asked to set a new one (no email is sent)."""
+    await service.request_reset(session, body.email, ctx)
+    return {"message": "If that account exists, a Finance Admin has been asked to reset it."}

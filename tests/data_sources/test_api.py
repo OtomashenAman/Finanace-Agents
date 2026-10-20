@@ -36,6 +36,7 @@ class FakeIntuit:
         self.note = "Entered by AP"
         self.sync_token = 3
         self.updates = 0
+        self.created: list[dict[str, Any]] = []
         self.vendors: list[dict[str, Any]] = [
             {"Id": "56", "DisplayName": "Acme Cloud Services", "Active": True},
             {"Id": "57", "DisplayName": "Old Supplier", "Active": False},
@@ -77,17 +78,23 @@ class FakeIntuit:
                         "Id": "145",
                         "SyncToken": str(self.sync_token),
                         "PrivateNote": self.note,
+                        "VendorRef": {"value": "56", "name": "Acme Cloud Services"},
                     }
                 },
             )
         if url.split("?")[0].endswith("/bill") and request.method == "POST":
             body = json.loads(request.content)
-            assert body["sparse"] is True and set(body) == {
-                "Id",
-                "SyncToken",
-                "sparse",
-                "PrivateNote",
-            }
+            if "VendorRef" not in body:  # as the real API does, even for sparse updates
+                fault = {"Detail": "Required parameter VendorRef is missing in the request"}
+                return httpx.Response(400, json={"Fault": {"Error": [fault]}})
+            if "Id" not in body:  # a new bill
+                bill = {**body, "Id": str(900 + len(self.created)), "SyncToken": "0"}
+                bill["TotalAmt"] = sum(line["Amount"] for line in body["Line"])
+                self.created.append(bill)
+                return httpx.Response(200, json={"Bill": bill})
+            # Only the note may change: nothing else is sent
+            assert body["sparse"] is True
+            assert set(body) == {"Id", "SyncToken", "sparse", "VendorRef", "PrivateNote"}
             if body["SyncToken"] != str(self.sync_token):
                 return httpx.Response(400, json={"Fault": "stale"})
             self.note = body["PrivateNote"]
@@ -109,6 +116,14 @@ class FakeIntuit:
         if "/query" in url:
             statement = request.url.params["query"]
             entity = statement.split(" FROM ")[1].split(" ")[0]
+            if " WHERE DocNumber = " in statement:
+                number = statement.split(" WHERE DocNumber = ")[1].strip("'")
+                existing = [
+                    {"Id": "145", "DocNumber": "INV-2048", "VendorRef": {"value": "56"}},
+                    *self.created,
+                ]
+                found = [b for b in existing if b["DocNumber"] == number]
+                return httpx.Response(200, json={"QueryResponse": {"Bill": found}})
             rows = {
                 "Vendor": self.vendors,
                 "PurchaseOrder": [
@@ -644,3 +659,116 @@ async def test_a_note_already_there_is_not_written_twice(
     done = (await me.post(f"{RUNS}/{run['id']}/write-back")).json()
     assert done["actions"][0]["receipt"]["already_present"] is True
     assert intuit.updates == 0
+
+
+async def approved_by_hand(
+    client: AsyncClient,
+    admin: AsyncClient,
+    invoice_number: str = "INV-3001",
+    supplier: str = "acme cloud services",  # matched to the QuickBooks vendor ignoring case
+) -> dict[str, Any]:
+    run = (await client.post(RUNS)).json()
+    values = {
+        "supplier": supplier,
+        "invoice_number": invoice_number,
+        "invoice_total": "980.50",
+        "po_authorized_amount": "980.50",
+        "received_amount": "980.50",
+        "tax_total": None,
+        "proposed_gl_account": None,
+    }
+    await client.put(f"{RUNS}/{run['id']}/input", json={"values": values})
+    await client.post(f"{RUNS}/{run['id']}/analyze")
+    await client.post(f"{RUNS}/{run['id']}/submit")
+    r = await admin.post(
+        f"{RUNS}/{run['id']}/reviews", json={"decision": "approved", "comment": "Checked it"}
+    )
+    assert r.json()["status"] == "approved", r.text
+    result: dict[str, Any] = r.json()
+    return result
+
+
+async def test_an_invoice_entered_by_hand_becomes_a_quickbooks_bill_once(
+    me: AsyncClient,
+    intuit: FakeIntuit,
+    make_user: MakeUser,
+    signed_in_client: ClientFactory,
+    fake_llm: FakeLLM,
+) -> None:
+    admin = await signed_in_client(await make_user("admin@example.com", UserRole.FINANCE_ADMIN))
+    run = await approved_by_hand(me, admin)
+    mine = (await me.get(f"{RUNS}/{run['id']}")).json()["permissions"]
+    assert mine["can_write_back"] is False and mine["write_back"] == "create_bill"
+    assert "Connect QuickBooks" in mine["write_back_blocked_reason"]
+
+    source_id = (await connect(me))["source"][0]
+    mine = (await me.get(f"{RUNS}/{run['id']}")).json()["permissions"]
+    assert mine["can_write_back"] is True and mine["write_back_blocked_reason"] is None
+    url = f"{RUNS}/{run['id']}/write-back"
+    assert (await me.post(url)).status_code == 403  # which company and account?
+    r = await me.post(url, json={"source_id": source_id, "account_id": "999"})
+    assert r.status_code == 404  # not a synced account
+
+    done = (await me.post(url, json={"source_id": source_id, "account_id": "7"})).json()
+    [action] = done["actions"]
+    assert action["status"] == "succeeded", action
+    assert action["label"] == "Bill created in QuickBooks"
+    assert action["receipt"]["bill_id"] == "900" and action["receipt"]["already_present"] is False
+    assert action["receipt"]["vendor"] == "Acme Cloud Services"
+    assert action["receipt"]["account"] == "6100 Cloud Hosting"
+    [bill] = intuit.created
+    assert bill["VendorRef"] == {"value": "56"} and bill["DocNumber"] == "INV-3001"
+    assert bill["TotalAmt"] == 980.5
+    assert bill["Line"][0]["AccountBasedExpenseLineDetail"]["AccountRef"] == {"value": "7"}
+    assert bill["PrivateNote"].startswith(f"[FinanceACC] {run['reference']} approved by Admin")
+    assert done["permissions"]["can_write_back"] is False
+    again = await me.post(url, json={"source_id": source_id, "account_id": "7"})
+    assert again.status_code == 403 and len(intuit.created) == 1
+
+    summaries = {e["summary"] for e in (await admin.get("/api/v1/audit-events")).json()["items"]}
+    assert f"Created QuickBooks bill 900 for {run['reference']}" in summaries
+
+
+async def test_an_existing_bill_with_that_number_is_not_duplicated(
+    me: AsyncClient,
+    intuit: FakeIntuit,
+    make_user: MakeUser,
+    signed_in_client: ClientFactory,
+    fake_llm: FakeLLM,
+) -> None:
+    admin = await signed_in_client(await make_user("admin@example.com", UserRole.FINANCE_ADMIN))
+    source_id = (await connect(me))["source"][0]
+    run = await approved_by_hand(me, admin, invoice_number="INV-2048")
+    done = (
+        await me.post(
+            f"{RUNS}/{run['id']}/write-back", json={"source_id": source_id, "account_id": "7"}
+        )
+    ).json()
+    receipt = done["actions"][0]["receipt"]
+    assert receipt["bill_id"] == "145" and receipt["already_present"] is True
+    assert intuit.created == []
+
+
+async def test_bill_needs_a_vendor_known_to_quickbooks_and_your_own_connection(
+    me: AsyncClient,
+    intuit: FakeIntuit,
+    make_user: MakeUser,
+    signed_in_client: ClientFactory,
+    fake_llm: FakeLLM,
+    db: AsyncSession,
+) -> None:
+    admin = await signed_in_client(await make_user("admin@example.com", UserRole.FINANCE_ADMIN))
+    source_id = (await connect(me))["source"][0]
+    body = {"source_id": source_id, "account_id": "7"}
+    unknown = await approved_by_hand(me, admin, supplier="Nobody Ltd")
+    r = await me.post(f"{RUNS}/{unknown['id']}/write-back", json=body)
+    assert r.status_code == 409 and "No vendor named" in r.json()["detail"]["message"]
+
+    other_user = await make_user("other@example.com")
+    await assign(db, other_user, AgentCapacity.PREPARER)
+    other = await signed_in_client(other_user)
+    await connect(other)
+    theirs = await approved_by_hand(other, admin, "INV-5")
+    r = await other.post(f"{RUNS}/{theirs['id']}/write-back", json=body)
+    assert r.status_code == 404  # someone else's connection
+    assert intuit.created == []

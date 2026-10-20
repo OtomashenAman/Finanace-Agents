@@ -10,7 +10,7 @@ from src.app.agent_catalog.runs.models import AgentRun, RunReview
 from src.app.audit.service import record_event
 from src.app.auth.models import User, UserRole
 from src.app.auth.security import hash_password
-from src.app.auth.service import revoke_user_tokens
+from src.app.auth.service import resolve_reset_requests, revoke_user_tokens
 from src.app.common.clock import utcnow
 from src.app.common.context import RequestContext
 from src.app.entities import service as entities
@@ -206,6 +206,7 @@ async def reset_password(
     user.failed_login_attempts = 0
     user.locked_until = None
     await revoke_user_tokens(session, user.id)
+    await resolve_reset_requests(session, user.id)
     record_event(session, "user.password_reset", ctx, actor_id=actor.id, user_id=str(user.id))
     await session.commit()
     return await _managed(session, user)

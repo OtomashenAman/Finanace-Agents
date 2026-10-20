@@ -1,16 +1,17 @@
 import hashlib
 import json
 import uuid
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ValidationError
-from sqlalchemy import Select, case, delete, func, select
+from sqlalchemy import Select, case, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from src.app.agent_catalog.agents.base import AnalysisContext, BaseAgent
 from src.app.agent_catalog.agents.fields import draft_schema, form_fields
@@ -40,6 +41,7 @@ from src.app.agent_catalog.runs.models import (
     AgentRun,
     AgentRunDetail,
     ExternalAction,
+    FlagSeverity,
     ReviewDecision,
     RunDocument,
     RunFlag,
@@ -69,6 +71,7 @@ from src.app.agent_catalog.runs.schemas import (
     RunSourceOut,
     RunSummary,
     SourceLink,
+    WriteBackRequest,
 )
 from src.app.agent_catalog.service import ADMIN_CAPACITIES, visible_agent_ids
 from src.app.audit import service as audit
@@ -83,6 +86,7 @@ from src.app.core.config import get_settings
 from src.app.core.llm.base import LLMProvider
 from src.app.data_sources import service as data_sources
 from src.app.data_sources.access import FinanceData
+from src.app.data_sources.models import DataSource, SourceKind, SourceStatus
 from src.app.entities import service as entities
 from src.app.entities.schemas import EntityRef
 from src.app.governance import service as governance
@@ -351,25 +355,55 @@ async def _review_blocked(
     return None
 
 
-ACTION_LABELS = {run_jobs.BILL_NOTE: "Approval noted on the QuickBooks bill"}
+ACTION_LABELS = {
+    run_jobs.BILL_NOTE: "Approval noted on the QuickBooks bill",
+    run_jobs.BILL_CREATE: "Bill created in QuickBooks",
+}
 
 
-async def _write_back_blocked(
-    session: AsyncSession, user: User, run: AgentRun, actions: list[ExternalAction]
-) -> str | None:
-    """Why the QuickBooks write-back isn't available (None: it is)."""
-    if run.preparer_id != user.id:
-        return "Only the preparer can write back to their QuickBooks."
-    if run.status != RunStatus.APPROVED:
-        return "Only approved runs are written back."
+WRITE_BACK_MODES: dict[str, Literal["note", "create_bill"]] = {
+    run_jobs.BILL_NOTE: "note",
+    run_jobs.BILL_CREATE: "create_bill",
+}
+
+
+@dataclass(frozen=True)
+class WriteBackOption:
+    kind: str | None  # run_jobs.BILL_NOTE or BILL_CREATE; None: not for this run
+    blocked: str | None  # why it can't be asked for now
+
+
+async def _write_back_option(
+    session: AsyncSession, access: AgentAccess, run: AgentRun, actions: list[ExternalAction]
+) -> WriteBackOption:
+    """How an approved run goes back to the preparer's QuickBooks, if it can."""
+    if run.preparer_id != access.user.id or run.status != RunStatus.APPROVED:
+        return WriteBackOption(None, None)
     snapshot = await session.get(RunSourceSnapshot, run.id)
-    if snapshot is None or snapshot.source_kind != "quickbooks" or snapshot.record_type != "bill":
-        return "The run wasn't prefilled from a QuickBooks bill."
-    if snapshot.source_id is None:
-        return "The QuickBooks connection was removed."
-    if any(a.kind == run_jobs.BILL_NOTE and a.status != ActionStatus.FAILED for a in actions):
-        return "Already written back."
-    return None
+    if snapshot and snapshot.source_kind == "quickbooks" and snapshot.record_type == "bill":
+        kind = run_jobs.BILL_NOTE
+        if snapshot.source_id is None:
+            return WriteBackOption(kind, "The QuickBooks connection was removed.")
+    elif access.definition.bill_fields is not None:
+        kind = run_jobs.BILL_CREATE
+        connected = await session.scalar(
+            select(func.count())
+            .select_from(DataSource)
+            .where(
+                DataSource.owner_id == access.user.id,
+                DataSource.kind == SourceKind.QUICKBOOKS,
+                DataSource.status == SourceStatus.CONNECTED,
+            )
+        )
+        if not connected:
+            return WriteBackOption(
+                kind, "Connect QuickBooks on Data Sources to create this bill there."
+            )
+    else:
+        return WriteBackOption(None, None)
+    if any(a.kind == kind and a.status != ActionStatus.FAILED for a in actions):
+        return WriteBackOption(kind, "Already written back.")
+    return WriteBackOption(kind, None)
 
 
 async def write_back(
@@ -377,6 +411,7 @@ async def write_back(
     user: User,
     key: str,
     run_id: uuid.UUID,
+    body: WriteBackRequest | None,
     ctx: RequestContext,
     llm: LLMProvider,
 ) -> RunDetail:
@@ -386,12 +421,31 @@ async def write_back(
     actions = list(
         await session.scalars(select(ExternalAction).where(ExternalAction.run_id == run.id))
     )
-    if blocked := await _write_back_blocked(session, user, run, actions):
-        raise RunPermissionError(blocked)
-    action = next((a for a in actions if a.kind == run_jobs.BILL_NOTE), None)
+    option = await _write_back_option(session, access, run, actions)
+    if option.kind is None:
+        raise RunPermissionError(
+            "Only the preparer of an approved run can write it back to QuickBooks."
+        )
+    if option.blocked:
+        raise RunPermissionError(option.blocked)
+    payload: dict[str, Any] = {}
+    if option.kind == run_jobs.BILL_CREATE:
+        if body is None:
+            raise RunPermissionError("Pick the QuickBooks company and the expense account.")
+        assert access.definition.bill_fields is not None  # noqa: S101 - BILL_CREATE needs them
+        vendor_field, number_field, amount_field = access.definition.bill_fields
+        target = await data_sources.bill_target(
+            session, user, body.source_id, getattr(detail, vendor_field), body.account_id
+        )
+        payload["bill"] = {
+            "target": {**asdict(target), "source_id": str(target.source_id)},
+            "doc_number": str(getattr(detail, number_field)),
+            "amount": str(getattr(detail, amount_field)),
+        }
+    action = next((a for a in actions if a.kind == option.kind), None)
     if action is None:
         action = ExternalAction(
-            run_id=run.id, kind=run_jobs.BILL_NOTE, status=ActionStatus.QUEUED, requested_by=user.id
+            run_id=run.id, kind=option.kind, status=ActionStatus.QUEUED, requested_by=user.id
         )
         session.add(action)
         await session.flush()
@@ -402,11 +456,18 @@ async def write_back(
     job = await jobs.enqueue(
         session,
         run_jobs.WRITEBACK_JOB,
-        {"action_id": str(action.id)},
+        {"action_id": str(action.id), **payload},
         dedupe_key=f"writeback:{action.id}:{utcnow().timestamp()}",
         max_attempts=4,
     )
-    record_event(session, "run.writeback_requested", ctx, actor_id=user.id, run=run.reference)
+    record_event(
+        session,
+        "run.writeback_requested",
+        ctx,
+        actor_id=user.id,
+        run=run.reference,
+        action=option.kind,
+    )
     await session.commit()
     await jobs.dispatch(session, job, llm)
     await session.refresh(run)
@@ -495,6 +556,7 @@ async def _detail(
             .order_by(ExternalAction.created_at)
         )
     )
+    write_back = await _write_back_option(session, access, run, actions)
     permissions = RunPermissions(
         can_edit=is_owner and is_allowed(run.status, RunAction.EDIT),
         can_analyze=is_owner and is_allowed(run.status, RunAction.ANALYZE),
@@ -503,7 +565,9 @@ async def _detail(
         can_review=pending and blocked is None,
         can_delete=is_owner and is_allowed(run.status, RunAction.DELETE),
         review_blocked_reason=blocked,
-        can_write_back=await _write_back_blocked(session, user, run, actions) is None,
+        can_write_back=write_back.kind is not None and write_back.blocked is None,
+        write_back=WRITE_BACK_MODES.get(write_back.kind or ""),
+        write_back_blocked_reason=write_back.blocked,
     )
     approval = None
     if run.submitted_at is not None:
@@ -1291,6 +1355,8 @@ class WorklistRow:
     agent_name: str
     reference: str
     entity_code: str | None
+    owner: str  # the preparer
+    exceptions: int  # high and warning findings
     status: RunStatus
     status_label: str
     priority: RunPriority
@@ -1368,6 +1434,19 @@ async def run_stats(
     }
     refs = await _business_refs(session, open_runs)
     ents = await _entities(session, open_runs)
+    owners = await _people(session, {r.preparer_id for r in open_runs})
+    exceptions = dict(
+        (
+            await session.execute(
+                select(RunFlag.run_id, func.count())
+                .where(
+                    RunFlag.run_id.in_([r.id for r in open_runs]),
+                    RunFlag.severity.in_([FlagSeverity.HIGH, FlagSeverity.WARNING]),
+                )
+                .group_by(RunFlag.run_id)
+            )
+        ).all()
+    )
     worklist = [
         WorklistRow(
             run_id=r.id,
@@ -1375,6 +1454,8 @@ async def run_stats(
             agent_name=agents[r.agent_id].short_name,
             reference=refs.get(r.id, r.reference),
             entity_code=ents[r.entity_id].code if r.entity_id in ents else None,
+            owner=owners[r.preparer_id].full_name,
+            exceptions=exceptions.get(r.id, 0),
             status=r.status,
             status_label=STATUS_LABELS[r.status],
             priority=r.priority,
@@ -1383,3 +1464,42 @@ async def run_stats(
         for r in open_runs
     ]
     return RunStats(runs_this_period, pending, high, worklist)
+
+
+async def search_runs(session: AsyncSession, user: User, term: str, limit: int) -> list[RunSummary]:
+    """Runs the user may see whose reference (RUN-01006 or 1006), headline or business
+    reference (e.g. the bill number) contains the term, newest first."""
+    pattern = f"%{term}%"
+    matches: list[ColumnElement[bool]] = [
+        AgentRun.reference_sql().ilike(pattern),
+        AgentRun.headline.ilike(pattern),
+    ]
+    if term.isdigit():
+        matches.append(AgentRun.run_number == int(term))
+    for agent in await session.scalars(select(Agent).where(Agent.id.in_(visible_agent_ids(user)))):
+        definition = get_agent_definition(agent.key)
+        if definition and definition.run_model and definition.reference_field:
+            model = definition.run_model
+            column = getattr(model, definition.reference_field)
+            matches.append(AgentRun.id.in_(select(model.run_id).where(column.ilike(pattern))))
+    runs = list(
+        await session.scalars(
+            _visible_runs(user)
+            .where(or_(*matches))
+            .order_by(AgentRun.run_number.desc())
+            .limit(limit)
+        )
+    )
+    agents = {
+        a.id: a
+        for a in await session.scalars(
+            select(Agent).where(Agent.id.in_({r.agent_id for r in runs}))
+        )
+    }
+    people = await _people(session, {r.preparer_id for r in runs})
+    refs = await _business_refs(session, runs)
+    ents = await _entities(session, runs)
+    return [
+        RunSummary(**_summary(r, agents[r.agent_id], people[r.preparer_id], refs.get(r.id), ents))
+        for r in runs
+    ]

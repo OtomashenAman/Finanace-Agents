@@ -12,6 +12,8 @@ import { RunPage } from "@/features/agent-catalog/workspace/run-page"
 import { WorkspacePage } from "@/features/agent-catalog/workspace/workspace-page"
 import { LoginPage } from "@/features/auth/login-page"
 import { ApprovalsPage } from "@/features/approvals/approvals-page"
+import { AccountPage } from "@/features/auth/account-page"
+import { HelpPage } from "@/features/help/help-page"
 import { AuditPage } from "@/features/audit/audit-page"
 import { WorklistPage } from "@/features/worklist/worklist-page"
 import { GuestOnly, RequireAdmin, RequireAuth } from "@/features/auth/route-guards"
@@ -34,6 +36,8 @@ const router = createBrowserRouter([
           { path: "/catalog/:agentKey", element: <WorkspacePage /> },
           { path: "/catalog/:agentKey/runs/:runId", element: <RunPage /> },
           { path: "/worklist", element: <WorklistPage /> },
+          { path: "/account", element: <AccountPage /> },
+          { path: "/help", element: <HelpPage /> },
           { path: "/approvals", element: <ApprovalsPage /> },
           { path: "/audit", element: <AuditPage /> },
           { path: "/data-sources", element: <DataSourcesPage /> },

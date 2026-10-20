@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     log_format: Literal["text", "json"] = "text"  # json: one object per line, for log shippers
     # Bearer token for GET /metrics. Unset: open outside production, disabled in production
     metrics_token: SecretStr | None = None
+    # Several server processes (WEB_CONCURRENCY > 1): a directory they share (tmpfs) where
+    # each keeps its HTTP counters, summed on every scrape. Unset: per-process counters
+    metrics_dir: str | None = None
 
     database_url: str
     secret_key: SecretStr
@@ -69,7 +72,7 @@ class Settings(BaseSettings):
     demo_admin_name: str = "Finance Admin"
     demo_admin_password: SecretStr | None = None
 
-    @field_validator("data_encryption_key", "metrics_token", mode="before")
+    @field_validator("data_encryption_key", "metrics_token", "metrics_dir", mode="before")
     @classmethod
     def _blank_is_unset(cls, value: object) -> object:
         return None if value == "" else value

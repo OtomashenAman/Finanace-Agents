@@ -11,6 +11,15 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=256)
 
 
+class PasswordChange(BaseModel):
+    current_password: str = Field(min_length=1, max_length=256)
+    new_password: str = Field(min_length=12, max_length=256)  # users.schemas.PASSWORD_MIN_LENGTH
+
+
+class ResetRequest(BaseModel):
+    email: EmailStr
+
+
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

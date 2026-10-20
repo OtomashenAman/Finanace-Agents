@@ -8,7 +8,9 @@ import contextlib
 import hashlib
 import secrets
 import uuid
+from dataclasses import dataclass
 from datetime import timedelta
+from decimal import Decimal
 from pathlib import PurePath
 from typing import Any
 
@@ -696,7 +698,7 @@ async def stamp_bill(
             already = marker in note
             if not already:
                 note = f"{note}\n{line}".strip()[:4000]
-                bill = await api.set_bill_note(bill_id, str(bill["SyncToken"]), note)
+                bill = await api.set_bill_note(bill, note)
     except qb.ReauthorizationRequired as exc:
         source.status = SourceStatus.NEEDS_REAUTH
         source.last_error = str(exc)
@@ -708,6 +710,102 @@ async def stamp_bill(
         "bill_id": bill_id,
         "sync_token": str(bill.get("SyncToken", "")),
         "note_line": line,
+        "already_present": already,
+        "updated_at": (bill.get("MetaData") or {}).get("LastUpdatedTime"),
+    }
+
+
+@dataclass(frozen=True)
+class BillTarget:
+    """Where an approved invoice becomes a QuickBooks bill: the user's connection, the
+    vendor matched by name and the expense account they chose (all from the last sync)."""
+
+    source_id: uuid.UUID
+    company: str
+    vendor_id: str
+    vendor_name: str
+    account_id: str
+    account_name: str
+
+
+async def bill_target(
+    session: AsyncSession, user: User, source_id: uuid.UUID, supplier: str, account_id: str
+) -> BillTarget:
+    source = await _owned(session, user, source_id)
+    if source.kind != SourceKind.QUICKBOOKS or source.status != SourceStatus.CONNECTED:
+        raise SourceNotSyncableError("Pick one of your connected QuickBooks companies.")
+
+    def record(record_type: RecordType) -> Any:
+        return select(FinanceRecord).where(
+            FinanceRecord.source_id == source.id, FinanceRecord.record_type == record_type
+        )
+
+    vendor = await session.scalar(
+        record(RecordType.VENDOR).where(func.lower(FinanceRecord.reference) == supplier.lower())
+    )
+    if vendor is None:
+        raise SourceNotSyncableError(
+            f"No vendor named “{supplier}” in this QuickBooks company. Add it in QuickBooks "
+            "(or fix the supplier name on the run), then sync."
+        )
+    account = await session.scalar(
+        record(RecordType.ACCOUNT).where(FinanceRecord.external_id == account_id)
+    )
+    if account is None:
+        raise RecordNotFoundError
+    return BillTarget(
+        source.id,
+        source.name,
+        vendor.external_id,
+        vendor.reference,
+        account.external_id,
+        " ".join(filter(None, [account.data.get("number"), account.data.get("name")])),
+    )
+
+
+async def create_bill(
+    session: AsyncSession,
+    target: BillTarget,
+    *,
+    doc_number: str,
+    amount: Decimal,
+    note: str,
+) -> dict[str, Any]:
+    """Create the bill unless the vendor already has one with this number (e.g. a retry
+    after a timeout, or entered by hand): then that bill is the receipt and nothing is
+    written. Returns the receipt to keep on the run."""
+    source = await session.get(DataSource, target.source_id, with_for_update=True)
+    if source is None or source.kind != SourceKind.QUICKBOOKS or not source.external_id:
+        raise SourceNotSyncableError("The QuickBooks connection is gone.")
+    app = _app_for(source)
+    try:
+        tokens = await _access_tokens(session, source, app)
+        async with qb.client() as http:
+            api = qb.Api(http, app, source.external_id, tokens.access_token)
+            bill = await api.find_bill(target.vendor_id, doc_number)
+            already = bill is not None
+            if bill is None:
+                bill = await api.create_bill(
+                    vendor_id=target.vendor_id,
+                    account_id=target.account_id,
+                    doc_number=doc_number,
+                    amount=amount,
+                    note=note,
+                )
+    except qb.ReauthorizationRequired as exc:
+        source.status = SourceStatus.NEEDS_REAUTH
+        source.last_error = str(exc)
+        await session.commit()
+        raise
+    return {
+        "system": "quickbooks",
+        "company": source.external_id,
+        "bill_id": str(bill.get("Id", "")),
+        "doc_number": doc_number,
+        "vendor": target.vendor_name,
+        "account": target.account_name,
+        "amount": str(bill.get("TotalAmt", amount)),
+        "sync_token": str(bill.get("SyncToken", "")),
         "already_present": already,
         "updated_at": (bill.get("MetaData") or {}).get("LastUpdatedTime"),
     }

@@ -1,12 +1,14 @@
 import json
 import logging
+from pathlib import Path
 
 import pytest
 from httpx import AsyncClient
 from pydantic import SecretStr
 
+from src.app.core import observability
 from src.app.core.config import get_settings
-from src.app.core.observability import JsonFormatter, request_id
+from src.app.core.observability import HttpCounters, JsonFormatter, request_id
 
 
 async def test_every_response_carries_a_request_id(client: AsyncClient) -> None:
@@ -61,3 +63,28 @@ def test_json_logs_include_the_request_id() -> None:
         request_id.reset(token)
     assert line["request_id"] == "req-42"
     assert line["status"] == 200 and line["level"] == "info" and line["msg"] == "GET / 200"
+
+
+def test_metrics_from_several_processes_are_summed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    other = HttpCounters()  # another server process
+    other.observe("GET", "/api/v1/runs", 200, 0.07)
+    other.observe("GET", "/api/v1/runs", 200, 3.0)
+    (tmp_path / "http-99-abc.json").write_text(json.dumps(other.to_json()))
+    (tmp_path / "http-98-old.json").write_text("{half a file")  # skipped, not fatal
+
+    mine = HttpCounters()
+    mine.observe("GET", "/api/v1/runs", 200, 0.02)
+    monkeypatch.setattr(observability, "_counters", mine)
+    observability.configure_metrics(str(tmp_path))
+    try:
+        body = "\n".join(observability.http_metrics())
+    finally:
+        observability.configure_metrics(None)
+
+    route = 'method="GET",route="/api/v1/runs"'
+    assert f'finance_acc_http_requests_total{{{route},status="200"}} 3' in body
+    assert f'finance_acc_http_request_duration_seconds_bucket{{{route},le="0.1"}} 2' in body
+    assert f"finance_acc_http_request_duration_seconds_count{{{route}}} 3" in body
+    assert (tmp_path / observability._metrics_file).exists()  # this process's own file

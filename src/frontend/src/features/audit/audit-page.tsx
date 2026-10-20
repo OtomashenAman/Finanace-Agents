@@ -36,7 +36,7 @@ function Filters({
 
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-      <div className="space-y-1.5 lg:col-span-2">
+      <div className="space-y-1.5">
         <Label htmlFor="f-category" className="text-xs">
           Category
         </Label>
@@ -57,7 +57,7 @@ function Filters({
         </select>
       </div>
       {admin && (
-        <div className="space-y-1.5 lg:col-span-2">
+        <div className="space-y-1.5">
           <Label htmlFor="f-actor" className="text-xs">
             Done by
           </Label>

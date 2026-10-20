@@ -54,6 +54,10 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-finance}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/${POSTGRES_DB:-finance_acc}
       LOG_FORMAT: json
       WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
+      # The workers' HTTP counters, summed on every /metrics scrape (emptied on restart)
+      METRICS_DIR: /run/finance-acc-metrics
+    tmpfs:
+      - /run/finance-acc-metrics:mode=1777
     depends_on:
       migrate:
         condition: service_completed_successfully

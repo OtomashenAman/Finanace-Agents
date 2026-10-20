@@ -63,6 +63,8 @@ async def get_summary(
             agent_name=row.agent_name,
             reference=row.reference,
             entity_code=row.entity_code,
+            owner=row.owner,
+            exceptions=row.exceptions,
             status=row.status.value,
             status_label=row.status_label,
             priority=row.priority.value,

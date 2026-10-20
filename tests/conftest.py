@@ -54,6 +54,7 @@ from src.app.core.llm.factory import get_llm_provider  # noqa: E402
 from src.app.main import app  # noqa: E402
 
 TABLES = (
+    "password_reset_requests",
     "run_actions",
     "approval_delegations",
     "jobs",

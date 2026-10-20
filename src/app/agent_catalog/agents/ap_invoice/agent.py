@@ -41,6 +41,7 @@ class ApInvoiceAgent(BaseAgent):
     input_schema = ApInvoiceInput
     run_model = ApInvoiceRun
     reference_field = "invoice_number"
+    bill_fields = ("supplier", "invoice_number", "invoice_total")
     policy_version = "ap_invoice/v1"
     controls = (
         "Duplicate supplier/invoice",

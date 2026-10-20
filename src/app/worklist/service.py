@@ -5,6 +5,7 @@ from datetime import timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.agent_catalog.runs import service as runs
+from src.app.auth import service as auth
 from src.app.auth.models import User, UserRole
 from src.app.common.clock import utcnow
 from src.app.core.config import get_settings
@@ -20,6 +21,7 @@ _ORDER = {
     "approve": 0,
     "changes_requested": 1,
     "validation_failed": 2,
+    "password_reset": 3,
     "locked_account": 3,
     "data_source": 4,
     "ready_to_submit": 5,
@@ -126,6 +128,20 @@ async def get_worklist(session: AsyncSession, user: User) -> Worklist:
             )
 
     if admin:
+        for request, requester in await auth.open_reset_requests(session):
+            action.append(
+                WorkItem(
+                    kind="password_reset",
+                    title=requester.full_name,
+                    detail="Forgot their password. Set a new one and share it with them securely.",
+                    context=requester.email,
+                    since=request.created_at,
+                    overdue=False,
+                    high_priority=False,
+                    action_label="Set password",
+                    link="/admin/users",
+                )
+            )
         for locked in await users.locked_users(session):
             action.append(
                 WorkItem(

@@ -12,6 +12,7 @@ import { ApiError } from "@/lib/api"
 
 import { useLogin } from "../hooks"
 import { loginSchema, type LoginFormValues } from "../schema"
+import { ForgotPassword } from "./forgot-password"
 
 function errorMessage(error: unknown): string | null {
   if (!error) return null
@@ -22,6 +23,7 @@ function errorMessage(error: unknown): string | null {
 export function LoginForm() {
   const login = useLogin()
   const [showPassword, setShowPassword] = useState(false)
+  const [forgot, setForgot] = useState(false)
   const {
     register,
     handleSubmit,
@@ -43,6 +45,14 @@ export function LoginForm() {
       },
     }),
   )
+
+  if (forgot) {
+    return (
+      <div className="mt-10">
+        <ForgotPassword onDone={() => setForgot(false)} />
+      </div>
+    )
+  }
 
   const serverError = errorMessage(login.error)
 
@@ -130,9 +140,7 @@ export function LoginForm() {
         <button
           type="button"
           className="underline-offset-4 hover:text-foreground hover:underline"
-          onClick={() =>
-            toast.info("Password reset", { description: "Contact your Finance Admin to reset your password." })
-          }
+          onClick={() => setForgot(true)}
         >
           Forgot password?
         </button>

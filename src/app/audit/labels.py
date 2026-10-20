@@ -36,6 +36,7 @@ FAILURE_EVENTS = frozenset(
         "auth.login_blocked",
         "auth.account_locked",
         "auth.refresh_reuse_detected",
+        "auth.password_change_failed",
         "data_source.authorization_failed",
         "run.validation_failed",
         "run.rejected",
@@ -70,6 +71,12 @@ _TEXT: dict[str, Describe] = {
     "auth.login_blocked": lambda d, s: "Sign-in blocked: account is locked",
     "auth.account_locked": lambda d, s: "Account locked after repeated failed sign-ins",
     "auth.logout": lambda d, s: "Signed out",
+    "auth.password_changed": lambda d, s: "Changed their own password",
+    "auth.password_change_failed": lambda d, s: "Password change refused (wrong current password)",
+    "auth.password_reset_requested": lambda d, s: (
+        "Asked for a password reset"
+        + ("" if d.get("known", True) else f" for unknown {d.get('email')}")
+    ),
     "auth.refresh_reuse_detected": lambda d, s: (
         "A reused session token was detected: that login's sessions were ended"
     ),
@@ -106,7 +113,9 @@ _TEXT: dict[str, Describe] = {
     "run.evidence_exported": lambda d, s: f"Downloaded the evidence pack of {d.get('run')}",
     "run.writeback_requested": lambda d, s: f"Asked to write {d.get('run')} back to QuickBooks",
     "run.writeback_posted": lambda d, s: (
-        f"Noted the approval of {d.get('run')} on QuickBooks bill {d.get('bill_id')}"
+        f"Created QuickBooks bill {d.get('bill_id')} for {d.get('run')}"
+        if d.get("created")
+        else f"Noted the approval of {d.get('run')} on QuickBooks bill {d.get('bill_id')}"
     ),
     "run.writeback_failed": lambda d, s: (
         f"QuickBooks write-back of {d.get('run')} failed: {d.get('error')}"

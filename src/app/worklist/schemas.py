@@ -11,6 +11,7 @@ WorkKind = Literal[
     "draft",
     "data_source",
     "locked_account",
+    "password_reset",
     "waiting",
     "user_data_source",
 ]

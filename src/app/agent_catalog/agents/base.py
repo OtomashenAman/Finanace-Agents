@@ -97,6 +97,9 @@ class BaseAgent:
     policy_schema: ClassVar[type[PolicySettings] | None] = None
     # What approval_amount() returns, for the approval matrix screen (e.g. "Invoice total")
     approval_amount_label: ClassVar[str | None] = None
+    # Input fields (vendor, bill number, amount) to create a QuickBooks bill from an approved
+    # run entered by hand (None: the agent's results aren't bills)
+    bill_fields: ClassVar[tuple[str, str, str] | None] = None
 
     _required: ClassVar[tuple[str, ...]] = (
         "key",

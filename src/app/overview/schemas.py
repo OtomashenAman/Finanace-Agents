@@ -19,6 +19,8 @@ class WorklistItem(BaseModel):
     agent_name: str
     reference: str  # business reference (e.g. INV-2048) or RUN-01048
     entity_code: str | None
+    owner: str  # the preparer
+    exceptions: int  # high and warning findings
     status: str
     status_label: str
     priority: str

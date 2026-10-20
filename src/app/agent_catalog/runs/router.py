@@ -14,6 +14,7 @@ from src.app.agent_catalog.runs.schemas import (
     RunInputUpdate,
     RunSummary,
     SourceLink,
+    WriteBackRequest,
 )
 from src.app.audit.schemas import AuditEventOut
 from src.app.auth.dependencies import CurrentUser
@@ -229,7 +230,10 @@ async def write_back(
     user: CurrentUser,
     ctx: RequestContextDep,
     llm: LLM,
+    body: WriteBackRequest | None = None,
 ) -> RunDetail:
-    """After approval: note the approval on the QuickBooks bill the run came from (preparer
-    only; runs in the background, the receipt shows on the run)."""
-    return await service.write_back(session, user, key, run_id, ctx, llm)
+    """After approval (preparer only): note the approval on the QuickBooks bill the run came
+    from, or, for an invoice entered by hand, create the bill in the QuickBooks company and
+    expense account given in the body. Runs in the background; the receipt shows on the run.
+    Never creates a second bill: if the vendor already has one with that number, it's used."""
+    return await service.write_back(session, user, key, run_id, body, ctx, llm)

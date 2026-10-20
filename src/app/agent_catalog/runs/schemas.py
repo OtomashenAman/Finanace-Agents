@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -125,6 +125,13 @@ class SourceLink(BaseModel):
     record_id: str = Field(min_length=1, max_length=100, description="The record's external_id")
 
 
+class WriteBackRequest(BaseModel):
+    """For "create_bill": which of your QuickBooks companies, and the expense account."""
+
+    source_id: uuid.UUID
+    account_id: str = Field(min_length=1, max_length=100, description="The account's external_id")
+
+
 class RunSourceOut(BaseModel):
     """Frozen copy of the source records the run was prefilled from (what reviewers see)."""
 
@@ -167,8 +174,12 @@ class RunPermissions(BaseModel):
     can_delete: bool
     # Why the viewer can't review a pending run (e.g. own run, already approved), if they can't
     review_blocked_reason: str | None = None
-    # Approved, prefilled from the preparer's QuickBooks bill: stamp the approval on it
+    # Approved and the viewer prepared it: stamp the approval on the QuickBooks bill it was
+    # prefilled from ("note"), or create that bill in one of their QuickBooks companies
     can_write_back: bool = False
+    write_back: Literal["note", "create_bill"] | None = None
+    # Why an approved run can't be written back (e.g. no QuickBooks connected), if it can't
+    write_back_blocked_reason: str | None = None
 
 
 class RunSummary(BaseModel):

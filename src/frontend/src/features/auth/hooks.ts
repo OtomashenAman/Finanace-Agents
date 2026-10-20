@@ -28,6 +28,14 @@ export function useLogin() {
   })
 }
 
+export function useChangePassword() {
+  return useMutation({ mutationFn: authApi.changePassword })
+}
+
+export function useRequestReset() {
+  return useMutation({ mutationFn: authApi.requestReset })
+}
+
 /** Drop all cached data but keep the "me" query (set to null) so mounted route guards see the
  *  change; queryClient.clear() would detach them from the cache. */
 function useSignedOutCache() {

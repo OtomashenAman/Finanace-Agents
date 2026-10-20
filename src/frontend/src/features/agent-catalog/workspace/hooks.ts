@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
-import { runsApi, type FieldValue, type ReviewDecision, type RunDetail } from "./api"
+import { runsApi, type FieldValue, type ReviewDecision, type RunDetail, type WriteBackTarget } from "./api"
 
 /** Cache tag for everything derived from runs (the overview dependsOn it) */
 export const RUNS_TAG = "runs"
@@ -87,7 +87,7 @@ export function useUnlinkSource(key: string, id: string) {
 }
 
 export function useWriteBack(key: string, id: string) {
-  return useRunMutation<void>(key, () => runsApi.writeBack(key, id))
+  return useRunMutation<WriteBackTarget | undefined>(key, (target) => runsApi.writeBack(key, id, target))
 }
 
 export function useEvidencePack(key: string, id: string) {

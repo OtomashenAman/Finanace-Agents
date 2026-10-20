@@ -10,7 +10,13 @@ from sqlalchemy import text
 from src.app.core.config import get_settings
 from src.app.core.db import SessionDep, get_engine
 from src.app.core.errors import register_exception_handlers
-from src.app.core.observability import ObservabilityMiddleware, http_metrics, setup_logging
+from src.app.core.observability import (
+    ObservabilityMiddleware,
+    configure_metrics,
+    flush_metrics,
+    http_metrics,
+    setup_logging,
+)
 from src.app.monitoring.metrics import business_metrics
 from src.app.router import api_router
 
@@ -18,12 +24,14 @@ from src.app.router import api_router
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     yield
+    flush_metrics(force=True)
     await get_engine().dispose()
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
     setup_logging(settings.log_level, settings.log_format)
+    configure_metrics(settings.metrics_dir)
     # API docs only outside production
     docs = not settings.is_production
     app = FastAPI(

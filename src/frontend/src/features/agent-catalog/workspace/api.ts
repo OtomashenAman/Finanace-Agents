@@ -179,7 +179,16 @@ export interface RunDetail extends RunSummary {
     /** Why the viewer can't decide on a pending run (own run, already approved, not an approver) */
     review_blocked_reason: string | null
     can_write_back: boolean
+    /** note: stamp the approval on the QuickBooks bill it came from; create_bill: create it */
+    write_back: "note" | "create_bill" | null
+    write_back_blocked_reason: string | null
   }
+}
+
+/** For create_bill: which of your QuickBooks companies, and the expense account */
+export interface WriteBackTarget {
+  source_id: string
+  account_id: string
 }
 
 const base = (key: string) => `/agents/${encodeURIComponent(key)}`
@@ -219,7 +228,8 @@ export const runsApi = {
       json: { source_id: sourceId, record_id: recordId },
     }),
   unlinkSource: (key: string, id: string) => apiRequest<RunDetail>(`${run(key, id)}/source`, { method: "DELETE" }),
-  writeBack: (key: string, id: string) => apiRequest<RunDetail>(`${run(key, id)}/write-back`, { method: "POST" }),
+  writeBack: (key: string, id: string, target?: WriteBackTarget) =>
+    apiRequest<RunDetail>(`${run(key, id)}/write-back`, { method: "POST", json: target }),
   evidencePack: (key: string, id: string) => apiDownload(`${run(key, id)}/evidence-pack`, "evidence.zip"),
   documentText: (key: string, id: string, documentId: string) =>
     apiRequest<{ id: string; filename: string; extracted_text: string }>(

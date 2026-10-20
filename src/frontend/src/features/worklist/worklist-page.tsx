@@ -7,6 +7,7 @@ import {
   FilePen,
   Hourglass,
   Inbox,
+  KeyRound,
   LoaderCircle,
   Lock,
   Send,
@@ -33,6 +34,7 @@ const ICONS: Record<WorkKind, LucideIcon> = {
   draft: FilePen,
   data_source: Database,
   locked_account: Lock,
+  password_reset: KeyRound,
   waiting: Hourglass,
   user_data_source: Database,
 }
@@ -45,6 +47,7 @@ const KIND_LABELS: Record<WorkKind, string> = {
   draft: "Draft",
   data_source: "Data source",
   locked_account: "Locked account",
+  password_reset: "Password reset",
   waiting: "Waiting",
   user_data_source: "User's data source",
 }

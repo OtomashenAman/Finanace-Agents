@@ -2,6 +2,8 @@ import { Link } from "react-router"
 import { Inbox } from "lucide-react"
 
 import { StatusBadge } from "@/features/agent-catalog/workspace/components/status-badge"
+import { formatDateTime } from "@/features/agent-catalog/workspace/format"
+import { cn } from "@/lib/utils"
 
 import type { WorklistItem } from "../api"
 
@@ -26,28 +28,47 @@ export function WorklistCard({ items }: { items: WorklistItem[] }) {
           </p>
         </div>
       ) : (
-        <ul className="divide-y">
-          {items.map((item) => (
-            <li key={item.run_id}>
-              <Link
-                to={`/catalog/${item.agent_key}/runs/${item.run_id}`}
-                className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-md py-3.5 hover:bg-secondary/40 sm:grid-cols-[1.2fr_1fr_auto]"
-              >
-                <span className="font-semibold text-brand-navy">
-                  {item.agent_name}
-                  {item.priority === "high" && (
-                    <span className="ml-2 align-middle text-xs font-semibold text-red-700">High priority</span>
-                  )}
-                </span>
-                <span className="hidden text-sm text-muted-foreground sm:inline">
-                  {item.reference}
-                  {item.entity_code && <span className="ml-2 font-mono text-xs">{item.entity_code}</span>}
-                </span>
-                <StatusBadge status={item.status} label={item.status_label} className="min-w-36" />
-              </Link>
-            </li>
-          ))}
-        </ul>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[620px] text-sm">
+            <thead>
+              <tr className="border-b text-left text-xs tracking-wide text-muted-foreground uppercase">
+                <th className="py-2 pr-3 font-semibold">Agent</th>
+                <th className="py-2 pr-3 font-semibold">Entity</th>
+                <th className="py-2 pr-3 font-semibold">Owner</th>
+                <th className="py-2 pr-3 font-semibold">Created</th>
+                <th className="py-2 pr-3 text-right font-semibold">Exceptions</th>
+                <th className="py-2 font-semibold">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {items.map((item) => (
+                <tr key={item.run_id} className="hover:bg-secondary/40">
+                  <td className="py-3 pr-3">
+                    <Link
+                      to={`/catalog/${item.agent_key}/runs/${item.run_id}`}
+                      className="font-semibold text-brand-navy hover:underline"
+                    >
+                      {item.agent_name}
+                    </Link>
+                    <span className="block text-xs text-muted-foreground">
+                      {item.reference}
+                      {item.priority === "high" && <span className="ml-2 font-semibold text-red-700">High priority</span>}
+                    </span>
+                  </td>
+                  <td className="py-3 pr-3 font-mono text-xs">{item.entity_code ?? "—"}</td>
+                  <td className="py-3 pr-3">{item.owner}</td>
+                  <td className="py-3 pr-3 whitespace-nowrap text-muted-foreground">{formatDateTime(item.created_at)}</td>
+                  <td className={cn("py-3 pr-3 text-right tabular-nums", item.exceptions > 0 && "font-semibold text-red-800")}>
+                    {item.exceptions}
+                  </td>
+                  <td className="py-3">
+                    <StatusBadge status={item.status} label={item.status_label} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   )

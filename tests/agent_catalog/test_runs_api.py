@@ -193,6 +193,8 @@ async def test_full_flow_input_result_review(
     assert kpis["kpis"]["runs_this_month"] == 1
     assert kpis["worklist"][0]["reference"] == "INV-2048"
     assert kpis["worklist"][0]["status_label"] == "Pending approval"
+    assert kpis["worklist"][0]["owner"] == "Ap Analyst"
+    assert kpis["worklist"][0]["exceptions"] == 3  # receipt mismatch, missing GL, no evidence
 
     # Review
     seen_by_reviewer = (await rev.get(f"{RUNS}/{run['id']}")).json()
