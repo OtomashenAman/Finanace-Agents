@@ -27,6 +27,7 @@ _PREFIXES: dict[str, AuditCategory] = {
     "entity.": AuditCategory.ENTITIES,
     "governance.": AuditCategory.GOVERNANCE,
     "audit.": AuditCategory.AUDIT,
+    "jobs.": AuditCategory.AUDIT,
 }
 
 FAILURE_EVENTS = frozenset(
@@ -38,6 +39,7 @@ FAILURE_EVENTS = frozenset(
         "data_source.authorization_failed",
         "run.validation_failed",
         "run.rejected",
+        "run.writeback_failed",
     }
 )
 
@@ -91,7 +93,9 @@ _TEXT: dict[str, Describe] = {
     "run.analyzed": lambda d, s: f"Analyzed {d.get('run')}",
     "run.submitted": lambda d, s: f"Submitted {d.get('run')} for approval",
     "run.approved": lambda d, s: (
-        f"Approved {d.get('run')}" + (" (own run)" if d.get("self_review") else "")
+        f"Approved {d.get('run')}"
+        + (" (own run)" if d.get("self_review") else "")
+        + (f" on behalf of {d['on_behalf_of']}" if d.get("on_behalf_of") else "")
     ),
     "run.approval_recorded": lambda d, s: (
         f"Approved {d.get('run')} ({d.get('approvals')} approvals, more needed)"
@@ -99,6 +103,14 @@ _TEXT: dict[str, Describe] = {
     "run.rejected": lambda d, s: f"Rejected {d.get('run')}",
     "run.changes_requested": lambda d, s: f"Requested changes on {d.get('run')}",
     "run.deleted": lambda d, s: f"Deleted draft {d.get('run')}",
+    "run.evidence_exported": lambda d, s: f"Downloaded the evidence pack of {d.get('run')}",
+    "run.writeback_requested": lambda d, s: f"Asked to write {d.get('run')} back to QuickBooks",
+    "run.writeback_posted": lambda d, s: (
+        f"Noted the approval of {d.get('run')} on QuickBooks bill {d.get('bill_id')}"
+    ),
+    "run.writeback_failed": lambda d, s: (
+        f"QuickBooks write-back of {d.get('run')} failed: {d.get('error')}"
+    ),
     "data_source.authorization_started": lambda d, s: "Started connecting QuickBooks",
     "data_source.authorized": lambda d, s: "Connected a QuickBooks company",
     "data_source.authorization_failed": lambda d, s: (
@@ -131,10 +143,20 @@ _TEXT: dict[str, Describe] = {
         + ("allowed" if d.get("self_approval") else "turned off (full maker-checker)")
     ),
     "governance.policy_updated": lambda d, s: f"Saved thresholds {d.get('version')}",
+    "governance.delegation_created": lambda d, s: (
+        f"{d.get('delegate')} may approve for {d.get('delegator')} "
+        f"({str(d.get('starts_at', ''))[:10]} to {str(d.get('ends_at', ''))[:10]})"
+    ),
+    "governance.delegation_cancelled": lambda d, s: "Cancelled an approval delegation",
     "governance.approval_matrix_updated": lambda d, s: (
         f"Changed the approval matrix of {d.get('agent')} ({len(d.get('tiers', []))} tiers)"
     ),
     "audit.exported": lambda d, s: f"Exported {d.get('rows')} audit events",
+    "audit.purged": lambda d, s: (
+        f"Retention purge removed {d.get('removed')} events older than "
+        f"{str(d.get('cutoff', ''))[:10]}"
+    ),
+    "jobs.retried": lambda d, s: f"Retried a failed {d.get('kind')} job",
 }
 
 

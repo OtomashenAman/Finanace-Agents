@@ -59,7 +59,18 @@ function query(filters: AuditFilters, cursor?: string | null): string {
   return qs ? `?${qs}` : ""
 }
 
+export interface ChainCheck {
+  checked: number
+  valid: boolean
+  first_broken_seq: number | null
+  last_hash: string | null
+  checked_at: string
+  retention_days: number
+}
+
 export const auditApi = {
+  /** Finance Admin only: recompute the tamper-evident hash chain */
+  integrity: () => apiRequest<ChainCheck>("/audit-events/integrity"),
   list: (filters: AuditFilters, cursor?: string | null) =>
     apiRequest<AuditPage>(`/audit-events${query(filters, cursor)}`),
   /** Finance Admin only */

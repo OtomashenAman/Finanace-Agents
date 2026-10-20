@@ -15,6 +15,7 @@ x-backend: &backend
   environment:
     ENVIRONMENT: production
     DEBUG: "false"
+    LOG_FORMAT: json
     DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-finance}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/${POSTGRES_DB:-finance_acc}
   networks: [internal]
 
@@ -51,7 +52,16 @@ services:
       ENVIRONMENT: production
       DEBUG: "false"
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-finance}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/${POSTGRES_DB:-finance_acc}
+      LOG_FORMAT: json
       WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    <<: *backend
+    restart: always
+    command: ["python", "-m", "src.app.cli.worker"]
     depends_on:
       migrate:
         condition: service_completed_successfully

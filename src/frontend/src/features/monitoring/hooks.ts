@@ -1,6 +1,6 @@
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery } from "@tanstack/react-query"
 
-import { monitoringApi } from "./api"
+import { jobsApi, monitoringApi } from "./api"
 
 export function useAiMonitoring(days: number) {
   return useQuery({
@@ -10,4 +10,17 @@ export function useAiMonitoring(days: number) {
     meta: { dependsOn: ["runs"] },
     refetchInterval: 60_000,
   })
+}
+
+export function useQueue() {
+  return useQuery({
+    queryKey: ["jobs"],
+    queryFn: jobsApi.summary,
+    meta: { dependsOn: ["runs"] },
+    refetchInterval: 10_000,
+  })
+}
+
+export function useRetryJob() {
+  return useMutation({ mutationFn: jobsApi.retry, meta: { invalidates: ["jobs", "runs"] } })
 }

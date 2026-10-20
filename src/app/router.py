@@ -9,6 +9,7 @@ from src.app.data_sources.router import admin_router as data_sources_admin_route
 from src.app.data_sources.router import router as data_sources_router
 from src.app.entities.router import router as entities_router
 from src.app.governance.router import router as governance_router
+from src.app.jobs.router import router as jobs_router
 from src.app.monitoring.router import router as monitoring_router
 from src.app.overview.router import router as overview_router
 from src.app.users.router import router as users_router
@@ -26,6 +27,7 @@ api_router.include_router(data_sources_router)
 api_router.include_router(data_sources_admin_router)
 api_router.include_router(audit_router)
 api_router.include_router(monitoring_router)
+api_router.include_router(jobs_router)
 api_router.include_router(entities_router)
 api_router.include_router(governance_router)
 api_router.include_router(worklist_router)

@@ -1,3 +1,4 @@
+import uuid
 from typing import Any
 
 from fastapi import APIRouter
@@ -10,6 +11,8 @@ from src.app.governance import service
 from src.app.governance.schemas import (
     ApprovalMatrixOut,
     ApprovalMatrixUpdate,
+    DelegationIn,
+    DelegationOut,
     OrgSettingsOut,
     OrgSettingsUpdate,
     PolicyOut,
@@ -70,3 +73,24 @@ async def set_matrix(
 ) -> ApprovalMatrixOut:
     """Replace the agent's amount tiers (runs already submitted keep their tier)."""
     return await service.set_matrix(session, key, body.tiers, admin, ctx)
+
+
+@router.get("/delegations", response_model=list[DelegationOut])
+async def list_delegations(session: SessionDep, _: AdminUser) -> list[DelegationOut]:
+    """Newest first: who may approve on whose behalf, and when."""
+    return await service.list_delegations(session)
+
+
+@router.post("/delegations", response_model=DelegationOut, status_code=201, responses=_ERRORS)
+async def create_delegation(
+    body: DelegationIn, session: SessionDep, ctx: RequestContextDep, admin: AdminUser
+) -> DelegationOut:
+    """Let another Finance Admin approve in your place for a period (at most 90 days)."""
+    return await service.create_delegation(session, body, admin, ctx)
+
+
+@router.post("/delegations/{delegation_id}/cancel", response_model=DelegationOut, responses=_ERRORS)
+async def cancel_delegation(
+    delegation_id: uuid.UUID, session: SessionDep, ctx: RequestContextDep, admin: AdminUser
+) -> DelegationOut:
+    return await service.cancel_delegation(session, delegation_id, admin, ctx)

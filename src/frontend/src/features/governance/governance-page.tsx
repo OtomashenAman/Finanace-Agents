@@ -6,6 +6,7 @@ import { useUsers } from "@/features/admin/hooks"
 import { AdminTabs } from "@/features/admin/components/admin-tabs"
 
 import { ApprovalMatrixCard } from "./components/approval-matrix-card"
+import { DelegationsCard } from "./components/delegations-card"
 import { MakerCheckerCard } from "./components/maker-checker-card"
 import { PolicyCard } from "./components/policy-card"
 import { useMatrices, usePolicies } from "./hooks"
@@ -60,6 +61,8 @@ export function GovernancePage() {
               <ApprovalMatrixCard key={`${m.agent_key}-${JSON.stringify(m.tiers)}`} matrix={m} admins={admins} />
             ))}
         </section>
+
+        {users.data && <DelegationsCard admins={admins} />}
       </div>
     </AppPage>
   )

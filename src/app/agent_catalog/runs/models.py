@@ -78,10 +78,13 @@ class AgentRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         enum_check("status", RunStatus),
         enum_check("priority", RunPriority),
         Index("ix_agent_runs_agent_id_status", "agent_id", "status"),
+        UniqueConstraint("preparer_id", "idempotency_key", name="uq_agent_runs_idempotency_key"),
     )
     __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012 - SQLAlchemy class config
 
     run_number: Mapped[int] = mapped_column(BigInteger, Identity(start=1001), unique=True)
+    # Client-chosen key for "create run": a retried request returns the same run
+    idempotency_key: Mapped[str | None] = mapped_column(String(100))
     agent_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("agents.id", ondelete="RESTRICT"), index=True
     )
@@ -206,6 +209,10 @@ class RunReview(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
         ForeignKey("agent_runs.id", ondelete="CASCADE"), index=True
     )
     reviewer_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+    # Approved as a delegate of this approver (approval matrix + delegation)
+    on_behalf_of_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
     decision: Mapped[ReviewDecision] = mapped_column(string_enum(ReviewDecision, 32))
     comment: Mapped[str] = mapped_column(Text)
     result_hash: Mapped[str] = mapped_column(String(64))  # what exactly was approved
@@ -233,3 +240,33 @@ class RunSourceSnapshot(CreatedAtMixin, Base):
     # {"bill": {...}, "purchase_order": {...}}: the selected record and what it pulled in
     records: Mapped[dict[str, Any]] = mapped_column(JSONB)
     source_synced_at: Mapped[datetime | None]
+
+
+class ActionStatus(StrEnum):
+    QUEUED = "queued"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+class ExternalAction(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """A write to an outside system after approval, with its receipt (one per kind per run).
+
+    Never automatic: a person asks for it, a background job performs it.
+    """
+
+    __tablename__ = "run_actions"
+    __table_args__ = (UniqueConstraint("run_id", "kind"), enum_check("status", ActionStatus))
+    __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012 - SQLAlchemy class config
+
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("agent_runs.id", ondelete="CASCADE"), index=True
+    )
+    kind: Mapped[str] = mapped_column(String(64))  # e.g. "quickbooks.bill_approval_note"
+    status: Mapped[ActionStatus] = mapped_column(string_enum(ActionStatus, 16))
+    requested_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    # What the outside system confirmed (ids, versions, the text written)
+    receipt: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    error: Mapped[str | None] = mapped_column(String(500))
+    completed_at: Mapped[datetime | None]

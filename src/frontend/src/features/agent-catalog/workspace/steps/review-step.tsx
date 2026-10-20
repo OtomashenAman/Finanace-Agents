@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils"
 
 import type { ReviewDecision, RunDetail } from "../api"
 import { Panel } from "../components/panel"
+import { EvidencePackButton, WriteBackPanel } from "../components/run-extras"
 import { SourceSnapshot } from "../components/source-snapshot"
 import { StatusBadge } from "../components/status-badge"
 import { formatDateTime } from "../format"
@@ -208,6 +209,9 @@ export function ReviewStep({ agentKey, run }: { agentKey: string; run: RunDetail
                   <li key={r.id} className="rounded-md border bg-background p-3 text-sm">
                     <p className="font-semibold">
                       {DECISION_LABEL[r.decision]} · {r.reviewer.full_name}
+                      {r.on_behalf_of && (
+                        <span className="font-normal text-muted-foreground"> on behalf of {r.on_behalf_of.full_name}</span>
+                      )}
                     </p>
                     <p className="text-xs text-muted-foreground">{formatDateTime(r.created_at)}</p>
                     <p className="mt-1.5">{r.comment}</p>
@@ -220,7 +224,11 @@ export function ReviewStep({ agentKey, run }: { agentKey: string; run: RunDetail
             </div>
           )}
 
+          <WriteBackPanel agentKey={agentKey} run={run} />
+
           <RunTimeline agentKey={agentKey} runId={run.id} />
+
+          <EvidencePackButton agentKey={agentKey} run={run} />
 
           <p className="text-xs text-muted-foreground">Actor, time, comments and result hash are recorded.</p>
         </div>

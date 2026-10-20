@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     app_name: str = "Finance Agent Command Center"
     environment: Literal["development", "test", "staging", "production"] = "development"
     debug: bool = False
+    log_level: str = "info"
+    log_format: Literal["text", "json"] = "text"  # json: one object per line, for log shippers
+    # Bearer token for GET /metrics. Unset: open outside production, disabled in production
+    metrics_token: SecretStr | None = None
 
     database_url: str
     secret_key: SecretStr
@@ -51,12 +55,21 @@ class Settings(BaseSettings):
     data_sync_timeout_seconds: float = 30
     upload_max_rows: int = 20_000
 
+    # Background jobs: "queue" = a worker process runs them (python -m src.app.cli.worker);
+    # "inline" = run inside the request that queued them (tests, single-process setups)
+    jobs_mode: Literal["queue", "inline"] = "queue"
+    jobs_poll_seconds: float = 1.0
+    jobs_lock_timeout_seconds: int = 600  # a running job older than this is retried
+
+    # Audit trail: events older than this are removed by `python -m src.app.cli.audit purge`
+    audit_retention_days: int = 7 * 365
+
     # Demo seed user (uv run poe seed)
     demo_admin_email: str = "finance.admin@example.com"
     demo_admin_name: str = "Finance Admin"
     demo_admin_password: SecretStr | None = None
 
-    @field_validator("data_encryption_key", mode="before")
+    @field_validator("data_encryption_key", "metrics_token", mode="before")
     @classmethod
     def _blank_is_unset(cls, value: object) -> object:
         return None if value == "" else value

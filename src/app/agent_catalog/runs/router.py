@@ -1,7 +1,7 @@
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Response, UploadFile, status
+from fastapi import APIRouter, Depends, Header, Response, UploadFile, status
 
 from src.app.agent_catalog.runs import service
 from src.app.agent_catalog.runs.exceptions import DocumentTooLargeError
@@ -53,10 +53,20 @@ async def create_run(
     session: SessionDep,
     user: CurrentUser,
     ctx: RequestContextDep,
+    response: Response,
     body: RunCreate | None = None,
+    idempotency_key: Annotated[str | None, Header(max_length=100)] = None,
 ) -> RunDetail:
-    """Start a new draft run for a legal entity you work for (preparer only)."""
-    return await service.create_run(session, user, key, body or RunCreate(), ctx)
+    """Start a new draft run for a legal entity you work for (preparer only).
+
+    Send an Idempotency-Key header to make retries safe: the same key returns the same run
+    (200 instead of 201)."""
+    run, created = await service.create_run(
+        session, user, key, body or RunCreate(), ctx, idempotency_key
+    )
+    if not created:
+        response.status_code = status.HTTP_200_OK
+    return run
 
 
 @router.get("/runs/{run_id}", response_model=RunDetail, responses=_ERRORS)
@@ -192,3 +202,34 @@ async def get_timeline(
 ) -> list[AuditEventOut]:
     """Who did what on this run, oldest first (from the audit trail)."""
     return await service.get_timeline(session, user, key, run_id)
+
+
+@router.get(
+    "/runs/{run_id}/evidence-pack",
+    response_class=Response,
+    responses={200: {"content": {"application/zip": {}}}, **_ERRORS},
+)
+async def evidence_pack(
+    key: str, run_id: uuid.UUID, session: SessionDep, user: CurrentUser, ctx: RequestContextDep
+) -> Response:
+    """Everything about the run in one ZIP, with a manifest of SHA-256 hashes (audited)."""
+    data, filename = await service.evidence_pack(session, user, key, run_id, ctx)
+    return Response(
+        data,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/runs/{run_id}/write-back", response_model=RunDetail, responses=_ERRORS)
+async def write_back(
+    key: str,
+    run_id: uuid.UUID,
+    session: SessionDep,
+    user: CurrentUser,
+    ctx: RequestContextDep,
+    llm: LLM,
+) -> RunDetail:
+    """After approval: note the approval on the QuickBooks bill the run came from (preparer
+    only; runs in the background, the receipt shows on the run)."""
+    return await service.write_back(session, user, key, run_id, ctx, llm)

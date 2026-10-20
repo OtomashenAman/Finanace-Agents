@@ -1,6 +1,6 @@
 import { Fragment, useState } from "react"
 import { Link } from "react-router"
-import { ChevronDown, ChevronRight, Download, Inbox, LoaderCircle } from "lucide-react"
+import { ChevronDown, ChevronRight, Download, Inbox, LoaderCircle, ShieldAlert, ShieldCheck } from "lucide-react"
 import { toast } from "sonner"
 
 import { AppPage } from "@/components/layout/app-page"
@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils"
 
 import { CATEGORY_LABELS, type AuditCategory, type AuditFilters } from "./api"
 import { EventDetails } from "./components/event-details"
-import { useAuditEvents, useExportAudit } from "./hooks"
+import { useAuditEvents, useAuditIntegrity, useExportAudit } from "./hooks"
 
 const FIELD =
   "flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/20 focus-visible:outline-none"
@@ -133,6 +133,7 @@ export function AuditPage() {
   const [open, setOpen] = useState<string | null>(null)
   const events = useAuditEvents(filters)
   const exportCsv = useExportAudit()
+  const integrity = useAuditIntegrity(admin)
   const rows = events.data?.pages.flatMap((p) => p.items) ?? []
 
   const onExport = () =>
@@ -150,6 +151,29 @@ export function AuditPage() {
           : "Your own activity, changes made to your account and everything that happened on your runs."
       }
     >
+      {admin && integrity.data && (
+        <div
+          className={cn(
+            "mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md border px-4 py-3 text-sm",
+            integrity.data.valid ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-red-200 bg-red-50 text-red-900",
+          )}
+          role="status"
+        >
+          <span className="flex items-center gap-2">
+            {integrity.data.valid ? <ShieldCheck className="size-4" aria-hidden /> : <ShieldAlert className="size-4" aria-hidden />}
+            {integrity.data.valid
+              ? `Tamper check passed: all ${integrity.data.checked.toLocaleString()} events chain correctly.`
+              : `Tamper check FAILED at event #${integrity.data.first_broken_seq}: the trail was changed outside the app.`}
+            <span className="text-xs opacity-75">
+              Kept {Math.round(integrity.data.retention_days / 365)} years · checked {formatDateTime(integrity.data.checked_at)}
+            </span>
+          </span>
+          <Button type="button" size="sm" variant="outline" onClick={() => void integrity.refetch()} disabled={integrity.isFetching}>
+            {integrity.isFetching && <LoaderCircle className="animate-spin" aria-hidden />}
+            Verify again
+          </Button>
+        </div>
+      )}
       <section className="space-y-5 rounded-lg border bg-card p-5 sm:p-6">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div className="min-w-0 flex-1">

@@ -188,7 +188,7 @@ export function InputStep({ agentKey, run, form }: InputStepProps) {
               </Button>
               {analyze.isPending && (
                 <p className="mt-2 text-center text-xs text-muted-foreground">
-                  Running checks and drafting the AI explanation. This can take a few seconds.
+                  Running the checks. The AI explanation is drafted in the background right after.
                 </p>
               )}
             </div>

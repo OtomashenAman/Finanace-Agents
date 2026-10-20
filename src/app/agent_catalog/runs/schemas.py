@@ -105,6 +105,7 @@ class NarrativeOut(BaseModel):
 class ReviewOut(BaseModel):
     id: uuid.UUID
     reviewer: Person
+    on_behalf_of: Person | None  # set when given as a delegate of a named approver
     decision: ReviewDecision
     comment: str
     result_hash: str
@@ -148,6 +149,16 @@ class RunApproval(BaseModel):
     approved_by: list[Person]
 
 
+class RunActionOut(BaseModel):
+    kind: str
+    label: str
+    status: str  # queued | succeeded | failed
+    receipt: dict[str, Any] | None
+    error: str | None
+    created_at: datetime
+    completed_at: datetime | None
+
+
 class RunPermissions(BaseModel):
     can_edit: bool
     can_analyze: bool
@@ -156,6 +167,8 @@ class RunPermissions(BaseModel):
     can_delete: bool
     # Why the viewer can't review a pending run (e.g. own run, already approved), if they can't
     review_blocked_reason: str | None = None
+    # Approved, prefilled from the preparer's QuickBooks bill: stamp the approval on it
+    can_write_back: bool = False
 
 
 class RunSummary(BaseModel):
@@ -187,6 +200,8 @@ class RunDetail(RunSummary):
     reviewer_label: str
     documents: list[DocumentOut]
     narrative: NarrativeOut | None
+    narrative_pending: bool  # the AI explanation is queued or being drafted (poll the run)
+    actions: list[RunActionOut]  # write-backs to outside systems, with receipts
     reviews: list[ReviewOut]
     source: RunSourceOut | None
     result_hash: str | None

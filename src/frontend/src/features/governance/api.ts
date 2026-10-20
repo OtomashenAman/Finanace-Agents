@@ -41,6 +41,26 @@ export interface ApprovalTierIn {
   approver_ids: string[]
 }
 
+export interface Delegation {
+  id: string
+  delegator: { id: string; full_name: string }
+  delegate: { id: string; full_name: string }
+  starts_at: string
+  ends_at: string
+  reason: string | null
+  active: boolean
+  cancelled_at: string | null
+  created_at: string
+}
+
+export interface DelegationIn {
+  delegate_id: string
+  starts_at: string
+  ends_at: string
+  reason?: string
+  delegator_id?: string
+}
+
 const GOV = "/admin/governance"
 
 export const governanceApi = {
@@ -52,6 +72,10 @@ export const governanceApi = {
   savePolicy: ({ key, values, note }: { key: string; values: Record<string, string | null>; note?: string }) =>
     apiRequest<Policy>(`${GOV}/policies/${encodeURIComponent(key)}`, { method: "PUT", json: { values, note } }),
   matrices: () => apiRequest<ApprovalMatrix[]>(`${GOV}/approval-matrix`),
+  delegations: () => apiRequest<Delegation[]>(`${GOV}/delegations`),
+  createDelegation: (body: DelegationIn) => apiRequest<Delegation>(`${GOV}/delegations`, { method: "POST", json: body }),
+  cancelDelegation: (id: string) =>
+    apiRequest<Delegation>(`${GOV}/delegations/${encodeURIComponent(id)}/cancel`, { method: "POST" }),
   saveMatrix: ({ key, tiers }: { key: string; tiers: ApprovalTierIn[] }) =>
     apiRequest<ApprovalMatrix>(`${GOV}/approval-matrix/${encodeURIComponent(key)}`, { method: "PUT", json: { tiers } }),
 }

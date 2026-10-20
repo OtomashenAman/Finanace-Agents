@@ -1,15 +1,17 @@
 import uuid
+from dataclasses import asdict
 from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response
 
-from src.app.audit import service
+from src.app.audit import integrity, service
 from src.app.audit.labels import AuditCategory
-from src.app.audit.schemas import AuditPage
+from src.app.audit.schemas import AuditPage, ChainCheckOut
 from src.app.auth.dependencies import AdminUser, CurrentUser
 from src.app.common.clock import utcnow
 from src.app.common.context import RequestContextDep
+from src.app.core.config import get_settings
 from src.app.core.db import SessionDep
 
 # Read-only: the trail has no update or delete endpoints, for anyone
@@ -51,3 +53,10 @@ async def export_csv(
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get("/integrity", response_model=ChainCheckOut)
+async def verify_integrity(session: SessionDep, _: AdminUser) -> ChainCheckOut:
+    """Recompute the tamper-evident hash chain over every event (Finance Admin only)."""
+    check = await integrity.verify(session)
+    return ChainCheckOut(**asdict(check), retention_days=get_settings().audit_retention_days)

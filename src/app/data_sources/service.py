@@ -10,6 +10,7 @@ import secrets
 import uuid
 from datetime import timedelta
 from pathlib import PurePath
+from typing import Any
 
 import jwt
 from sqlalchemy import delete, func, select
@@ -668,3 +669,45 @@ async def owned_record(
     if row is None:
         raise RecordNotFoundError
     return source, to_record(row)
+
+
+# --- write-back (after approval) --------------------------------------------------------
+
+
+async def stamp_bill(
+    session: AsyncSession, source_id: uuid.UUID, bill_id: str, marker: str, line: str
+) -> dict[str, Any]:
+    """Append `line` to a QuickBooks bill's private note unless `marker` is already there.
+
+    Only the note changes (sparse update). Returns the receipt to keep on the run.
+    """
+    source = await session.get(DataSource, source_id, with_for_update=True)
+    if source is None or source.kind != SourceKind.QUICKBOOKS or not source.external_id:
+        raise SourceNotSyncableError("The QuickBooks connection is gone.")
+    app = _app_for(source)
+    try:
+        tokens = await _access_tokens(session, source, app)
+        async with qb.client() as http:
+            api = qb.Api(http, app, source.external_id, tokens.access_token)
+            bill = await api.get_bill(bill_id)
+            if not bill:
+                raise qb.QuickBooksError(f"Bill {bill_id} no longer exists in QuickBooks.")
+            note = str(bill.get("PrivateNote") or "")
+            already = marker in note
+            if not already:
+                note = f"{note}\n{line}".strip()[:4000]
+                bill = await api.set_bill_note(bill_id, str(bill["SyncToken"]), note)
+    except qb.ReauthorizationRequired as exc:
+        source.status = SourceStatus.NEEDS_REAUTH
+        source.last_error = str(exc)
+        await session.commit()
+        raise
+    return {
+        "system": "quickbooks",
+        "company": source.external_id,
+        "bill_id": bill_id,
+        "sync_token": str(bill.get("SyncToken", "")),
+        "note_line": line,
+        "already_present": already,
+        "updated_at": (bill.get("MetaData") or {}).get("LastUpdatedTime"),
+    }

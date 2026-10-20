@@ -33,6 +33,9 @@ class FakeIntuit:
         self.issued = 0
         self.revoked: list[str] = []
         self.refresh_rejected = False
+        self.note = "Entered by AP"
+        self.sync_token = 3
+        self.updates = 0
         self.vendors: list[dict[str, Any]] = [
             {"Id": "56", "DisplayName": "Acme Cloud Services", "Active": True},
             {"Id": "57", "DisplayName": "Old Supplier", "Active": False},
@@ -63,6 +66,44 @@ class FakeIntuit:
         if url == qb.REVOKE_URL:
             self.revoked.append(json.loads(request.content)["token"])
             return httpx.Response(200)
+        if "/bill/" in url and request.method == "GET":
+            bill_id = url.split("/bill/")[1].split("?")[0]
+            if bill_id != "145":
+                return httpx.Response(200, json={})
+            return httpx.Response(
+                200,
+                json={
+                    "Bill": {
+                        "Id": "145",
+                        "SyncToken": str(self.sync_token),
+                        "PrivateNote": self.note,
+                    }
+                },
+            )
+        if url.split("?")[0].endswith("/bill") and request.method == "POST":
+            body = json.loads(request.content)
+            assert body["sparse"] is True and set(body) == {
+                "Id",
+                "SyncToken",
+                "sparse",
+                "PrivateNote",
+            }
+            if body["SyncToken"] != str(self.sync_token):
+                return httpx.Response(400, json={"Fault": "stale"})
+            self.note = body["PrivateNote"]
+            self.sync_token += 1
+            self.updates += 1
+            return httpx.Response(
+                200,
+                json={
+                    "Bill": {
+                        "Id": "145",
+                        "SyncToken": str(self.sync_token),
+                        "PrivateNote": self.note,
+                        "MetaData": {"LastUpdatedTime": "2026-10-20T10:00:00-07:00"},
+                    }
+                },
+            )
         if "/companyinfo/" in url:
             return httpx.Response(200, json={"CompanyInfo": {"CompanyName": "Acme Holdings Ltd"}})
         if "/query" in url:
@@ -523,3 +564,83 @@ async def test_cannot_prefill_from_someone_elses_source(
     )
     assert r.status_code == 404
     assert (await db.get(DataSource, source_id)).status == SourceStatus.CONNECTED  # type: ignore[union-attr]
+
+
+# --- write-back after approval ----------------------------------------------------------
+
+
+async def approved_from_quickbooks(client: AsyncClient, admin: AsyncClient) -> dict[str, Any]:
+    source_id = (await connect(client))["source"][0]
+    run = (await client.post(RUNS)).json()
+    run = (
+        await client.put(
+            f"{RUNS}/{run['id']}/source", json={"source_id": source_id, "record_id": "145"}
+        )
+    ).json()
+    values = {**run["input"], "received_amount": "12500.00"}
+    await client.put(f"{RUNS}/{run['id']}/input", json={"values": values})
+    await client.post(f"{RUNS}/{run['id']}/analyze")
+    await client.post(f"{RUNS}/{run['id']}/submit")
+    r = await admin.post(
+        f"{RUNS}/{run['id']}/reviews", json={"decision": "approved", "comment": "Checked it"}
+    )
+    assert r.json()["status"] == "approved", r.text
+    result: dict[str, Any] = r.json()
+    return result
+
+
+async def test_preparer_writes_the_approval_back_once(
+    me: AsyncClient,
+    intuit: FakeIntuit,
+    make_user: MakeUser,
+    signed_in_client: ClientFactory,
+    fake_llm: FakeLLM,
+) -> None:
+    admin = await signed_in_client(await make_user("admin@example.com", UserRole.FINANCE_ADMIN))
+    run = await approved_from_quickbooks(me, admin)
+    assert run["permissions"]["can_write_back"] is False  # the admin's view
+    mine = (await me.get(f"{RUNS}/{run['id']}")).json()
+    assert mine["permissions"]["can_write_back"] is True
+
+    assert (await admin.post(f"{RUNS}/{run['id']}/write-back")).status_code == 403
+    done = (await me.post(f"{RUNS}/{run['id']}/write-back")).json()
+    [action] = done["actions"]
+    assert action["status"] == "succeeded"
+    assert action["receipt"]["bill_id"] == "145"
+    assert action["receipt"]["sync_token"] == "4"
+    assert intuit.note.startswith("Entered by AP\n[FinanceACC] ")
+    assert f"{run['reference']} approved by Admin" in intuit.note
+    assert done["permissions"]["can_write_back"] is False
+
+    again = await me.post(f"{RUNS}/{run['id']}/write-back")
+    assert again.status_code == 403 and intuit.updates == 1
+
+    summaries = {e["summary"] for e in (await admin.get("/api/v1/audit-events")).json()["items"]}
+    assert f"Noted the approval of {run['reference']} on QuickBooks bill 145" in summaries
+
+
+async def test_write_back_is_not_offered_before_approval_or_without_quickbooks(
+    me: AsyncClient,
+    intuit: FakeIntuit,
+    fake_llm: FakeLLM,
+) -> None:
+    run = (await me.post(RUNS)).json()
+    assert run["permissions"]["can_write_back"] is False
+    r = await me.post(f"{RUNS}/{run['id']}/write-back")
+    assert r.status_code == 403
+    assert "approved" in r.json()["detail"]["message"]
+
+
+async def test_a_note_already_there_is_not_written_twice(
+    me: AsyncClient,
+    intuit: FakeIntuit,
+    make_user: MakeUser,
+    signed_in_client: ClientFactory,
+    fake_llm: FakeLLM,
+) -> None:
+    admin = await signed_in_client(await make_user("admin@example.com", UserRole.FINANCE_ADMIN))
+    run = await approved_from_quickbooks(me, admin)
+    intuit.note = f"[FinanceACC] {run['reference']} approved earlier"
+    done = (await me.post(f"{RUNS}/{run['id']}/write-back")).json()
+    assert done["actions"][0]["receipt"]["already_present"] is True
+    assert intuit.updates == 0

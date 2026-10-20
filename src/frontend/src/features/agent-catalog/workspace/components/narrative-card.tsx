@@ -1,4 +1,4 @@
-import { Sparkles, TriangleAlert } from "lucide-react"
+import { Sparkles, TriangleAlert, LoaderCircle } from "lucide-react"
 
 import type { FormField, Narrative, RunDocument } from "../api"
 
@@ -17,13 +17,14 @@ function List({ title, items }: { title: string; items: string[] }) {
 }
 
 interface NarrativeCardProps {
+  pending?: boolean
   narrative: Narrative | null
   fields: FormField[]
   documents: RunDocument[]
 }
 
 /** The LLM's explanation, clearly labelled as AI-drafted and with its guard-check results. */
-export function NarrativeCard({ narrative, fields, documents }: NarrativeCardProps) {
+export function NarrativeCard({ narrative, fields, documents, pending }: NarrativeCardProps) {
   return (
     <section aria-labelledby="ai-explanation" className="rounded-lg border border-primary/20 bg-primary/[0.03] p-4 sm:p-5">
       <h3 id="ai-explanation" className="flex items-center gap-2 font-semibold text-primary">
@@ -31,7 +32,12 @@ export function NarrativeCard({ narrative, fields, documents }: NarrativeCardPro
         AI-generated explanation
       </h3>
 
-      {!narrative || narrative.status === "not_configured" ? (
+      {pending ? (
+        <p className="mt-2 flex items-center gap-2 text-sm text-muted-foreground" role="status">
+          <LoaderCircle className="size-4 animate-spin" aria-hidden />
+          Drafting the explanation from the validated results. This page updates by itself.
+        </p>
+      ) : !narrative || narrative.status === "not_configured" ? (
         <p className="mt-2 text-sm text-muted-foreground">
           AI explanations are turned off (no LLM is configured). The calculations and findings are complete.
         </p>

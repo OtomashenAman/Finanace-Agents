@@ -28,6 +28,7 @@ os.environ["DATABASE_URL"] = _test_url.render_as_string(hide_password=False)
 os.environ["ENVIRONMENT"] = "test"
 os.environ["COOKIE_SECURE"] = "false"
 os.environ["LLM_PROVIDER"] = "none"  # tests never call a real LLM; use the fake_llm fixture
+os.environ["JOBS_MODE"] = "inline"  # background jobs run inside the request (see tests/jobs)
 get_settings.cache_clear()
 
 
@@ -53,6 +54,9 @@ from src.app.core.llm.factory import get_llm_provider  # noqa: E402
 from src.app.main import app  # noqa: E402
 
 TABLES = (
+    "run_actions",
+    "approval_delegations",
+    "jobs",
     "org_settings",
     "agent_policies",
     "approval_rules",
@@ -79,6 +83,8 @@ DEFAULT_PASSWORD = "Correct-Horse-Battery-1"
 @pytest.fixture(autouse=True)
 async def _clean_db() -> None:
     async with get_sessionmaker()() as session:
+        # audit_events is append-only (database trigger); the purge setting lets tests reset it
+        await session.execute(text("SET LOCAL finance_acc.audit_purge = 'on'"))
         await session.execute(text(f"TRUNCATE {', '.join(TABLES)} CASCADE"))
         await session.commit()
 

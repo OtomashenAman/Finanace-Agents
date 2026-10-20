@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils"
 
 import type { LlmBreakdown, LlmCall, LlmStatus } from "./api"
 import { DailyCallsChart } from "./components/daily-calls-chart"
+import { QueuePanel } from "./components/queue-panel"
 import { useAiMonitoring } from "./hooks"
 
 const RANGES = [7, 30, 90] as const
@@ -131,11 +132,13 @@ export function AiMonitoringPage() {
 
   return (
     <AppPage
-      title="Admin Settings · AI monitoring"
-      subtitle="Every AI explanation call made while analyzing runs. Calculations and decisions never depend on the model."
+      title="Admin Settings · Monitoring"
+      subtitle="Background jobs and every AI explanation call. Calculations and decisions never depend on the model."
     >
       <AdminTabs />
       <div className="space-y-6">
+        <QueuePanel />
+        <h2 className="pt-2 text-lg font-semibold text-brand-navy">AI calls</h2>
         <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Period">
           {RANGES.map((r) => (
             <button

@@ -64,3 +64,33 @@ export interface LlmSummary {
 export const monitoringApi = {
   summary: (days: number) => apiRequest<LlmSummary>(`/admin/ai-monitoring?days=${days}`),
 }
+
+export interface QueueJob {
+  id: string
+  kind: string
+  status: "queued" | "running" | "succeeded" | "failed"
+  attempts: number
+  max_attempts: number
+  last_error: string | null
+  created_at: string
+  run_after: string
+  finished_at: string | null
+  run_reference: string | null
+  run_link: string | null
+}
+
+export interface QueueSummary {
+  queued: number
+  running: number
+  failed: number
+  succeeded_24h: number
+  oldest_queued_seconds: number | null
+  by_kind: { kind: string; queued: number; running: number; succeeded: number; failed: number }[]
+  failures: QueueJob[]
+  retrying: QueueJob[]
+}
+
+export const jobsApi = {
+  summary: () => apiRequest<QueueSummary>("/admin/jobs"),
+  retry: (id: string) => apiRequest<QueueJob>(`/admin/jobs/${encodeURIComponent(id)}/retry`, { method: "POST" }),
+}

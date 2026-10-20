@@ -31,3 +31,7 @@ export function useRunTimeline(agentKey: string, runId: string) {
 export function useExportAudit() {
   return useMutation({ mutationFn: auditApi.exportCsv, meta: { invalidates: ["audit"] } })
 }
+
+export function useAuditIntegrity(enabled: boolean) {
+  return useQuery({ queryKey: ["audit", "integrity"], queryFn: auditApi.integrity, enabled })
+}

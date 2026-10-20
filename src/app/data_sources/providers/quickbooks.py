@@ -179,6 +179,33 @@ class Api:
         result: dict[str, Any] = resp.json()
         return result
 
+    async def _post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+        try:
+            resp = await self._client.post(
+                f"{self._base}/{path}",
+                params={"minorversion": MINOR_VERSION},
+                headers={**self._headers, "Content-Type": "application/json"},
+                json=body,
+            )
+        except httpx.HTTPError as exc:
+            raise QuickBooksError("Couldn't reach QuickBooks. Try again in a moment.") from exc
+        if resp.status_code in (401, 403):
+            raise ReauthorizationRequired("QuickBooks no longer accepts this connection.")
+        if resp.is_error:
+            raise QuickBooksError(f"QuickBooks rejected the update ({resp.status_code}).")
+        result: dict[str, Any] = resp.json()
+        return result
+
+    async def get_bill(self, bill_id: str) -> dict[str, Any]:
+        bill: dict[str, Any] = (await self._get(f"bill/{bill_id}")).get("Bill", {})
+        return bill
+
+    async def set_bill_note(self, bill_id: str, sync_token: str, note: str) -> dict[str, Any]:
+        """Sparse update: only the private note changes (amounts, lines, accounts untouched)."""
+        body = {"Id": bill_id, "SyncToken": sync_token, "sparse": True, "PrivateNote": note}
+        bill: dict[str, Any] = (await self._post("bill", body)).get("Bill", {})
+        return bill
+
     async def company_name(self, realm_id: str) -> str | None:
         body = await self._get(f"companyinfo/{realm_id}")
         name = body.get("CompanyInfo", {}).get("CompanyName")

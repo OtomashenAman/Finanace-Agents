@@ -52,6 +52,28 @@ services:
       db:
         condition: service_healthy
 
+  # Background jobs (AI explanations, QuickBooks write-back). Restarts on code changes.
+  worker:
+    build:
+      context: .
+      dockerfile: src/Dockerfile
+      target: dev
+    restart: unless-stopped
+    command: ["watchfiles", "--filter", "python", "python -m src.app.cli.worker", "src/app"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      ENVIRONMENT: development
+      WATCHFILES_FORCE_POLLING: ${DOCKER_FILE_POLLING:-false}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-finance}:${POSTGRES_PASSWORD:-finance}@db:5432/${POSTGRES_DB:-finance_acc}
+    volumes:
+      - ./src:/app/src
+      - ./pyproject.toml:/app/pyproject.toml
+    depends_on:
+      db:
+        condition: service_healthy
+
   frontend:
     build:
       context: ./src/frontend

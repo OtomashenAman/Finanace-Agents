@@ -1,5 +1,5 @@
 import type { EntityRef } from "@/features/entities/api"
-import { apiRequest } from "@/lib/api"
+import { apiDownload, apiRequest } from "@/lib/api"
 
 export type RunStatus =
   | "draft"
@@ -107,6 +107,8 @@ export interface Narrative {
 export interface Review {
   id: string
   reviewer: Person
+  /** Given as a delegate of this named approver */
+  on_behalf_of: Person | null
   decision: ReviewDecision
   comment: string
   result_hash: string
@@ -123,6 +125,17 @@ export interface RunSource {
   records: Record<string, Record<string, unknown>>
   source_synced_at: string | null
   captured_at: string
+}
+
+/** A write to an outside system after approval, with its receipt */
+export interface RunExternalAction {
+  kind: string
+  label: string
+  status: "queued" | "succeeded" | "failed"
+  receipt: Record<string, unknown> | null
+  error: string | null
+  created_at: string
+  completed_at: string | null
 }
 
 /** Routing fixed on submit by the approval matrix, and progress in this round */
@@ -148,6 +161,9 @@ export interface RunDetail extends RunSummary {
   reviewer_label: string
   documents: RunDocument[]
   narrative: Narrative | null
+  /** The AI explanation is queued or being drafted: poll until it's false */
+  narrative_pending: boolean
+  actions: RunExternalAction[]
   reviews: Review[]
   source: RunSource | null
   result_hash: string | null
@@ -162,6 +178,7 @@ export interface RunDetail extends RunSummary {
     can_delete: boolean
     /** Why the viewer can't decide on a pending run (own run, already approved, not an approver) */
     review_blocked_reason: string | null
+    can_write_back: boolean
   }
 }
 
@@ -175,7 +192,13 @@ export const runsApi = {
   get: (key: string, id: string) => apiRequest<RunDetail>(run(key, id)),
   /** entityId may be omitted when the user works for exactly one legal entity */
   create: (key: string, entityId?: string | null) =>
-    apiRequest<RunDetail>(`${base(key)}/runs`, { method: "POST", json: { entity_id: entityId ?? null } }),
+    apiRequest<RunDetail>(`${base(key)}/runs`, {
+      method: "POST",
+      json: { entity_id: entityId ?? null },
+      // One key per click: if the request is retried (e.g. after a token refresh) the
+      // server returns the run it already created instead of a second one
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+    }),
   saveInput: (key: string, id: string, values: Record<string, FieldValue>) =>
     apiRequest<RunDetail>(`${run(key, id)}/input`, { method: "PUT", json: { values } }),
   remove: (key: string, id: string) => apiRequest<void>(run(key, id), { method: "DELETE" }),
@@ -196,6 +219,8 @@ export const runsApi = {
       json: { source_id: sourceId, record_id: recordId },
     }),
   unlinkSource: (key: string, id: string) => apiRequest<RunDetail>(`${run(key, id)}/source`, { method: "DELETE" }),
+  writeBack: (key: string, id: string) => apiRequest<RunDetail>(`${run(key, id)}/write-back`, { method: "POST" }),
+  evidencePack: (key: string, id: string) => apiDownload(`${run(key, id)}/evidence-pack`, "evidence.zip"),
   documentText: (key: string, id: string, documentId: string) =>
     apiRequest<{ id: string; filename: string; extracted_text: string }>(
       `${run(key, id)}/documents/${encodeURIComponent(documentId)}`,

@@ -65,3 +65,24 @@ class ApprovalMatrixOut(BaseModel):
 
 class ApprovalMatrixUpdate(BaseModel):
     tiers: list[ApprovalTierIn] = Field(max_length=10)
+
+
+class DelegationIn(BaseModel):
+    delegate_id: uuid.UUID
+    starts_at: datetime
+    ends_at: datetime
+    reason: str | None = Field(default=None, max_length=300)
+    # Another admin's approvals (e.g. set up for a colleague on sudden leave); default: yours
+    delegator_id: uuid.UUID | None = None
+
+
+class DelegationOut(BaseModel):
+    id: uuid.UUID
+    delegator: Approver
+    delegate: Approver
+    starts_at: datetime
+    ends_at: datetime
+    reason: str | None
+    active: bool  # in its period and not cancelled
+    cancelled_at: datetime | None
+    created_at: datetime

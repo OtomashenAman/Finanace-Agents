@@ -115,6 +115,27 @@ folder gets an `input_schema`, `run_model` and `analyze()` (see `agents/ap_invoi
   data sources, and for admins locked accounts), what waits on others, and for admins users'
   connection problems. The sidebar shows the count.
 - Overview filters: period, legal entity, agent and priority.
+- Background jobs: a Postgres queue (`jobs`, claimed with `FOR UPDATE SKIP LOCKED`) run by the
+  `worker` service (`python -m src.app.cli.worker`). Jobs are idempotent (`dedupe_key`), retried
+  with backoff and marked failed after their last attempt; admins see and retry them under
+  Admin Settings → Monitoring. The AI explanation is drafted this way (the run shows
+  `narrative_pending` until it's ready; submitting waits for it). `JOBS_MODE=inline` runs jobs
+  inside the request instead (tests). `POST .../runs` accepts an `Idempotency-Key` header.
+- Delegated approvers (Governance): an admin lets another approve in their place for a period;
+  reviews record `on_behalf_of`, and one person never counts twice in a multi-approval round.
+- Evidence pack: `GET .../runs/{id}/evidence-pack` is a ZIP with the run, documents' text, the
+  data source snapshot, the audit timeline and a SHA-256 manifest (the export is audited).
+- QuickBooks write-back: after approval the preparer can note the approval on the QuickBooks
+  bill the run came from (`POST .../runs/{id}/write-back`, a background job; only the bill's
+  private note changes). The receipt is kept on the run (`run_actions`).
+- Audit integrity: database triggers make `audit_events` append-only and chain every event to
+  the previous one by SHA-256. `python -m src.app.cli.audit verify` (or Audit Trail as an admin)
+  recomputes the chain; `... audit purge` removes events past `AUDIT_RETENTION_DAYS` and records
+  the purge.
+- Observability: `X-Request-ID` on every response and log line, `LOG_FORMAT=json` for log
+  shippers, `/ready` (database) next to `/health`, and `/metrics` for Prometheus (HTTP counters
+  plus queue, AI, approval, account and data source gauges; `METRICS_TOKEN`). Example scrape
+  config and alert rules: `ops/prometheus/`.
 - Sessions are per browser tab: the SPA sends its tab's id in `X-Session-Slot` and the httpOnly
   auth cookies are named after it, so an admin and a user can be signed in side by side. A new
   tab opens with the last account used; the user menu's "another account" icon signs in a

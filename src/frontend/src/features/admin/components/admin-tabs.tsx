@@ -7,7 +7,7 @@ const TABS = [
   { to: "/admin/entities", label: "Legal entities" },
   { to: "/admin/governance", label: "Governance" },
   { to: "/admin/data-sources", label: "Data sources" },
-  { to: "/admin/ai-monitoring", label: "AI monitoring" },
+  { to: "/admin/ai-monitoring", label: "Monitoring" },
 ]
 
 export function AdminTabs() {

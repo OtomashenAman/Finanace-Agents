@@ -35,6 +35,17 @@ class AuditEventOut(BaseModel):
     details: dict[str, Any]
 
 
+class ChainCheckOut(BaseModel):
+    checked: int
+    valid: bool
+    first_broken_seq: int | None
+    first_seq: int | None
+    last_seq: int | None
+    last_hash: str | None
+    checked_at: datetime
+    retention_days: int
+
+
 class AuditPage(BaseModel):
     items: list[AuditEventOut]
     next_cursor: str | None  # pass back as ?cursor= for the next (older) page

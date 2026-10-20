@@ -25,7 +25,15 @@ export function useRuns(key: string, enabled = true, entityId?: string | null) {
 }
 
 export function useRun(key: string, id: string) {
-  return useQuery({ queryKey: runKeys.detail(key, id), queryFn: () => runsApi.get(key, id) })
+  return useQuery({
+    queryKey: runKeys.detail(key, id),
+    queryFn: () => runsApi.get(key, id),
+    // While the worker drafts the AI explanation or writes back, check back every 2 seconds
+    refetchInterval: (query) => {
+      const run = query.state.data
+      return run?.narrative_pending || run?.actions.some((a) => a.status === "queued") ? 2000 : false
+    },
+  })
 }
 
 /** Every run mutation returns the fresh run: show it immediately, then refresh derived data. */
@@ -76,6 +84,15 @@ export function useLinkSource(key: string, id: string) {
 
 export function useUnlinkSource(key: string, id: string) {
   return useRunMutation<void>(key, () => runsApi.unlinkSource(key, id))
+}
+
+export function useWriteBack(key: string, id: string) {
+  return useRunMutation<void>(key, () => runsApi.writeBack(key, id))
+}
+
+export function useEvidencePack(key: string, id: string) {
+  // Downloading is audited server-side: refresh the run's activity afterwards
+  return useMutation({ mutationFn: () => runsApi.evidencePack(key, id), meta: { invalidates: ["audit"] } })
 }
 
 export function useDeleteRun(key: string, id: string) {

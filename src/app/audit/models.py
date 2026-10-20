@@ -1,7 +1,7 @@
 import uuid
 from typing import Any
 
-from sqlalchemy import ForeignKey, Index, String, text
+from sqlalchemy import BigInteger, FetchedValue, ForeignKey, Index, String, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -30,3 +30,11 @@ class AuditEvent(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     ip: Mapped[str | None] = mapped_column(String(45))
     user_agent: Mapped[str | None] = mapped_column(String(512))
     details: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    # Tamper evidence, filled by a database trigger (see the audit_integrity migration):
+    # seq orders the chain, hash = sha256(this event's content + prev_hash). actor_id is left
+    # out of the hash because deleting a user sets it to NULL (the only change allowed).
+    seq: Mapped[int] = mapped_column(
+        BigInteger, server_default=text("nextval('audit_events_seq')"), unique=True
+    )
+    prev_hash: Mapped[str | None] = mapped_column(String(64), server_default=FetchedValue())
+    hash: Mapped[str] = mapped_column(String(64), server_default=FetchedValue())

@@ -48,7 +48,12 @@ export function ResultStep({ agentKey, run, form, onGoTo }: ResultStepProps) {
             <h3 className="mb-1 text-sm font-semibold text-brand-navy">Calculations</h3>
             <CalculationsTable calculations={run.calculations} />
           </div>
-          <NarrativeCard narrative={run.narrative} fields={form.fields} documents={run.documents} />
+          <NarrativeCard
+            narrative={run.narrative}
+            fields={form.fields}
+            documents={run.documents}
+            pending={run.narrative_pending}
+          />
         </div>
       </Panel>
 
@@ -98,7 +103,13 @@ export function ResultStep({ agentKey, run, form, onGoTo }: ResultStepProps) {
                 </Button>
               </div>
             )}
-            {!run.permissions.can_submit && run.status === "analyzed" && (
+            {run.narrative_pending && run.permissions.can_edit && run.status === "analyzed" && (
+              <Button size="lg" className="w-full font-semibold" disabled>
+                <LoaderCircle className="animate-spin" aria-hidden />
+                Waiting for the AI explanation…
+              </Button>
+            )}
+            {!run.permissions.can_submit && !run.narrative_pending && run.status === "analyzed" && (
               <p className="text-sm text-muted-foreground">Waiting for the preparer to submit this run.</p>
             )}
           </div>

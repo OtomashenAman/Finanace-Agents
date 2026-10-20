@@ -6,6 +6,7 @@ submit), so a later change never rewrites history.
 
 import uuid
 from dataclasses import dataclass
+from datetime import timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -19,14 +20,28 @@ from src.app.agent_catalog.agents.fields import PolicySettings, form_fields
 from src.app.agent_catalog.registry import REGISTRY, get_agent_definition
 from src.app.audit.service import record_event
 from src.app.auth.models import User, UserRole
+from src.app.common.clock import utcnow
 from src.app.common.context import RequestContext
-from src.app.governance.exceptions import InvalidApprovalMatrixError, PolicyNotFoundError
-from src.app.governance.models import SETTINGS_ROW, AgentPolicy, ApprovalRule, OrgSettings
+from src.app.governance.exceptions import (
+    DelegationNotFoundError,
+    InvalidApprovalMatrixError,
+    InvalidDelegationError,
+    PolicyNotFoundError,
+)
+from src.app.governance.models import (
+    SETTINGS_ROW,
+    AgentPolicy,
+    ApprovalDelegation,
+    ApprovalRule,
+    OrgSettings,
+)
 from src.app.governance.schemas import (
     ApprovalMatrixOut,
     ApprovalTierIn,
     ApprovalTierOut,
     Approver,
+    DelegationIn,
+    DelegationOut,
     OrgSettingsOut,
     PolicyOut,
     PolicyVersionOut,
@@ -371,3 +386,107 @@ async def set_matrix(
     )
     await session.commit()
     return await get_matrix(session, key)
+
+
+# --- delegated approvers ----------------------------------------------------------------
+
+MAX_DELEGATION = timedelta(days=90)
+
+
+async def delegators_of(session: AsyncSession, delegate_id: uuid.UUID) -> set[uuid.UUID]:
+    """Approvers this user may currently stand in for."""
+    now = utcnow()
+    rows = await session.scalars(
+        select(ApprovalDelegation.delegator_id).where(
+            ApprovalDelegation.delegate_id == delegate_id,
+            ApprovalDelegation.cancelled_at.is_(None),
+            ApprovalDelegation.starts_at <= now,
+            ApprovalDelegation.ends_at > now,
+        )
+    )
+    return set(rows)
+
+
+def _delegation_out(d: ApprovalDelegation, names: dict[uuid.UUID, str]) -> DelegationOut:
+    now = utcnow()
+    return DelegationOut(
+        id=d.id,
+        delegator=Approver(id=d.delegator_id, full_name=names.get(d.delegator_id, "Deleted user")),
+        delegate=Approver(id=d.delegate_id, full_name=names.get(d.delegate_id, "Deleted user")),
+        starts_at=d.starts_at,
+        ends_at=d.ends_at,
+        reason=d.reason,
+        active=d.cancelled_at is None and d.starts_at <= now < d.ends_at,
+        cancelled_at=d.cancelled_at,
+        created_at=d.created_at,
+    )
+
+
+async def list_delegations(session: AsyncSession) -> list[DelegationOut]:
+    rows = list(
+        await session.scalars(
+            select(ApprovalDelegation).order_by(ApprovalDelegation.starts_at.desc()).limit(100)
+        )
+    )
+    names = await _names(session, {i for d in rows for i in (d.delegator_id, d.delegate_id)})
+    return [_delegation_out(d, names) for d in rows]
+
+
+async def create_delegation(
+    session: AsyncSession, body: DelegationIn, actor: User, ctx: RequestContext
+) -> DelegationOut:
+    delegator_id = body.delegator_id or actor.id
+    admins = await _admins(session)
+    if delegator_id not in admins or body.delegate_id not in admins:
+        raise InvalidDelegationError("Both people must be active Finance Admins.")
+    if delegator_id == body.delegate_id:
+        raise InvalidDelegationError("Choose someone else to delegate to.")
+    if body.ends_at <= body.starts_at:
+        raise InvalidDelegationError("The delegation must end after it starts.")
+    if body.ends_at <= utcnow():
+        raise InvalidDelegationError("This period is already over.")
+    if body.ends_at - body.starts_at > MAX_DELEGATION:
+        raise InvalidDelegationError("A delegation can last at most 90 days.")
+    delegation = ApprovalDelegation(
+        delegator_id=delegator_id,
+        delegate_id=body.delegate_id,
+        starts_at=body.starts_at,
+        ends_at=body.ends_at,
+        reason=(body.reason or "").strip() or None,
+        created_by=actor.id,
+    )
+    session.add(delegation)
+    await session.flush()
+    record_event(
+        session,
+        "governance.delegation_created",
+        ctx,
+        actor_id=actor.id,
+        delegation_id=str(delegation.id),
+        delegator=admins[delegator_id],
+        delegate=admins[body.delegate_id],
+        starts_at=body.starts_at.isoformat(),
+        ends_at=body.ends_at.isoformat(),
+    )
+    await session.commit()
+    return _delegation_out(delegation, admins)
+
+
+async def cancel_delegation(
+    session: AsyncSession, delegation_id: uuid.UUID, actor: User, ctx: RequestContext
+) -> DelegationOut:
+    delegation = await session.get(ApprovalDelegation, delegation_id, with_for_update=True)
+    if delegation is None:
+        raise DelegationNotFoundError
+    if delegation.cancelled_at is None:
+        delegation.cancelled_at = utcnow()
+        record_event(
+            session,
+            "governance.delegation_cancelled",
+            ctx,
+            actor_id=actor.id,
+            delegation_id=str(delegation.id),
+        )
+        await session.commit()
+    names = await _names(session, {delegation.delegator_id, delegation.delegate_id})
+    return _delegation_out(delegation, names)

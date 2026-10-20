@@ -34,3 +34,15 @@ export function useMatrices() {
 export function useSaveMatrix() {
   return useMutation({ mutationFn: governanceApi.saveMatrix, meta: { invalidates } })
 }
+
+export function useDelegations() {
+  return useQuery({ queryKey: [GOVERNANCE_TAG, "delegations"], queryFn: governanceApi.delegations })
+}
+
+export function useCreateDelegation() {
+  return useMutation({ mutationFn: governanceApi.createDelegation, meta: { invalidates } })
+}
+
+export function useCancelDelegation() {
+  return useMutation({ mutationFn: governanceApi.cancelDelegation, meta: { invalidates } })
+}

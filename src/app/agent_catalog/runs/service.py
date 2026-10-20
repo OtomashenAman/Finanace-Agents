@@ -17,11 +17,13 @@ from src.app.agent_catalog.agents.fields import draft_schema, form_fields
 from src.app.agent_catalog.exceptions import AgentNotFoundError
 from src.app.agent_catalog.models import Agent, AgentAssignment, AgentCapacity
 from src.app.agent_catalog.registry import get_agent_definition
-from src.app.agent_catalog.runs import narrative as narrative_service
+from src.app.agent_catalog.runs import evidence
+from src.app.agent_catalog.runs import jobs as run_jobs
 from src.app.agent_catalog.runs.exceptions import (
     DocumentConflictError,
     DocumentNotFoundError,
     DocumentRejectedError,
+    InvalidRunStateError,
     RunNotFoundError,
     RunPermissionError,
     WorkspaceUnavailableError,
@@ -34,8 +36,10 @@ from src.app.agent_catalog.runs.lifecycle import (
     is_allowed,
 )
 from src.app.agent_catalog.runs.models import (
+    ActionStatus,
     AgentRun,
     AgentRunDetail,
+    ExternalAction,
     ReviewDecision,
     RunDocument,
     RunFlag,
@@ -57,6 +61,7 @@ from src.app.agent_catalog.runs.schemas import (
     Person,
     ReviewCreate,
     ReviewOut,
+    RunActionOut,
     RunApproval,
     RunCreate,
     RunDetail,
@@ -81,6 +86,7 @@ from src.app.data_sources.access import FinanceData
 from src.app.entities import service as entities
 from src.app.entities.schemas import EntityRef
 from src.app.governance import service as governance
+from src.app.jobs import queue as jobs
 
 TEXT_PREVIEW_CHARS = 400
 
@@ -303,20 +309,135 @@ def _approver_ids(run: AgentRun) -> set[uuid.UUID]:
     return {uuid.UUID(i) for i in ids}
 
 
+def _approved_by(run: AgentRun, reviews: list[RunReview]) -> set[uuid.UUID]:
+    """People whose approval this round already counts (in person or through a delegate)."""
+    people: set[uuid.UUID] = set()
+    for r in _round_approvals(run, reviews):
+        people.add(r.reviewer_id)
+        if r.on_behalf_of_id:
+            people.add(r.on_behalf_of_id)
+    return people
+
+
+async def _acting_for(
+    session: AsyncSession, user: User, run: AgentRun, reviews: list[RunReview]
+) -> tuple[bool, uuid.UUID | None]:
+    """(may decide as an approver, named approver they stand in for if any)."""
+    approvers = _approver_ids(run)
+    if not approvers or user.id in approvers:
+        return True, None
+    covering = sorted(
+        (approvers & await governance.delegators_of(session, user.id)) - _approved_by(run, reviews)
+    )
+    return (True, covering[0]) if covering else (False, None)
+
+
 async def _review_blocked(
     session: AsyncSession, user: User, run: AgentRun, reviews: list[RunReview]
 ) -> str | None:
     """Why this user may not decide on the run now (None: they may)."""
     if user.role != UserRole.FINANCE_ADMIN:
         return "Only a Finance Admin can approve runs."
-    approvers = _approver_ids(run)
-    if approvers and user.id not in approvers:
-        return "Only the approvers set for this amount in the approval matrix can decide."
+    if user.id in _approved_by(run, reviews):
+        return "You already approved this run: another approver must give the next approval."
+    allowed, _ = await _acting_for(session, user, run, reviews)
+    if not allowed:
+        return (
+            "Only the approvers set for this amount in the approval matrix "
+            "(or their delegates) can decide."
+        )
     if run.preparer_id == user.id and not await governance.allow_self_approval(session):
         return "You can't review a run you prepared (segregation of duties)."
-    if any(r.reviewer_id == user.id for r in _round_approvals(run, reviews)):
-        return "You already approved this run: another approver must give the next approval."
     return None
+
+
+ACTION_LABELS = {run_jobs.BILL_NOTE: "Approval noted on the QuickBooks bill"}
+
+
+async def _write_back_blocked(
+    session: AsyncSession, user: User, run: AgentRun, actions: list[ExternalAction]
+) -> str | None:
+    """Why the QuickBooks write-back isn't available (None: it is)."""
+    if run.preparer_id != user.id:
+        return "Only the preparer can write back to their QuickBooks."
+    if run.status != RunStatus.APPROVED:
+        return "Only approved runs are written back."
+    snapshot = await session.get(RunSourceSnapshot, run.id)
+    if snapshot is None or snapshot.source_kind != "quickbooks" or snapshot.record_type != "bill":
+        return "The run wasn't prefilled from a QuickBooks bill."
+    if snapshot.source_id is None:
+        return "The QuickBooks connection was removed."
+    if any(a.kind == run_jobs.BILL_NOTE and a.status != ActionStatus.FAILED for a in actions):
+        return "Already written back."
+    return None
+
+
+async def write_back(
+    session: AsyncSession,
+    user: User,
+    key: str,
+    run_id: uuid.UUID,
+    ctx: RequestContext,
+    llm: LLMProvider,
+) -> RunDetail:
+    """Queue the QuickBooks write-back (once per run; a failed one can be asked for again)."""
+    access = await _access(session, user, key)
+    run, detail = await _load(session, access, run_id, lock=True)
+    actions = list(
+        await session.scalars(select(ExternalAction).where(ExternalAction.run_id == run.id))
+    )
+    if blocked := await _write_back_blocked(session, user, run, actions):
+        raise RunPermissionError(blocked)
+    action = next((a for a in actions if a.kind == run_jobs.BILL_NOTE), None)
+    if action is None:
+        action = ExternalAction(
+            run_id=run.id, kind=run_jobs.BILL_NOTE, status=ActionStatus.QUEUED, requested_by=user.id
+        )
+        session.add(action)
+        await session.flush()
+    else:  # a failed attempt, asked for again
+        action.status = ActionStatus.QUEUED
+        action.error = None
+        action.requested_by = user.id
+    job = await jobs.enqueue(
+        session,
+        run_jobs.WRITEBACK_JOB,
+        {"action_id": str(action.id)},
+        dedupe_key=f"writeback:{action.id}:{utcnow().timestamp()}",
+        max_attempts=4,
+    )
+    record_event(session, "run.writeback_requested", ctx, actor_id=user.id, run=run.reference)
+    await session.commit()
+    await jobs.dispatch(session, job, llm)
+    await session.refresh(run)
+    return await _detail(session, access, run, detail)
+
+
+async def evidence_pack(
+    session: AsyncSession, user: User, key: str, run_id: uuid.UUID, ctx: RequestContext
+) -> tuple[bytes, str]:
+    """ZIP for auditors (preparer or Finance Admin). Returns (bytes, filename); audited."""
+    access = await _access(session, user, key)
+    run, detail = await _load(session, access, run_id)
+    out = await _detail(session, access, run, detail)
+    documents = [
+        (d.filename, d.sha256, d.extracted_text)
+        for d in await session.scalars(
+            select(RunDocument).where(RunDocument.run_id == run.id).order_by(RunDocument.created_at)
+        )
+    ]
+    timeline = await audit.run_timeline(session, user, run.reference)
+    data = evidence.build(out, documents, timeline, user.email)
+    record_event(
+        session,
+        "run.evidence_exported",
+        ctx,
+        actor_id=user.id,
+        run=run.reference,
+        sha256=hashlib.sha256(data).hexdigest(),
+    )
+    await session.commit()
+    return data, f"{run.reference}-evidence.zip"
 
 
 async def get_timeline(
@@ -352,7 +473,12 @@ async def _detail(
             .order_by(RunNarrative.created_at.desc())
             .limit(1)
         )
-    people = await _people(session, {run.preparer_id} | {r.reviewer_id for r in reviews})
+    people = await _people(
+        session,
+        {run.preparer_id}
+        | {r.reviewer_id for r in reviews}
+        | {r.on_behalf_of_id for r in reviews if r.on_behalf_of_id},
+    )
     refs = await _business_refs(session, [run])
     ents = await _entities(session, [run])
     snapshot = await session.get(RunSourceSnapshot, run.id)
@@ -361,13 +487,23 @@ async def _detail(
     is_owner = run.preparer_id == user.id
     pending = is_allowed(run.status, RunAction.REVIEW)
     blocked = await _review_blocked(session, user, run, reviews) if pending else None
+    drafting = await run_jobs.narrative_pending(session, run)
+    actions = list(
+        await session.scalars(
+            select(ExternalAction)
+            .where(ExternalAction.run_id == run.id)
+            .order_by(ExternalAction.created_at)
+        )
+    )
     permissions = RunPermissions(
         can_edit=is_owner and is_allowed(run.status, RunAction.EDIT),
         can_analyze=is_owner and is_allowed(run.status, RunAction.ANALYZE),
-        can_submit=is_owner and is_allowed(run.status, RunAction.SUBMIT),
+        # The AI explanation is part of what gets approved (result hash): wait for it
+        can_submit=is_owner and is_allowed(run.status, RunAction.SUBMIT) and not drafting,
         can_review=pending and blocked is None,
         can_delete=is_owner and is_allowed(run.status, RunAction.DELETE),
         review_blocked_reason=blocked,
+        can_write_back=await _write_back_blocked(session, user, run, actions) is None,
     )
     approval = None
     if run.submitted_at is not None:
@@ -393,6 +529,19 @@ async def _detail(
         policy_version=run.policy_version,
         policy_values=run.policy_values,
         approval=approval,
+        narrative_pending=drafting,
+        actions=[
+            RunActionOut(
+                kind=a.kind,
+                label=ACTION_LABELS.get(a.kind, a.kind),
+                status=a.status.value,
+                receipt=a.receipt,
+                error=a.error,
+                created_at=a.created_at,
+                completed_at=a.completed_at,
+            )
+            for a in actions
+        ],
         calculations=[CalculationOut(**c) for c in run.calculations],
         flags=[
             FlagOut(code=f.code, severity=f.severity, message=f.message, field=f.field)
@@ -438,6 +587,7 @@ async def _detail(
             ReviewOut(
                 id=r.id,
                 reviewer=people[r.reviewer_id],
+                on_behalf_of=people.get(r.on_behalf_of_id) if r.on_behalf_of_id else None,
                 decision=r.decision,
                 comment=r.comment,
                 result_hash=r.result_hash,
@@ -486,9 +636,27 @@ async def get_document_text(
 
 
 async def create_run(
-    session: AsyncSession, user: User, key: str, body: RunCreate, ctx: RequestContext
-) -> RunDetail:
+    session: AsyncSession,
+    user: User,
+    key: str,
+    body: RunCreate,
+    ctx: RequestContext,
+    idempotency_key: str | None = None,
+) -> tuple[RunDetail, bool]:
+    """Returns (run, created). The same Idempotency-Key returns the run it created before."""
     access = await _access(session, user, key)
+    if idempotency_key:
+        existing = await session.scalar(
+            select(AgentRun).where(
+                AgentRun.preparer_id == user.id,
+                AgentRun.idempotency_key == idempotency_key,
+                AgentRun.agent_id == access.agent.id,
+            )
+        )
+        if existing is not None:
+            detail = await session.get(access.run_model, existing.id)
+            assert detail is not None  # noqa: S101 - created together
+            return await _detail(session, access, existing, detail), False
     if not access.definition.has_workspace():
         raise WorkspaceUnavailableError
     if not access.agent.is_active:
@@ -501,6 +669,7 @@ async def create_run(
         agent_id=access.agent.id,
         preparer_id=user.id,
         entity_id=entity.id if entity else None,
+        idempotency_key=idempotency_key,
         status=RunStatus.DRAFT,
         priority=RunPriority.NORMAL,
         policy_version=access.definition.policy_version,
@@ -521,7 +690,7 @@ async def create_run(
         entity=entity.code if entity else None,
     )
     await session.commit()
-    return await _detail(session, access, run, detail)
+    return await _detail(session, access, run, detail), True
 
 
 async def update_input(
@@ -730,19 +899,15 @@ async def analyze_run(
     )
     await session.commit()
 
-    # The LLM call happens after the commit so a slow provider never holds the row lock
-    entity_name = (await _entities(session, [run])).get(run.entity_id) if run.entity_id else None
-    await narrative_service.generate(
+    # The AI explanation is drafted in the background (a worker), never holding this request
+    job = await jobs.enqueue(
         session,
-        run,
-        access.definition,
-        data,
-        analysis,
-        documents,
-        llm,
-        entity_name.name if entity_name else None,
+        run_jobs.NARRATIVE_JOB,
+        run_jobs.narrative_payload(run),
+        dedupe_key=run_jobs.narrative_key(run),
     )
     await session.commit()
+    await jobs.dispatch(session, job, llm)
     return await _detail(session, access, run, detail)
 
 
@@ -881,6 +1046,10 @@ async def submit_run(
     run, detail = await _load(session, access, run_id, lock=True)
     _require_owner(run, user)
     ensure_allowed(run.status, RunAction.SUBMIT)
+    if await run_jobs.narrative_pending(session, run):
+        raise InvalidRunStateError(
+            "The AI explanation is still being drafted. Submit when it's ready."
+        )
 
     run.result_hash = _result_hash(run, await _detail(session, access, run, detail))
     data = access.input_schema.model_validate(_input_values(access, detail))
@@ -922,6 +1091,7 @@ async def review_run(
     if blocked := await _review_blocked(session, user, run, reviews):
         raise RunPermissionError(blocked)
     self_review = run.preparer_id == user.id  # only when the setting allows it; audited
+    _, on_behalf_of = await _acting_for(session, user, run, reviews)
     assert run.result_hash is not None  # noqa: S101 - set on submit
 
     session.add(
@@ -931,6 +1101,7 @@ async def review_run(
             decision=body.decision,
             comment=body.comment.strip(),
             result_hash=run.result_hash,
+            on_behalf_of_id=on_behalf_of,
         )
     )
     approvals = len(_round_approvals(run, reviews)) + 1
@@ -949,6 +1120,9 @@ async def review_run(
         run=run.reference,
         result_hash=run.result_hash,
         self_review=self_review,
+        on_behalf_of=(await _people(session, {on_behalf_of}))[on_behalf_of].full_name
+        if on_behalf_of
+        else None,
         approvals=f"{approvals}/{run.required_approvals}"
         if body.decision == ReviewDecision.APPROVED
         else None,

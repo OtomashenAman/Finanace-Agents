@@ -15,7 +15,8 @@ import src.app.audit.models
 import src.app.auth.models
 import src.app.data_sources.models
 import src.app.entities.models
-import src.app.governance.models  # noqa: F401
+import src.app.governance.models
+import src.app.jobs.models  # noqa: F401
 from src.app.common.models import Base
 
 # this is the Alembic Config object, which provides

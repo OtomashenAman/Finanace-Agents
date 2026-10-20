@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
@@ -64,3 +65,30 @@ class ApprovalRule(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     approvals_required: Mapped[int]
     # Finance Admin user ids allowed to approve this tier; empty = any Finance Admin
     approver_ids: Mapped[list[str]] = mapped_column(JSONB, default=list)
+
+
+class ApprovalDelegation(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
+    """While active, `delegate` may approve wherever the matrix names `delegator` (e.g. leave).
+
+    Reviews given this way record whom they were on behalf of.
+    """
+
+    __tablename__ = "approval_delegations"
+    __table_args__ = (
+        CheckConstraint("ends_at > starts_at", name="period"),
+        CheckConstraint("delegator_id <> delegate_id", name="distinct_people"),
+    )
+
+    delegator_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    delegate_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    starts_at: Mapped[datetime]
+    ends_at: Mapped[datetime]
+    reason: Mapped[str | None] = mapped_column(String(300))
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    cancelled_at: Mapped[datetime | None]
