@@ -19,7 +19,7 @@ from src.app.data_sources.providers import quickbooks as qb
 from tests.conftest import ClientFactory, FakeLLM, MakeUser
 
 SOURCES = "/api/v1/data-sources"
-INTEGRATION = "/api/v1/admin/integrations/quickbooks"
+APP = {"client_id": "ABclient", "client_secret": "super-secret", "environment": "sandbox"}
 RUNS = "/api/v1/agents/ap_invoice/runs"
 REALM = "9130350000000001"
 
@@ -147,60 +147,93 @@ async def me(analyst: User, signed_in_client: ClientFactory) -> AsyncClient:
     return await signed_in_client(analyst)
 
 
-async def configure_app(adm: AsyncClient) -> None:
-    r = await adm.put(
-        INTEGRATION,
-        json={"client_id": "ABclient", "client_secret": "super-secret", "environment": "sandbox"},
-    )
+def state_of(url: str) -> str:
+    query = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+    assert query["redirect_uri"] == [
+        "http://localhost:8081/api/v1/data-sources/quickbooks/callback"
+    ]
+    assert query["client_id"] == [APP["client_id"]]
+    return query["state"][0]
+
+
+async def start(client: AsyncClient, source_id: str | None = None) -> Any:
+    """Connect with the user's own app, or re-authorize an existing source."""
+    if source_id is None:
+        r = await client.post(f"{SOURCES}/quickbooks", json=APP)
+    else:
+        r = await client.post(f"{SOURCES}/{source_id}/authorize")
     assert r.status_code == 200, r.text
+    return r.json()
 
 
 async def connect(client: AsyncClient, source_id: str | None = None, realm: str = REALM) -> Any:
     """Run the OAuth round trip the browser would do; returns the callback redirect."""
-    r = await client.post(f"{SOURCES}/quickbooks/authorize", json={"source_id": source_id})
-    assert r.status_code == 200, r.text
-    query = urllib.parse.parse_qs(urllib.parse.urlparse(r.json()["url"]).query)
-    assert query["redirect_uri"] == [
-        "http://localhost:8081/api/v1/data-sources/quickbooks/callback"
-    ]
+    state = state_of((await start(client, source_id))["url"])
     callback = await client.get(
         f"{SOURCES}/quickbooks/callback",
-        params={"state": query["state"][0], "code": "good-code", "realmId": realm},
+        params={"state": state, "code": "good-code", "realmId": realm},
     )
     assert callback.status_code == 303
     return urllib.parse.parse_qs(urllib.parse.urlparse(callback.headers["location"]).query)
 
 
-# --- integration app ----------------------------------------------------------------------
+# --- the user's own Intuit app -------------------------------------------------------------
 
 
-async def test_quickbooks_app_is_admin_only_and_secret_never_returned(
-    adm: AsyncClient, me: AsyncClient, db: AsyncSession
+async def test_each_user_brings_their_own_app_and_the_secret_stays_hidden(
+    me: AsyncClient, db: AsyncSession
 ) -> None:
-    assert (await me.get(INTEGRATION)).status_code == 403
-    assert (await me.get(f"{SOURCES}/quickbooks/status")).json() == {
-        "configured": False,
-        "environment": None,
-    }
-    first = await adm.put(INTEGRATION, json={"client_id": "ABclient", "environment": "sandbox"})
-    assert first.json()["detail"]["code"] == "client_secret_required"
+    uri = (await me.get(f"{SOURCES}/quickbooks/redirect-uri")).json()["redirect_uri"]
+    assert uri == "http://localhost:8081/api/v1/data-sources/quickbooks/callback"
 
-    await configure_app(adm)
-    body = (await adm.get(INTEGRATION)).json()
-    assert body["has_client_secret"] is True
-    assert "super-secret" not in json.dumps(body)
-    assert body["redirect_uri"].endswith("/api/v1/data-sources/quickbooks/callback")
+    missing = await me.post(f"{SOURCES}/quickbooks", json={**APP, "client_secret": ""})
+    assert missing.status_code == 422
 
-    # Updating without a secret keeps the stored one
-    r = await adm.put(INTEGRATION, json={"client_id": "ABclient2", "environment": "production"})
-    assert r.json()["client_id"] == "ABclient2"
-    assert (await me.get(f"{SOURCES}/quickbooks/status")).json()["configured"] is True
+    started = await start(me)
+    assert started["source"]["client_id"] == "ABclient"
+    assert started["source"]["status"] == "pending_auth"
+    assert "super-secret" not in json.dumps(started)
+    row = await db.get(DataSource, started["source"]["id"])
+    assert row is not None and row.client_secret_enc is not None
+    assert crypto.decrypt(row.client_secret_enc) == "super-secret"
+
+    # Retrying (or double-clicking Connect) reuses the unfinished connection
+    again = await start(me)
+    assert again["source"]["id"] == started["source"]["id"]
+    assert len((await me.get(SOURCES)).json()) == 1
 
 
-async def test_connect_requires_the_app(me: AsyncClient) -> None:
-    r = await me.post(f"{SOURCES}/quickbooks/authorize", json={})
-    assert r.status_code == 409
-    assert r.json()["detail"]["code"] == "integration_not_configured"
+async def test_changing_the_app_requires_reauthorization(
+    me: AsyncClient, intuit: FakeIntuit, db: AsyncSession
+) -> None:
+    source_id = (await connect(me))["source"][0]
+    same = await me.put(
+        f"{SOURCES}/{source_id}/app", json={"client_id": "ABclient", "environment": "sandbox"}
+    )
+    assert same.json()["status"] == "connected"  # nothing changed
+
+    r = await me.put(
+        f"{SOURCES}/{source_id}/app",
+        json={"client_id": "ABother", "client_secret": "other-secret", "environment": "sandbox"},
+    )
+    assert r.json()["status"] == "needs_reauth"
+    row = await db.get(DataSource, source_id)
+    assert row is not None and row.credentials_enc is None  # old tokens dropped
+    assert (await me.post(f"{SOURCES}/{source_id}/sync")).status_code == 409
+
+
+async def test_two_users_can_connect_the_same_company_separately(
+    me: AsyncClient,
+    intuit: FakeIntuit,
+    make_user: MakeUser,
+    signed_in_client: ClientFactory,
+) -> None:
+    other = await signed_in_client(await make_user("other@example.com"))
+    first = (await connect(me))["source"][0]
+    second = (await connect(other))["source"][0]
+    assert first != second
+    assert [s["id"] for s in (await me.get(SOURCES)).json()] == [first]
+    assert [s["id"] for s in (await other.get(SOURCES)).json()] == [second]
 
 
 # --- OAuth + sync -------------------------------------------------------------------------
@@ -209,7 +242,6 @@ async def test_connect_requires_the_app(me: AsyncClient) -> None:
 async def test_user_connects_own_quickbooks_and_it_syncs(
     adm: AsyncClient, me: AsyncClient, intuit: FakeIntuit, db: AsyncSession
 ) -> None:
-    await configure_app(adm)
     result = await connect(me)
     assert result["quickbooks"] == ["connected"]
 
@@ -233,9 +265,7 @@ async def test_user_connects_own_quickbooks_and_it_syncs(
 async def test_callback_state_is_signed_and_single_use(
     adm: AsyncClient, me: AsyncClient, intuit: FakeIntuit
 ) -> None:
-    await configure_app(adm)
-    r = await me.post(f"{SOURCES}/quickbooks/authorize", json={})
-    state = urllib.parse.parse_qs(urllib.parse.urlparse(r.json()["url"]).query)["state"][0]
+    state = state_of((await start(me))["url"])
     params = {"state": state, "code": "good-code", "realmId": REALM}
 
     assert (await me.get(f"{SOURCES}/quickbooks/callback", params=params)).status_code == 303
@@ -251,9 +281,7 @@ async def test_callback_state_is_signed_and_single_use(
 async def test_cancelled_authorization_is_reported(
     adm: AsyncClient, me: AsyncClient, intuit: FakeIntuit
 ) -> None:
-    await configure_app(adm)
-    r = await me.post(f"{SOURCES}/quickbooks/authorize", json={})
-    state = urllib.parse.parse_qs(urllib.parse.urlparse(r.json()["url"]).query)["state"][0]
+    state = state_of((await start(me))["url"])
     callback = await me.get(
         f"{SOURCES}/quickbooks/callback", params={"state": state, "error": "access_denied"}
     )
@@ -267,7 +295,6 @@ async def test_cancelled_authorization_is_reported(
 async def test_expired_access_is_refreshed_and_rotation_kept(
     adm: AsyncClient, me: AsyncClient, intuit: FakeIntuit, db: AsyncSession
 ) -> None:
-    await configure_app(adm)
     source_id = (await connect(me))["source"][0]
     row = await db.get(DataSource, source_id)
     assert row is not None and row.credentials_enc is not None
@@ -286,7 +313,6 @@ async def test_expired_access_is_refreshed_and_rotation_kept(
 async def test_revoked_access_needs_reauthorization_of_the_same_company(
     adm: AsyncClient, me: AsyncClient, intuit: FakeIntuit, db: AsyncSession
 ) -> None:
-    await configure_app(adm)
     source_id = (await connect(me))["source"][0]
     row = await db.get(DataSource, source_id)
     assert row is not None and row.credentials_enc is not None
@@ -313,7 +339,6 @@ async def test_revoked_access_needs_reauthorization_of_the_same_company(
 async def test_disconnect_revokes_access(
     adm: AsyncClient, me: AsyncClient, intuit: FakeIntuit
 ) -> None:
-    await configure_app(adm)
     source_id = (await connect(me))["source"][0]
     assert (await me.delete(f"{SOURCES}/{source_id}")).status_code == 204
     assert intuit.revoked == ["rt-1"]
@@ -330,7 +355,6 @@ async def test_sources_are_private_to_their_owner(
     make_user: MakeUser,
     signed_in_client: ClientFactory,
 ) -> None:
-    await configure_app(adm)
     source_id = (await connect(me))["source"][0]
     other = await signed_in_client(await make_user("other@example.com"))
 
@@ -340,8 +364,9 @@ async def test_sources_are_private_to_their_owner(
     assert r.status_code == 404
     assert (await other.post(f"{SOURCES}/{source_id}/sync")).status_code == 404
     assert (await other.delete(f"{SOURCES}/{source_id}")).status_code == 404
-    reauth = await other.post(f"{SOURCES}/quickbooks/authorize", json={"source_id": source_id})
-    assert reauth.status_code == 404
+    assert (await other.post(f"{SOURCES}/{source_id}/authorize")).status_code == 404
+    app = {"client_id": "x", "environment": "sandbox"}
+    assert (await other.put(f"{SOURCES}/{source_id}/app", json=app)).status_code == 404
 
     # The admin sees status per user, never credentials or records
     assert (await adm.get(f"{SOURCES}/{source_id}")).status_code == 404
@@ -425,7 +450,6 @@ async def test_run_prefilled_from_quickbooks_with_snapshot_for_reviewer(
     db: AsyncSession,
     fake_llm: FakeLLM,
 ) -> None:
-    await configure_app(adm)
     source_id = (await connect(me))["source"][0]
     run = (await me.post(RUNS)).json()
 
@@ -449,9 +473,9 @@ async def test_run_prefilled_from_quickbooks_with_snapshot_for_reviewer(
     assert flags["VENDOR_IN_MASTER"] == "pass"
     run = (await me.post(f"{RUNS}/{run['id']}/submit")).json()
 
-    reviewer = await make_user("ap.approver@example.com")
-    await assign(db, reviewer, AgentCapacity.REVIEWER)
-    seen = (await (await signed_in_client(reviewer)).get(f"{RUNS}/{run['id']}")).json()
+    # The approving admin can't open the user's data source, only the run's snapshot
+    seen = (await adm.get(f"{RUNS}/{run['id']}")).json()
+    assert (await adm.get(f"{SOURCES}/{source_id}")).status_code == 404
     assert seen["source"]["records"]["bill"]["doc_number"] == "INV-2048"
 
     # Deleting the source keeps what the reviewer approves against
@@ -465,7 +489,6 @@ async def test_run_prefilled_from_quickbooks_with_snapshot_for_reviewer(
 async def test_vendor_master_flags_unknown_and_inactive_suppliers(
     adm: AsyncClient, me: AsyncClient, intuit: FakeIntuit, fake_llm: FakeLLM
 ) -> None:
-    await configure_app(adm)
     await connect(me)
     run = (await me.post(RUNS)).json()
     base = {
@@ -492,7 +515,6 @@ async def test_cannot_prefill_from_someone_elses_source(
     signed_in_client: ClientFactory,
     db: AsyncSession,
 ) -> None:
-    await configure_app(adm)
     source_id = (await connect(me))["source"][0]
     other_user = await make_user("other@example.com")
     await assign(db, other_user, AgentCapacity.PREPARER)

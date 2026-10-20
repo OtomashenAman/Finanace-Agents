@@ -56,7 +56,6 @@ TABLES = (
     "run_source_snapshots",
     "finance_records",
     "data_sources",
-    "integration_apps",
     "run_reviews",
     "run_narratives",
     "run_documents",

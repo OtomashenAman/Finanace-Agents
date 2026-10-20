@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query"
 
-import { dataSourcesApi } from "./api"
+import { dataSourcesApi, type AuthorizeResponse, type QuickBooksApp } from "./api"
 
 /** Cache tag for everything derived from data sources (the admin overview dependsOn it) */
 export const DATA_SOURCES_TAG = "data-sources"
@@ -8,9 +8,8 @@ export const DATA_SOURCES_TAG = "data-sources"
 export const dataSourceKeys = {
   list: () => [DATA_SOURCES_TAG, "list"] as const,
   recordTypes: () => [DATA_SOURCES_TAG, "record-types"] as const,
-  quickbooksStatus: () => [DATA_SOURCES_TAG, "quickbooks-status"] as const,
+  redirectUri: () => [DATA_SOURCES_TAG, "redirect-uri"] as const,
   records: (id: string, type: string, search: string) => [DATA_SOURCES_TAG, "records", id, type, search] as const,
-  integration: () => [DATA_SOURCES_TAG, "integration"] as const,
   all: () => [DATA_SOURCES_TAG, "all"] as const,
 }
 
@@ -24,8 +23,8 @@ export function useRecordTypes() {
   return useQuery({ queryKey: dataSourceKeys.recordTypes(), queryFn: dataSourcesApi.recordTypes, staleTime: Infinity })
 }
 
-export function useQuickBooksStatus() {
-  return useQuery({ queryKey: dataSourceKeys.quickbooksStatus(), queryFn: dataSourcesApi.quickbooksStatus })
+export function useRedirectUri() {
+  return useQuery({ queryKey: dataSourceKeys.redirectUri(), queryFn: dataSourcesApi.redirectUri, staleTime: Infinity })
 }
 
 export function useSourceRecords(id: string | null, type: string, search: string) {
@@ -36,12 +35,23 @@ export function useSourceRecords(id: string | null, type: string, search: string
   })
 }
 
-/** Starts the Intuit round trip: the browser leaves the app and comes back to /data-sources */
+/** Send the browser to Intuit. The promise never settles: the mutation stays pending until the
+ *  page has navigated away, so Connect / Re-authorize can't be clicked twice meanwhile. */
+function goToIntuit({ url }: AuthorizeResponse): Promise<never> {
+  window.location.assign(url)
+  return new Promise<never>(() => {})
+}
+
+export function useConnectQuickBooks() {
+  return useMutation({ mutationFn: (app: QuickBooksApp) => dataSourcesApi.connect(app).then(goToIntuit) })
+}
+
 export function useAuthorizeQuickBooks() {
-  return useMutation({
-    mutationFn: dataSourcesApi.authorize,
-    onSuccess: ({ url }) => window.location.assign(url),
-  })
+  return useMutation({ mutationFn: (id: string) => dataSourcesApi.authorize(id).then(goToIntuit) })
+}
+
+export function useUpdateApp() {
+  return useMutation({ mutationFn: dataSourcesApi.updateApp, meta: { invalidates } })
 }
 
 export function useSyncSource() {
@@ -62,14 +72,6 @@ export function usePreviewUpload() {
 
 export function useUpload() {
   return useMutation({ mutationFn: dataSourcesApi.upload, meta: { invalidates } })
-}
-
-export function useIntegration() {
-  return useQuery({ queryKey: dataSourceKeys.integration(), queryFn: dataSourcesApi.integration })
-}
-
-export function useSetIntegration() {
-  return useMutation({ mutationFn: dataSourcesApi.setIntegration, meta: { invalidates } })
 }
 
 export function useAllSources() {

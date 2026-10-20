@@ -26,9 +26,8 @@ from src.app.data_sources import crypto
 from src.app.data_sources import uploads as upload_parser
 from src.app.data_sources.access import to_record
 from src.app.data_sources.exceptions import (
-    ClientSecretRequiredError,
+    AppCredentialsError,
     DataSourceNotFoundError,
-    IntegrationNotConfiguredError,
     RecordNotFoundError,
     SourceNotSyncableError,
     SyncFailedError,
@@ -37,7 +36,6 @@ from src.app.data_sources.exceptions import (
 from src.app.data_sources.models import (
     DataSource,
     FinanceRecord,
-    IntegrationApp,
     IntegrationEnvironment,
     SourceKind,
     SourceStatus,
@@ -46,15 +44,14 @@ from src.app.data_sources.providers import quickbooks as qb
 from src.app.data_sources.records import RECORD_LABELS, Record, RecordType
 from src.app.data_sources.schemas import (
     AdminDataSourceOut,
-    AuthorizeRequest,
     AuthorizeResponse,
     DataSourceOut,
     FieldSpec,
-    IntegrationAppOut,
-    IntegrationAppUpdate,
-    QuickBooksStatus,
+    QuickBooksApp,
+    QuickBooksAppUpdate,
     RecordOut,
     RecordTypeInfo,
+    RedirectUri,
     SourceOwner,
     UploadPreview,
     UploadResult,
@@ -63,77 +60,6 @@ from src.app.data_sources.schemas import (
 STATE_PURPOSE = "quickbooks_oauth"
 STATE_TTL = timedelta(minutes=15)
 PENDING_NAME = "QuickBooks (authorization pending)"
-
-
-# --- integration app (Finance Admin) ----------------------------------------------------
-
-
-async def _integration(session: AsyncSession) -> IntegrationApp | None:
-    return await session.scalar(
-        select(IntegrationApp).where(IntegrationApp.provider == SourceKind.QUICKBOOKS)
-    )
-
-
-async def _app_credentials(session: AsyncSession) -> qb.AppCredentials:
-    app = await _integration(session)
-    if app is None:
-        raise IntegrationNotConfiguredError
-    try:
-        secret = crypto.decrypt(app.client_secret_enc)
-    except ValueError as exc:
-        raise IntegrationNotConfiguredError(
-            "The QuickBooks app secret can't be read. Ask your Finance Admin to enter it again."
-        ) from exc
-    return qb.AppCredentials(app.client_id, secret, app.environment)
-
-
-def _integration_out(app: IntegrationApp | None) -> IntegrationAppOut:
-    return IntegrationAppOut(
-        provider=SourceKind.QUICKBOOKS,
-        configured=app is not None,
-        client_id=app.client_id if app else None,
-        has_client_secret=app is not None,
-        environment=app.environment if app else IntegrationEnvironment.SANDBOX,
-        redirect_uri=qb.redirect_uri(),
-        updated_at=app.updated_at if app else None,
-    )
-
-
-async def get_integration(session: AsyncSession) -> IntegrationAppOut:
-    return _integration_out(await _integration(session))
-
-
-async def set_integration(
-    session: AsyncSession, body: IntegrationAppUpdate, actor: User, ctx: RequestContext
-) -> IntegrationAppOut:
-    app = await _integration(session)
-    if app is None:
-        if body.client_secret is None:
-            raise ClientSecretRequiredError
-        app = IntegrationApp(provider=SourceKind.QUICKBOOKS)
-        session.add(app)
-    app.client_id = body.client_id.strip()
-    app.environment = body.environment
-    if body.client_secret is not None:
-        app.client_secret_enc = crypto.encrypt(body.client_secret.strip())
-    app.updated_by = actor.id
-    record_event(
-        session,
-        "integration.quickbooks_updated",
-        ctx,
-        actor_id=actor.id,
-        environment=body.environment.value,
-        secret_changed=body.client_secret is not None,
-    )
-    await session.commit()
-    return _integration_out(app)
-
-
-async def quickbooks_status(session: AsyncSession) -> QuickBooksStatus:
-    app = await _integration(session)
-    return QuickBooksStatus(
-        configured=app is not None, environment=app.environment if app else None
-    )
 
 
 # --- sources ----------------------------------------------------------------------------
@@ -184,7 +110,7 @@ async def health_summary(session: AsyncSession) -> str:
     )
     rows: dict[SourceStatus, int] = dict(result.all())
     if not rows:
-        return "Not configured" if await _integration(session) is None else "No connections yet"
+        return "Not configured"
     parts = [f"{rows.get(SourceStatus.CONNECTED, 0)} connected"]
     if attention := rows.get(SourceStatus.NEEDS_REAUTH, 0) + rows.get(SourceStatus.ERROR, 0):
         parts.append(f"{attention} need attention")
@@ -207,10 +133,9 @@ async def delete_source(
     source = await _owned(session, user, source_id, lock=True)
     if source.kind == SourceKind.QUICKBOOKS and source.credentials_enc:
         try:
-            app = await _app_credentials(session)
             tokens = qb.Tokens.from_json(crypto.decrypt_json(source.credentials_enc))
-            await qb.revoke(app, tokens.refresh_token)
-        except (IntegrationNotConfiguredError, ValueError, KeyError):
+            await qb.revoke(_app_for(source), tokens.refresh_token)
+        except (AppCredentialsError, ValueError, KeyError):
             pass  # nothing usable to revoke; deleting locally still ends our access
     record_event(
         session,
@@ -250,24 +175,40 @@ async def _replace_records(
 # --- QuickBooks OAuth -------------------------------------------------------------------
 
 
-async def start_authorization(
-    session: AsyncSession, user: User, body: AuthorizeRequest, ctx: RequestContext
+def _app_for(source: DataSource) -> qb.AppCredentials:
+    """The source owner's own Intuit app."""
+    if not source.client_id or not source.client_secret_enc or not source.environment:
+        raise AppCredentialsError
+    try:
+        secret = crypto.decrypt(source.client_secret_enc)
+    except ValueError as exc:
+        raise AppCredentialsError(
+            "Your QuickBooks Client Secret can't be read. Enter it again."
+        ) from exc
+    return qb.AppCredentials(source.client_id, secret, source.environment)
+
+
+def _set_app(
+    source: DataSource, client_id: str, secret: str | None, environment: IntegrationEnvironment
+) -> bool:
+    """Store the Intuit app; returns whether it changed (old tokens are then unusable)."""
+    changed = source.client_id != client_id.strip() or source.environment != environment
+    source.client_id = client_id.strip()
+    source.environment = environment
+    if secret is not None:
+        source.client_secret_enc = crypto.encrypt(secret.strip())
+        changed = True
+    return changed
+
+
+def redirect_uri() -> RedirectUri:
+    return RedirectUri(redirect_uri=qb.redirect_uri())
+
+
+async def _authorization(
+    session: AsyncSession, user: User, source: DataSource, ctx: RequestContext
 ) -> AuthorizeResponse:
-    """Connect a new company, or re-authorize one of the user's own connections."""
-    app = await _app_credentials(session)
-    if body.source_id is None:
-        source = DataSource(
-            owner_id=user.id,
-            kind=SourceKind.QUICKBOOKS,
-            name=PENDING_NAME,
-            status=SourceStatus.PENDING_AUTH,
-        )
-        session.add(source)
-        await session.flush()
-    else:
-        source = await _owned(session, user, body.source_id, lock=True)
-        if source.kind != SourceKind.QUICKBOOKS:
-            raise DataSourceNotFoundError
+    app = _app_for(source)
     # Single use: the callback must present this exact value, then it is cleared
     source.oauth_nonce = secrets.token_urlsafe(24)
     state = create_purpose_token(
@@ -283,7 +224,83 @@ async def start_authorization(
         source_id=str(source.id),
     )
     await session.commit()
-    return AuthorizeResponse(url=qb.authorization_url(app, state))
+    return AuthorizeResponse(
+        source=DataSourceOut.model_validate(source), url=qb.authorization_url(app, state)
+    )
+
+
+async def connect_quickbooks(
+    session: AsyncSession, user: User, body: QuickBooksApp, ctx: RequestContext
+) -> AuthorizeResponse:
+    """Start connecting a company with the user's own Intuit app.
+
+    An unfinished connection (never authorized) is reused, so retrying or double-clicking
+    doesn't pile up empty sources.
+    """
+    source = await session.scalar(
+        select(DataSource)
+        .where(
+            DataSource.owner_id == user.id,
+            DataSource.kind == SourceKind.QUICKBOOKS,
+            DataSource.status == SourceStatus.PENDING_AUTH,
+            DataSource.external_id.is_(None),
+        )
+        .order_by(DataSource.created_at.desc())
+        .limit(1)
+        .with_for_update()
+    )
+    if source is None:
+        source = DataSource(
+            owner_id=user.id,
+            kind=SourceKind.QUICKBOOKS,
+            name=PENDING_NAME,
+            status=SourceStatus.PENDING_AUTH,
+        )
+        session.add(source)
+    _set_app(source, body.client_id, body.client_secret, body.environment)
+    source.last_error = None
+    await session.flush()
+    return await _authorization(session, user, source, ctx)
+
+
+async def authorize_source(
+    session: AsyncSession, user: User, source_id: uuid.UUID, ctx: RequestContext
+) -> AuthorizeResponse:
+    """Re-authorize one of the user's own connections (same Intuit app)."""
+    source = await _owned(session, user, source_id, lock=True)
+    if source.kind != SourceKind.QUICKBOOKS:
+        raise DataSourceNotFoundError
+    return await _authorization(session, user, source, ctx)
+
+
+async def update_app(
+    session: AsyncSession,
+    user: User,
+    source_id: uuid.UUID,
+    body: QuickBooksAppUpdate,
+    ctx: RequestContext,
+) -> DataSourceOut:
+    """Change the Intuit app of a connection. A different app needs a new authorization."""
+    source = await _owned(session, user, source_id, lock=True)
+    if source.kind != SourceKind.QUICKBOOKS:
+        raise DataSourceNotFoundError
+    if _set_app(source, body.client_id, body.client_secret, body.environment):
+        source.credentials_enc = None  # tokens belong to the previous app
+        source.status = (
+            SourceStatus.NEEDS_REAUTH if source.external_id else SourceStatus.PENDING_AUTH
+        )
+        source.last_error = "App credentials changed: re-authorize to continue."
+        record_event(
+            session,
+            "data_source.app_updated",
+            ctx,
+            actor_id=user.id,
+            source_id=str(source.id),
+            environment=body.environment.value,
+            secret_changed=body.client_secret is not None,
+        )
+        await session.commit()
+    return DataSourceOut.model_validate(source)
 
 
 async def complete_authorization(
@@ -345,9 +362,9 @@ async def complete_authorization(
         return await fail("This QuickBooks company is already connected as another data source.")
 
     try:
-        app = await _app_credentials(session)
+        app = _app_for(source)
         tokens = await qb.exchange_code(app, code)
-    except (IntegrationNotConfiguredError, qb.QuickBooksError) as exc:
+    except (AppCredentialsError, qb.QuickBooksError) as exc:
         return await fail(str(exc))
 
     source.credentials_enc = crypto.encrypt_json(tokens.to_json())
@@ -439,7 +456,7 @@ async def sync_source(
         raise SourceNotSyncableError("Uploads don't sync: upload a new file instead.")
     if source.status in (SourceStatus.PENDING_AUTH, SourceStatus.NEEDS_REAUTH):
         raise SourceNotSyncableError("Re-authorize this QuickBooks connection first.")
-    await _sync(session, source, await _app_credentials(session), ctx, user.id)
+    await _sync(session, source, _app_for(source), ctx, user.id)
     return DataSourceOut.model_validate(source)
 
 

@@ -63,6 +63,8 @@ from src.app.agent_catalog.runs.schemas import (
     SourceLink,
 )
 from src.app.agent_catalog.service import ADMIN_CAPACITIES, visible_agent_ids
+from src.app.audit import service as audit
+from src.app.audit.schemas import AuditEventOut
 from src.app.audit.service import record_event
 from src.app.auth.models import User, UserRole
 from src.app.common.clock import utcnow
@@ -132,10 +134,20 @@ def _require_owner(run: AgentRun, user: User) -> None:
         raise RunPermissionError("Only the preparer of this run can change it.")
 
 
+def _own_runs(query: Select[AgentRun], user: User) -> Select[AgentRun]:
+    """Users only ever see their own runs; a Finance Admin sees (and reviews) everyone's."""
+    if user.role == UserRole.FINANCE_ADMIN:
+        return query
+    return query.where(AgentRun.preparer_id == user.id)
+
+
 async def _load(
     session: AsyncSession, access: AgentAccess, run_id: uuid.UUID, *, lock: bool = False
 ) -> tuple[AgentRun, AgentRunDetail]:
-    query = select(AgentRun).where(AgentRun.id == run_id, AgentRun.agent_id == access.agent.id)
+    query = _own_runs(
+        select(AgentRun).where(AgentRun.id == run_id, AgentRun.agent_id == access.agent.id),
+        access.user,
+    )
     run = await session.scalar(query.with_for_update() if lock else query)
     if run is None:
         raise RunNotFoundError
@@ -230,8 +242,7 @@ async def list_runs(session: AsyncSession, user: User, key: str) -> list[RunSumm
     access = await _access(session, user, key)
     runs = list(
         await session.scalars(
-            select(AgentRun)
-            .where(AgentRun.agent_id == access.agent.id)
+            _own_runs(select(AgentRun).where(AgentRun.agent_id == access.agent.id), user)
             .order_by(AgentRun.run_number.desc())
             .limit(50)
         )
@@ -247,6 +258,15 @@ async def get_run(session: AsyncSession, user: User, key: str, run_id: uuid.UUID
     access = await _access(session, user, key)
     run, detail = await _load(session, access, run_id)
     return await _detail(session, access, run, detail)
+
+
+async def get_timeline(
+    session: AsyncSession, user: User, key: str, run_id: uuid.UUID
+) -> list[AuditEventOut]:
+    """The run's audit events, for whoever may open the run (its preparer, or an admin)."""
+    access = await _access(session, user, key)
+    run, _ = await _load(session, access, run_id)
+    return await audit.run_timeline(session, user, run.reference)
 
 
 async def _detail(
@@ -283,11 +303,7 @@ async def _detail(
         can_edit=is_owner and is_allowed(run.status, RunAction.EDIT),
         can_analyze=is_owner and is_allowed(run.status, RunAction.ANALYZE),
         can_submit=is_owner and is_allowed(run.status, RunAction.SUBMIT),
-        can_review=(
-            AgentCapacity.REVIEWER in access.capacities
-            and (access.is_admin or not is_owner)
-            and is_allowed(run.status, RunAction.REVIEW)
-        ),
+        can_review=access.is_admin and is_allowed(run.status, RunAction.REVIEW),
         can_delete=is_owner and is_allowed(run.status, RunAction.DELETE),
     )
     return RunDetail(
@@ -784,12 +800,9 @@ async def review_run(
 ) -> RunDetail:
     access = await _access(session, user, key)
     run, detail = await _load(session, access, run_id, lock=True)
-    if AgentCapacity.REVIEWER not in access.capacities:
-        raise RunPermissionError("You are not assigned as a reviewer for this agent.")
-    # Segregation of duties for users; a Finance Admin may approve their own run (audited)
-    self_review = run.preparer_id == user.id
-    if self_review and not access.is_admin:
-        raise RunPermissionError("You can't review a run you prepared (segregation of duties).")
+    if not access.is_admin:
+        raise RunPermissionError("Only a Finance Admin can approve runs.")
+    self_review = run.preparer_id == user.id  # allowed for admins, and audited
     ensure_allowed(run.status, RunAction.REVIEW)
     assert run.result_hash is not None  # noqa: S101 - set on submit
 
@@ -815,6 +828,51 @@ async def review_run(
     )
     await session.commit()
     return await _detail(session, access, run, detail)
+
+
+# --- approvals --------------------------------------------------------------------------
+
+DECIDED_STATUSES = (RunStatus.APPROVED, RunStatus.REJECTED, RunStatus.CHANGES_REQUESTED)
+
+
+@dataclass(frozen=True)
+class ApprovalRow:
+    summary: RunSummary
+    submitted_at: datetime | None
+    decided_at: datetime | None
+
+
+async def approval_rows(
+    session: AsyncSession, user: User, *, decided: bool, limit: int = 100
+) -> list[ApprovalRow]:
+    """Runs waiting for approval (oldest first) or already decided (newest first), across
+    agents. A Finance Admin sees everyone's; a user only the runs they submitted."""
+    query = _visible_runs(user)
+    if decided:
+        query = query.where(AgentRun.status.in_(DECIDED_STATUSES)).order_by(
+            AgentRun.updated_at.desc()
+        )
+    else:
+        query = query.where(AgentRun.status == RunStatus.PENDING_APPROVAL).order_by(
+            AgentRun.submitted_at
+        )
+    runs = list(await session.scalars(query.limit(limit)))
+    agents = {
+        a.id: a
+        for a in await session.scalars(
+            select(Agent).where(Agent.id.in_({r.agent_id for r in runs}))
+        )
+    }
+    people = await _people(session, {r.preparer_id for r in runs})
+    refs = await _business_refs(session, runs)
+    return [
+        ApprovalRow(
+            RunSummary(**_summary(r, agents[r.agent_id], people[r.preparer_id], refs.get(r.id))),
+            r.submitted_at,
+            r.decided_at,
+        )
+        for r in runs
+    ]
 
 
 # --- overview ---------------------------------------------------------------------------
@@ -849,7 +907,7 @@ OPEN_STATUSES = (
 
 
 def _visible_runs(user: User) -> Select[AgentRun]:
-    return select(AgentRun).where(AgentRun.agent_id.in_(visible_agent_ids(user)))
+    return _own_runs(select(AgentRun).where(AgentRun.agent_id.in_(visible_agent_ids(user))), user)
 
 
 async def run_stats(

@@ -6,9 +6,9 @@ import { useAgents } from "@/features/agent-catalog/hooks"
 
 import type { Assignment } from "../api"
 
+// Users only prepare: approving runs is for Finance Admins
 const CAPACITIES: { capacity: AgentCapacity; label: string; hint: string }[] = [
-  { capacity: "preparer", label: "Prepare", hint: "start runs and see results" },
-  { capacity: "reviewer", label: "Approve", hint: "review other users' runs" },
+  { capacity: "preparer", label: "Access", hint: "run the agent on their own data and see their results" },
 ]
 
 interface AssignmentsEditorProps {
@@ -78,7 +78,7 @@ export function AssignmentsEditor({ value, onChange, disabled }: AssignmentsEdit
         </tbody>
       </table>
       <p className="mt-3 text-xs text-muted-foreground">
-        Prepare: start runs and see results. Approve: review runs prepared by someone else.
+        Users run these agents on their own data and only ever see their own runs. A Finance Admin approves them.
       </p>
     </div>
   )

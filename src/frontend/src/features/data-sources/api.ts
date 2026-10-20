@@ -10,6 +10,9 @@ export interface DataSource {
   kind: SourceKind
   name: string
   status: SourceStatus
+  /** QuickBooks: the owner's own Intuit app (the secret is never returned) */
+  client_id: string | null
+  environment: IntegrationEnvironment | null
   external_id: string | null
   last_synced_at: string | null
   last_error: string | null
@@ -58,25 +61,19 @@ export interface FinanceRecord {
   data: Record<string, unknown>
 }
 
-export interface QuickBooksStatus {
-  configured: boolean
-  environment: IntegrationEnvironment | null
-}
-
-export interface IntegrationApp {
-  provider: "quickbooks"
-  configured: boolean
-  client_id: string | null
-  has_client_secret: boolean
-  environment: IntegrationEnvironment
-  redirect_uri: string
-  updated_at: string | null
-}
-
-export interface IntegrationAppUpdate {
+/** The user's own Intuit app (Intuit Developer portal → Keys & OAuth) */
+export interface QuickBooksApp {
   client_id: string
-  client_secret?: string
+  client_secret: string
   environment: IntegrationEnvironment
+}
+
+/** Omit client_secret to keep the stored one */
+export type QuickBooksAppUpdate = Omit<QuickBooksApp, "client_secret"> & { client_secret?: string }
+
+export interface AuthorizeResponse {
+  source: DataSource
+  url: string
 }
 
 export interface UploadRequest {
@@ -102,13 +99,14 @@ function uploadForm({ file, recordType, mapping, name, skipInvalid }: UploadRequ
 export const dataSourcesApi = {
   list: () => apiRequest<DataSource[]>("/data-sources"),
   recordTypes: () => apiRequest<RecordTypeInfo[]>("/data-sources/record-types"),
-  quickbooksStatus: () => apiRequest<QuickBooksStatus>("/data-sources/quickbooks/status"),
-  /** Intuit sign-in URL; pass sourceId to re-authorize an existing connection */
-  authorize: (sourceId?: string) =>
-    apiRequest<{ url: string }>("/data-sources/quickbooks/authorize", {
-      method: "POST",
-      json: { source_id: sourceId ?? null },
-    }),
+  redirectUri: () => apiRequest<{ redirect_uri: string }>("/data-sources/quickbooks/redirect-uri"),
+  /** Connect a company with the user's own Intuit app; returns the Intuit sign-in URL */
+  connect: (app: QuickBooksApp) =>
+    apiRequest<AuthorizeResponse>("/data-sources/quickbooks", { method: "POST", json: app }),
+  /** Re-authorize an existing connection */
+  authorize: (id: string) => apiRequest<AuthorizeResponse>(`${source(id)}/authorize`, { method: "POST" }),
+  updateApp: ({ id, ...app }: QuickBooksAppUpdate & { id: string }) =>
+    apiRequest<DataSource>(`${source(id)}/app`, { method: "PUT", json: app }),
   sync: (id: string) => apiRequest<DataSource>(`${source(id)}/sync`, { method: "POST" }),
   rename: ({ id, name }: { id: string; name: string }) =>
     apiRequest<DataSource>(source(id), { method: "PATCH", json: { name } }),
@@ -123,8 +121,5 @@ export const dataSourcesApi = {
     apiRequest<UploadResult>("/data-sources/uploads", { method: "POST", form: uploadForm(req) }),
 
   // Finance Admin
-  integration: () => apiRequest<IntegrationApp>("/admin/integrations/quickbooks"),
-  setIntegration: (body: IntegrationAppUpdate) =>
-    apiRequest<IntegrationApp>("/admin/integrations/quickbooks", { method: "PUT", json: body }),
   allSources: () => apiRequest<AdminDataSource[]>("/admin/data-sources"),
 }

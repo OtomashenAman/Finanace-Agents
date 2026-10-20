@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -15,7 +15,8 @@ FullName = Annotated[str, Field(min_length=1, max_length=200)]
 
 class AssignmentIn(BaseModel):
     agent_key: str = Field(max_length=64)
-    capacity: AgentCapacity
+    # Users prepare; approving is for Finance Admins only
+    capacity: Literal[AgentCapacity.PREPARER] = AgentCapacity.PREPARER
 
 
 class AssignmentOut(BaseModel):

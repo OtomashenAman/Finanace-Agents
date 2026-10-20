@@ -9,8 +9,8 @@ export const userKeys = {
   list: (search: string) => [USERS_TAG, "list", search] as const,
 }
 
-export function useUsers(search: string) {
-  return useQuery({ queryKey: userKeys.list(search), queryFn: () => usersApi.list(search) })
+export function useUsers(search: string, enabled = true) {
+  return useQuery({ queryKey: userKeys.list(search), queryFn: () => usersApi.list(search), enabled })
 }
 
 const invalidates = [USERS_TAG, "auth"] as const

@@ -98,7 +98,7 @@ export function UsersPage() {
   return (
     <AppPage
       title="Admin Settings · Users"
-      subtitle="Create accounts, choose who prepares and approves each agent, reset passwords and deactivate access."
+      subtitle="Create accounts, choose which agents each user can run, reset passwords and deactivate access."
     >
       <AdminTabs />
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">

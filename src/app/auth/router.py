@@ -1,9 +1,14 @@
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Cookie, Response, status
+from fastapi import APIRouter, Depends, Request, Response, status
 
 from src.app.auth import service
-from src.app.auth.cookies import REFRESH_COOKIE, clear_auth_cookies, set_auth_cookies
+from src.app.auth.cookies import (
+    SessionSlot,
+    clear_auth_cookies,
+    refresh_cookie,
+    set_auth_cookies,
+)
 from src.app.auth.dependencies import CurrentUser
 from src.app.auth.exceptions import InvalidRefreshTokenError
 from src.app.auth.models import User
@@ -15,7 +20,12 @@ from src.app.core.errors import app_error_response
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-RefreshCookie = Annotated[str | None, Cookie(alias=REFRESH_COOKIE)]
+
+def _refresh_token(request: Request, slot: SessionSlot) -> str | None:
+    return request.cookies.get(refresh_cookie(slot))
+
+
+RefreshCookie = Annotated[str | None, Depends(_refresh_token)]
 _UNAUTHORIZED: dict[int | str, dict[str, Any]] = {401: {"model": ErrorResponse}}
 
 
@@ -25,12 +35,16 @@ _UNAUTHORIZED: dict[int | str, dict[str, Any]] = {401: {"model": ErrorResponse}}
     responses={**_UNAUTHORIZED, 423: {"model": ErrorResponse}},
 )
 async def login(
-    body: LoginRequest, response: Response, session: SessionDep, ctx: RequestContextDep
+    body: LoginRequest,
+    response: Response,
+    session: SessionDep,
+    ctx: RequestContextDep,
+    slot: SessionSlot,
 ) -> User:
     user = await service.authenticate(session, body.email, body.password, ctx)
     tokens = service.issue_tokens(session, user, ctx)
     await session.commit()
-    set_auth_cookies(response, tokens.access_token, tokens.refresh_token)
+    set_auth_cookies(response, tokens.access_token, tokens.refresh_token, slot)
     return user
 
 
@@ -41,7 +55,7 @@ async def login(
     responses=_UNAUTHORIZED,
 )
 async def refresh(
-    session: SessionDep, ctx: RequestContextDep, refresh_token: RefreshCookie = None
+    session: SessionDep, ctx: RequestContextDep, slot: SessionSlot, refresh_token: RefreshCookie
 ) -> Response:
     try:
         if not refresh_token:
@@ -49,22 +63,22 @@ async def refresh(
         _, tokens = await service.rotate_refresh_token(session, refresh_token, ctx)
     except InvalidRefreshTokenError as exc:
         error = app_error_response(exc)
-        clear_auth_cookies(error)
+        clear_auth_cookies(error, slot)
         return error
     await session.commit()
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
-    set_auth_cookies(response, tokens.access_token, tokens.refresh_token)
+    set_auth_cookies(response, tokens.access_token, tokens.refresh_token, slot)
     return response
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
 async def logout(
-    session: SessionDep, ctx: RequestContextDep, refresh_token: RefreshCookie = None
+    session: SessionDep, ctx: RequestContextDep, slot: SessionSlot, refresh_token: RefreshCookie
 ) -> Response:
     await service.logout(session, refresh_token, ctx)
     await session.commit()
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
-    clear_auth_cookies(response)
+    clear_auth_cookies(response, slot)
     return response
 
 

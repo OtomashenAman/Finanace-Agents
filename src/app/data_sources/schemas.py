@@ -16,6 +16,9 @@ class DataSourceOut(BaseModel):
     kind: SourceKind
     name: str
     status: SourceStatus
+    # QuickBooks: the owner's own Intuit app (the secret is never returned)
+    client_id: str | None
+    environment: IntegrationEnvironment | None
     external_id: str | None
     last_synced_at: datetime | None
     last_error: str | None
@@ -41,36 +44,28 @@ class SourceUpdate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
 
 
-class QuickBooksStatus(BaseModel):
-    configured: bool
-    environment: IntegrationEnvironment | None
+class QuickBooksApp(BaseModel):
+    """The user's own Intuit app (Intuit Developer portal → Keys & OAuth)."""
 
-
-class AuthorizeRequest(BaseModel):
-    """Omit source_id to connect a new company; pass it to re-authorize an existing one."""
-
-    source_id: uuid.UUID | None = None
-
-
-class AuthorizeResponse(BaseModel):
-    url: str
-
-
-class IntegrationAppOut(BaseModel):
-    provider: SourceKind
-    configured: bool
-    client_id: str | None
-    has_client_secret: bool
+    client_id: str = Field(min_length=1, max_length=255)
+    client_secret: str = Field(min_length=1, max_length=500)
     environment: IntegrationEnvironment
-    redirect_uri: str  # register exactly this in the Intuit app
-    updated_at: datetime | None
 
 
-class IntegrationAppUpdate(BaseModel):
+class QuickBooksAppUpdate(BaseModel):
     client_id: str = Field(min_length=1, max_length=255)
     # Omit to keep the stored secret (it is never sent back to the browser)
     client_secret: str | None = Field(default=None, min_length=1, max_length=500)
     environment: IntegrationEnvironment
+
+
+class RedirectUri(BaseModel):
+    redirect_uri: str  # register exactly this in the Intuit app
+
+
+class AuthorizeResponse(BaseModel):
+    source: DataSourceOut
+    url: str  # Intuit sign-in: send the browser here
 
 
 class FieldSpec(BaseModel):

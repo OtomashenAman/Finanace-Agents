@@ -3,12 +3,14 @@ import { createBrowserRouter, Navigate, RouterProvider } from "react-router"
 import { Toaster } from "sonner"
 
 import { AppShell } from "@/components/layout/app-shell"
-import { IntegrationsPage } from "@/features/admin/integrations-page"
+import { AdminDataSourcesPage } from "@/features/admin/data-sources-page"
 import { UsersPage } from "@/features/admin/users-page"
 import { CatalogPage } from "@/features/agent-catalog/catalog-page"
 import { RunPage } from "@/features/agent-catalog/workspace/run-page"
 import { WorkspacePage } from "@/features/agent-catalog/workspace/workspace-page"
 import { LoginPage } from "@/features/auth/login-page"
+import { ApprovalsPage } from "@/features/approvals/approvals-page"
+import { AuditPage } from "@/features/audit/audit-page"
 import { GuestOnly, RequireAdmin, RequireAuth } from "@/features/auth/route-guards"
 import { DataSourcesPage } from "@/features/data-sources/data-sources-page"
 import { OverviewPage } from "@/features/overview/overview-page"
@@ -27,13 +29,15 @@ const router = createBrowserRouter([
           { path: "/catalog", element: <CatalogPage /> },
           { path: "/catalog/:agentKey", element: <WorkspacePage /> },
           { path: "/catalog/:agentKey/runs/:runId", element: <RunPage /> },
+          { path: "/approvals", element: <ApprovalsPage /> },
+          { path: "/audit", element: <AuditPage /> },
           { path: "/data-sources", element: <DataSourcesPage /> },
           {
             element: <RequireAdmin />,
             children: [
               { path: "/admin", element: <Navigate to="/admin/users" replace /> },
               { path: "/admin/users", element: <UsersPage /> },
-              { path: "/admin/integrations", element: <IntegrationsPage /> },
+              { path: "/admin/data-sources", element: <AdminDataSourcesPage /> },
             ],
           },
         ],

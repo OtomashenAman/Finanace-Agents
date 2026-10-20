@@ -26,7 +26,7 @@ export function ResultStep({ agentKey, run, form, onGoTo }: ResultStepProps) {
 
   const onSubmit = () =>
     submit.mutate(undefined, {
-      onSuccess: () => toast.success(`${run.reference} sent to ${run.reviewer_label} for approval`),
+      onSuccess: () => toast.success(`${run.reference} sent to the Finance Admin for approval`),
       onError: (error) => toast.error(error instanceof ApiError ? error.message : "Couldn't submit the run"),
     })
 

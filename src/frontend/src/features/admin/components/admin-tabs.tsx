@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils"
 
 const TABS = [
   { to: "/admin/users", label: "Users" },
-  { to: "/admin/integrations", label: "Integrations" },
+  { to: "/admin/data-sources", label: "Data sources" },
 ]
 
 export function AdminTabs() {

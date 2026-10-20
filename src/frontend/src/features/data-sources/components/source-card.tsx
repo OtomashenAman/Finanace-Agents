@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { FileSpreadsheet, KeyRound, Landmark, LoaderCircle, Pencil, RefreshCw, Trash2 } from "lucide-react"
+import { FileSpreadsheet, KeyRound, Landmark, LoaderCircle, Pencil, RefreshCw, Settings2, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils"
 import type { DataSource, RecordType } from "../api"
 import { useAuthorizeQuickBooks, useDeleteSource, useRenameSource, useSyncSource } from "../hooks"
 import { RECORD_LABELS, STATUS } from "../labels"
+import { QuickBooksAppForm } from "./quickbooks-app-form"
 
 export function StatusPill({ source }: { source: DataSource }) {
   const { label, tone } = STATUS[source.status]
@@ -48,6 +49,7 @@ export function SourceCard({ source }: { source: DataSource }) {
   const authorize = useAuthorizeQuickBooks()
   const remove = useDeleteSource()
   const [renaming, setRenaming] = useState(false)
+  const [editingApp, setEditingApp] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   const isQuickBooks = source.kind === "quickbooks"
@@ -90,7 +92,13 @@ export function SourceCard({ source }: { source: DataSource }) {
           )}
           <p className="mt-0.5 text-xs text-muted-foreground">
             {isQuickBooks
-              ? `QuickBooks Online${source.external_id ? ` · company ${source.external_id}` : ""}`
+              ? [
+                  "QuickBooks Online",
+                  source.environment === "sandbox" && "sandbox",
+                  source.external_id && `company ${source.external_id}`,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")
               : `Upload · ${source.filename ?? "file"}`}
           </p>
         </div>
@@ -110,6 +118,12 @@ export function SourceCard({ source }: { source: DataSource }) {
         <p className={cn("mt-3 text-sm", source.status === "connected" ? "text-muted-foreground" : "text-destructive")}>
           {source.last_error}
         </p>
+      )}
+
+      {editingApp && (
+        <div className="mt-4 border-t pt-4">
+          <QuickBooksAppForm source={source} onDone={() => setEditingApp(false)} />
+        </div>
       )}
 
       <p className="mt-3 text-xs text-muted-foreground">
@@ -133,6 +147,18 @@ export function SourceCard({ source }: { source: DataSource }) {
           >
             <KeyRound aria-hidden />
             {source.status === "pending_auth" ? "Authorize" : "Re-authorize"}
+          </Button>
+        )}
+        {isQuickBooks && !editingApp && (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={() => setEditingApp(true)}
+            aria-label={`App credentials for ${source.name}`}
+            title="App credentials"
+          >
+            <Settings2 aria-hidden />
           </Button>
         )}
         {!renaming && (

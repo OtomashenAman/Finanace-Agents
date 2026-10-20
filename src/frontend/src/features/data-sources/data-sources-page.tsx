@@ -5,13 +5,12 @@ import { CircleCheck, Database, Landmark, LoaderCircle, Upload } from "lucide-re
 import { AppPage } from "@/components/layout/app-page"
 import { Alert } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
-import { useCurrentUser } from "@/features/auth/hooks"
-import { isAdmin } from "@/features/auth/roles"
-import { errorMessage } from "@/lib/api"
+import { Panel } from "@/features/agent-catalog/workspace/components/panel"
 
+import { QuickBooksAppForm } from "./components/quickbooks-app-form"
 import { SourceCard } from "./components/source-card"
 import { UploadWizard } from "./components/upload-wizard"
-import { useAuthorizeQuickBooks, useDataSources, useQuickBooksStatus } from "./hooks"
+import { useDataSources } from "./hooks"
 
 type Banner = { kind: "success" | "error"; text: string }
 
@@ -37,14 +36,9 @@ function useOAuthResult(): [Banner | null, () => void] {
 }
 
 export function DataSourcesPage() {
-  const { data: user } = useCurrentUser()
   const sources = useDataSources()
-  const quickbooks = useQuickBooksStatus()
-  const authorize = useAuthorizeQuickBooks()
-  const [uploading, setUploading] = useState(false)
+  const [panel, setPanel] = useState<"connect" | "upload" | null>(null)
   const [banner, dismiss] = useOAuthResult()
-
-  const qbReady = quickbooks.data?.configured === true
 
   return (
     <AppPage
@@ -71,34 +65,22 @@ export function DataSourcesPage() {
           ))}
 
         <div className="flex flex-wrap items-center gap-3">
-          <Button
-            type="button"
-            onClick={() => authorize.mutate(undefined)}
-            disabled={!qbReady || authorize.isPending}
-          >
-            {authorize.isPending ? <LoaderCircle className="animate-spin" aria-hidden /> : <Landmark aria-hidden />}
+          <Button type="button" onClick={() => setPanel("connect")} disabled={panel === "connect"}>
+            <Landmark aria-hidden />
             Connect QuickBooks
           </Button>
-          <Button type="button" variant="outline" onClick={() => setUploading(true)} disabled={uploading}>
+          <Button type="button" variant="outline" onClick={() => setPanel("upload")} disabled={panel === "upload"}>
             <Upload aria-hidden />
             Upload file
           </Button>
-          {quickbooks.data && !qbReady && (
-            <p className="text-sm text-muted-foreground">
-              {isAdmin(user)
-                ? "Set up the QuickBooks app under Admin Settings → Integrations to enable connecting."
-                : "QuickBooks isn't set up yet: ask your Finance Admin. You can still upload files."}
-            </p>
-          )}
-          {quickbooks.data?.environment === "sandbox" && (
-            <span className="rounded bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">
-              QuickBooks sandbox
-            </span>
-          )}
         </div>
-        {authorize.error && <Alert>{errorMessage(authorize.error, "Couldn't start the QuickBooks connection.")}</Alert>}
 
-        {uploading && <UploadWizard onDone={() => setUploading(false)} />}
+        {panel === "connect" && (
+          <Panel title="Connect your QuickBooks company">
+            <QuickBooksAppForm onDone={() => setPanel(null)} />
+          </Panel>
+        )}
+        {panel === "upload" && <UploadWizard onDone={() => setPanel(null)} />}
 
         {sources.isPending && (
           <div className="flex justify-center py-16" role="status">
@@ -107,7 +89,7 @@ export function DataSourcesPage() {
           </div>
         )}
         {sources.isError && <Alert>Couldn't load your data sources. Refresh the page to try again.</Alert>}
-        {sources.data?.length === 0 && !uploading && (
+        {sources.data?.length === 0 && panel === null && (
           <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed bg-card px-6 py-16 text-center">
             <Database className="size-8 text-muted-foreground" aria-hidden />
             <p className="font-semibold">No data sources yet</p>

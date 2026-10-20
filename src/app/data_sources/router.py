@@ -17,14 +17,13 @@ from src.app.data_sources.exceptions import UploadRejectedError
 from src.app.data_sources.records import RecordType
 from src.app.data_sources.schemas import (
     AdminDataSourceOut,
-    AuthorizeRequest,
     AuthorizeResponse,
     DataSourceOut,
-    IntegrationAppOut,
-    IntegrationAppUpdate,
-    QuickBooksStatus,
+    QuickBooksApp,
+    QuickBooksAppUpdate,
     RecordOut,
     RecordTypeInfo,
+    RedirectUri,
     SourceUpdate,
     UploadPreview,
     UploadResult,
@@ -76,18 +75,18 @@ async def record_types(_: CurrentUser) -> list[RecordTypeInfo]:
     return service.record_types()
 
 
-@router.get("/quickbooks/status", response_model=QuickBooksStatus)
-async def quickbooks_status(session: SessionDep, _: CurrentUser) -> QuickBooksStatus:
-    """Whether a Finance Admin has set up the QuickBooks app (no credentials exposed)."""
-    return await service.quickbooks_status(session)
+@router.get("/quickbooks/redirect-uri", response_model=RedirectUri)
+async def quickbooks_redirect_uri(_: CurrentUser) -> RedirectUri:
+    """The Redirect URI to register in your Intuit app, exactly as returned."""
+    return service.redirect_uri()
 
 
-@router.post("/quickbooks/authorize", response_model=AuthorizeResponse, responses=_ERRORS)
-async def authorize_quickbooks(
-    body: AuthorizeRequest, session: SessionDep, user: CurrentUser, ctx: RequestContextDep
+@router.post("/quickbooks", response_model=AuthorizeResponse, responses=_ERRORS)
+async def connect_quickbooks(
+    body: QuickBooksApp, session: SessionDep, user: CurrentUser, ctx: RequestContextDep
 ) -> AuthorizeResponse:
-    """Intuit sign-in URL to send the browser to (connect a company or re-authorize one)."""
-    return await service.start_authorization(session, user, body, ctx)
+    """Connect a company with your own Intuit app; returns the Intuit sign-in URL."""
+    return await service.connect_quickbooks(session, user, body, ctx)
 
 
 @router.get("/quickbooks/callback", include_in_schema=False)
@@ -187,6 +186,26 @@ async def delete_source(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.post("/{source_id}/authorize", response_model=AuthorizeResponse, responses=_ERRORS)
+async def authorize_source(
+    source_id: uuid.UUID, session: SessionDep, user: CurrentUser, ctx: RequestContextDep
+) -> AuthorizeResponse:
+    """Re-authorize a QuickBooks connection (e.g. after access expired)."""
+    return await service.authorize_source(session, user, source_id, ctx)
+
+
+@router.put("/{source_id}/app", response_model=DataSourceOut, responses=_ERRORS)
+async def update_app(
+    source_id: uuid.UUID,
+    body: QuickBooksAppUpdate,
+    session: SessionDep,
+    user: CurrentUser,
+    ctx: RequestContextDep,
+) -> DataSourceOut:
+    """Change the connection's Intuit app (Client ID/Secret, environment)."""
+    return await service.update_app(session, user, source_id, body, ctx)
+
+
 @router.post("/{source_id}/sync", response_model=DataSourceOut, responses=_ERRORS)
 async def sync_source(
     source_id: uuid.UUID, session: SessionDep, user: CurrentUser, ctx: RequestContextDep
@@ -208,19 +227,6 @@ async def list_records(
 
 
 # --- Finance Admin ----------------------------------------------------------------------
-
-
-@admin_router.get("/integrations/quickbooks", response_model=IntegrationAppOut)
-async def get_quickbooks_app(session: SessionDep, _: AdminUser) -> IntegrationAppOut:
-    """The organization's Intuit app (the secret is never returned) and its redirect URI."""
-    return await service.get_integration(session)
-
-
-@admin_router.put("/integrations/quickbooks", response_model=IntegrationAppOut, responses=_ERRORS)
-async def set_quickbooks_app(
-    body: IntegrationAppUpdate, session: SessionDep, ctx: RequestContextDep, admin: AdminUser
-) -> IntegrationAppOut:
-    return await service.set_integration(session, body, admin, ctx)
 
 
 @admin_router.get("/data-sources", response_model=list[AdminDataSourceOut])

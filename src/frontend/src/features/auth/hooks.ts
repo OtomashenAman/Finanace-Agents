@@ -1,6 +1,7 @@
 import { hashKey, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { AUTH_ME_KEY } from "@/lib/query-client"
+import { rememberSlot, startNewSlot } from "@/lib/session-slot"
 
 import { authApi } from "./api"
 
@@ -20,20 +21,37 @@ export function useLogin() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: authApi.login,
-    onSuccess: (user) => queryClient.setQueryData(authKeys.me, user),
+    onSuccess: (user) => {
+      rememberSlot()
+      queryClient.setQueryData(authKeys.me, user)
+    },
   })
 }
 
-export function useLogout() {
+/** Drop all cached data but keep the "me" query (set to null) so mounted route guards see the
+ *  change; queryClient.clear() would detach them from the cache. */
+function useSignedOutCache() {
   const queryClient = useQueryClient()
+  return () => {
+    queryClient.setQueryData(authKeys.me, null)
+    queryClient.removeQueries({ predicate: (query) => query.queryHash !== hashKey(authKeys.me) })
+  }
+}
+
+export function useLogout() {
+  const signedOut = useSignedOutCache()
   return useMutation({
     mutationFn: authApi.logout,
-    // Even if the request fails, treat the user as signed out and drop all other cached data.
-    // Keep the "me" query itself (set to null) so mounted route guards see the change;
-    // queryClient.clear() would detach them from the cache.
-    onSettled: () => {
-      queryClient.setQueryData(authKeys.me, null)
-      queryClient.removeQueries({ predicate: (query) => query.queryHash !== hashKey(authKeys.me) })
-    },
+    // Even if the request fails, treat the user as signed out
+    onSettled: signedOut,
   })
+}
+
+/** Sign in with another account in this tab only; other tabs stay signed in as they are. */
+export function useSwitchAccount() {
+  const signedOut = useSignedOutCache()
+  return () => {
+    startNewSlot()
+    signedOut()
+  }
 }

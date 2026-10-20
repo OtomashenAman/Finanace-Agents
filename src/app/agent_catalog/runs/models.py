@@ -5,12 +5,17 @@ from typing import Any
 
 from sqlalchemy import (
     BigInteger,
+    ColumnElement,
     ForeignKey,
     Identity,
     Index,
     String,
     Text,
     UniqueConstraint,
+    case,
+    cast,
+    func,
+    literal,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -100,6 +105,13 @@ class AgentRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     @property
     def reference(self) -> str:
         return f"RUN-{self.run_number:05d}"
+
+    @classmethod
+    def reference_sql(cls) -> ColumnElement[str]:
+        """`reference` in SQL (audit events store it), e.g. to match a user's runs."""
+        number = cast(cls.run_number, String)
+        padded = case((cls.run_number < 100_000, func.lpad(number, 5, "0")), else_=number)
+        return literal("RUN-") + padded
 
 
 class AgentRunDetail:

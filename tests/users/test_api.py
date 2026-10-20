@@ -99,11 +99,18 @@ async def test_update_and_assignments(adm: AsyncClient, db: AsyncSession) -> Non
     r = await adm.patch(f"{USERS}/{user['id']}", json={"full_name": "Renamed", "role": "user"})
     assert r.json()["full_name"] == "Renamed"
 
+    # Approving is for Finance Admins only: users can't be made reviewers
+    reviewer = await adm.put(
+        f"{USERS}/{user['id']}/assignments",
+        json={"assignments": [{"agent_key": "ap_invoice", "capacity": "reviewer"}]},
+    )
+    assert reviewer.status_code == 422
+
     r = await adm.put(
         f"{USERS}/{user['id']}/assignments",
         json={
             "assignments": [
-                {"agent_key": "ap_invoice", "capacity": "reviewer"},
+                {"agent_key": "ap_invoice"},
                 {"agent_key": "expense_audit", "capacity": "preparer"},
                 {"agent_key": "expense_audit", "capacity": "preparer"},  # duplicates collapse
             ]
@@ -111,7 +118,7 @@ async def test_update_and_assignments(adm: AsyncClient, db: AsyncSession) -> Non
     )
     assert r.status_code == 200, r.text
     assert [(a["agent_key"], a["capacity"]) for a in r.json()["assignments"]] == [
-        ("ap_invoice", "reviewer"),
+        ("ap_invoice", "preparer"),
         ("expense_audit", "preparer"),
     ]
     rows = await db.scalars(select(AgentAssignment).where(AgentAssignment.user_id == user["id"]))

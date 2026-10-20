@@ -14,6 +14,7 @@ from src.app.agent_catalog.runs.schemas import (
     RunSummary,
     SourceLink,
 )
+from src.app.audit.schemas import AuditEventOut
 from src.app.auth.dependencies import CurrentUser
 from src.app.common.context import RequestContextDep
 from src.app.common.schemas import ErrorResponse
@@ -154,8 +155,7 @@ async def review_run(
     user: CurrentUser,
     ctx: RequestContextDep,
 ) -> RunDetail:
-    """Approve, reject or request changes (assigned reviewer; only a Finance Admin may review
-    their own run)."""
+    """Approve, reject or request changes (Finance Admin only, own runs included)."""
     return await service.review_run(session, user, key, run_id, body, ctx)
 
 
@@ -177,3 +177,11 @@ async def unlink_source(
     key: str, run_id: uuid.UUID, session: SessionDep, user: CurrentUser, ctx: RequestContextDep
 ) -> RunDetail:
     return await service.unlink_source(session, user, key, run_id, ctx)
+
+
+@router.get("/runs/{run_id}/timeline", response_model=list[AuditEventOut], responses=_ERRORS)
+async def get_timeline(
+    key: str, run_id: uuid.UUID, session: SessionDep, user: CurrentUser
+) -> list[AuditEventOut]:
+    """Who did what on this run, oldest first (from the audit trail)."""
+    return await service.get_timeline(session, user, key, run_id)

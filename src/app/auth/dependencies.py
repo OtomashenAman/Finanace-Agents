@@ -3,19 +3,17 @@ from collections.abc import Awaitable, Callable
 from typing import Annotated
 
 import jwt
-from fastapi import Cookie, Depends
+from fastapi import Depends, Request
 
-from src.app.auth.cookies import ACCESS_COOKIE
+from src.app.auth.cookies import SessionSlot, access_cookie
 from src.app.auth.exceptions import NotAuthenticatedError, PermissionDeniedError, TokenExpiredError
 from src.app.auth.models import User, UserRole
 from src.app.auth.security import decode_access_token
 from src.app.core.db import SessionDep
 
 
-async def get_current_user(
-    session: SessionDep,
-    access_token: Annotated[str | None, Cookie(alias=ACCESS_COOKIE)] = None,
-) -> User:
+async def get_current_user(session: SessionDep, request: Request, slot: SessionSlot) -> User:
+    access_token = request.cookies.get(access_cookie(slot))
     if not access_token:
         raise NotAuthenticatedError
     try:

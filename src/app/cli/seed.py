@@ -5,7 +5,7 @@
 
 Users (both share DEMO_ADMIN_PASSWORD):
   finance.admin@example.com  Finance Admin (every agent, user management)
-  demo.user@example.com      user: preparer + reviewer for AP Invoice
+  demo.user@example.com      user: prepares AP Invoice runs (the admin approves them)
 """
 
 import argparse
@@ -24,7 +24,7 @@ from src.app.core.db import get_engine, get_sessionmaker
 # email, full name, role, (agent key, capacity) assignments
 DEMO_TEAM: list[tuple[str, str, UserRole, list[tuple[str, AgentCapacity]]]] = [
     ("demo.user@example.com", "Demo User", UserRole.USER,
-     [("ap_invoice", AgentCapacity.PREPARER), ("ap_invoice", AgentCapacity.REVIEWER)]),
+     [("ap_invoice", AgentCapacity.PREPARER)]),
 ]  # fmt: skip
 
 

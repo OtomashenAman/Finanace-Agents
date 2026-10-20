@@ -70,11 +70,11 @@ async def test_preparer_sees_only_assigned_active_agents(
     assert (await c.get(AGENTS)).json() == []
 
     await assign(db, preparer, "ap_invoice", AgentCapacity.PREPARER)
-    await assign(db, preparer, "expense_audit", AgentCapacity.REVIEWER)
+    await assign(db, preparer, "expense_audit", AgentCapacity.PREPARER)
     agents = (await c.get(AGENTS)).json()
     assert [(a["key"], a["my_capacities"]) for a in agents] == [
         ("ap_invoice", ["preparer"]),
-        ("expense_audit", ["reviewer"]),
+        ("expense_audit", ["preparer"]),
     ]
 
     # A disabled agent disappears for non-admins even when assigned

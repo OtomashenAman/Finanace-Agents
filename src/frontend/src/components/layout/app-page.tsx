@@ -1,8 +1,8 @@
 import type { ReactNode } from "react"
-import { LogOut } from "lucide-react"
+import { LogOut, UserPlus } from "lucide-react"
 import { toast } from "sonner"
 
-import { useCurrentUser, useLogout } from "@/features/auth/hooks"
+import { useCurrentUser, useLogout, useSwitchAccount } from "@/features/auth/hooks"
 import { initials, ROLE_LABELS } from "@/features/auth/roles"
 
 interface AppPageProps {
@@ -19,6 +19,7 @@ function comingSoon(feature: string) {
 function UserMenu() {
   const { data: user } = useCurrentUser()
   const logout = useLogout()
+  const switchAccount = useSwitchAccount()
   if (!user) return null
 
   return (
@@ -32,6 +33,15 @@ function UserMenu() {
       <span className="hidden font-medium text-brand-navy lg:inline" title={user.email}>
         {ROLE_LABELS[user.role]}
       </span>
+      <button
+        type="button"
+        onClick={switchAccount}
+        className="ml-1 rounded-md p-2 text-muted-foreground hover:bg-secondary hover:text-foreground"
+        aria-label="Use another account in this tab"
+        title="Use another account in this tab (others stay signed in)"
+      >
+        <UserPlus className="size-4" />
+      </button>
       <button
         type="button"
         onClick={() => logout.mutate()}

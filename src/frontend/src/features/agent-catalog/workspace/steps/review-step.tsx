@@ -4,6 +4,7 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { RunTimeline } from "@/features/audit/components/run-timeline"
 import { ApiError } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
@@ -66,7 +67,7 @@ export function ReviewStep({ agentKey, run }: { agentKey: string; run: RunDetail
           <dl className="grid gap-4 sm:grid-cols-2">
             <Fact label="Run identifier">{run.reference}</Fact>
             <Fact label="Preparer">{run.preparer.full_name}</Fact>
-            <Fact label="Assigned reviewer">{run.reviewer_label}</Fact>
+            <Fact label="Approver">Finance Admin ({run.reviewer_label})</Fact>
             <Fact label="Submitted">{formatDateTime(run.submitted_at)}</Fact>
           </dl>
 
@@ -162,7 +163,7 @@ export function ReviewStep({ agentKey, run }: { agentKey: string; run: RunDetail
             </div>
           ) : (
             run.status === "pending_approval" && (
-              <p className="text-sm text-muted-foreground">Waiting for {run.reviewer_label} to review this run.</p>
+              <p className="text-sm text-muted-foreground">Waiting for a Finance Admin to review this run.</p>
             )
           )}
 
@@ -185,6 +186,8 @@ export function ReviewStep({ agentKey, run }: { agentKey: string; run: RunDetail
               </ol>
             </div>
           )}
+
+          <RunTimeline agentKey={agentKey} runId={run.id} />
 
           <p className="text-xs text-muted-foreground">Actor, time, comments and result hash are recorded.</p>
         </div>

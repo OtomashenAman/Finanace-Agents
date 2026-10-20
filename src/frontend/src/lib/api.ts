@@ -1,3 +1,5 @@
+import { sessionSlot, SLOT_HEADER } from "./session-slot"
+
 const API_BASE = `${import.meta.env.VITE_API_BASE_URL ?? "/api"}/v1`
 
 /** Error thrown for every failed API call. `code` mirrors the backend's detail.code. */
@@ -60,7 +62,11 @@ async function toApiError(res: Response): Promise<ApiError> {
 let refreshing: Promise<boolean> | null = null
 
 function refreshSession(): Promise<boolean> {
-  refreshing ??= fetch(`${API_BASE}/auth/refresh`, { method: "POST", credentials: "same-origin" })
+  refreshing ??= fetch(`${API_BASE}/auth/refresh`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { [SLOT_HEADER]: sessionSlot() },
+  })
     .then((res) => res.ok)
     .catch(() => false)
     .finally(() => {
@@ -69,17 +75,18 @@ function refreshSession(): Promise<boolean> {
   return refreshing
 }
 
-export async function apiRequest<T>(
+async function send(
   path: string,
-  { json, form, headers, skipAuthRefresh = false, ...init }: RequestOptions = {},
-): Promise<T> {
-  const send = async () => {
+  { json, form, headers, skipAuthRefresh = false, ...init }: RequestOptions,
+): Promise<Response> {
+  const attempt = async () => {
     try {
       return await fetch(`${API_BASE}${path}`, {
         ...init,
         credentials: "same-origin",
         headers: {
           Accept: "application/json",
+          [SLOT_HEADER]: sessionSlot(),
           ...(json !== undefined && { "Content-Type": "application/json" }),
           ...headers,
         },
@@ -90,14 +97,32 @@ export async function apiRequest<T>(
     }
   }
 
-  let res = await send()
+  let res = await attempt()
   if (res.status === 401 && !skipAuthRefresh) {
     await refreshSession()
     // Retry even if this tab's refresh lost a race: another tab may already have new cookies
-    res = await send()
+    res = await attempt()
   }
-
   if (!res.ok) throw await toApiError(res)
+  return res
+}
+
+export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const res = await send(path, options)
   if (res.status === 204) return undefined as T
   return (await res.json()) as T
+}
+
+/** Save a file the API generates (e.g. a CSV export) under the name the server gives it.
+ *  A plain link wouldn't carry this tab's session header. */
+export async function apiDownload(path: string, fallbackName: string): Promise<void> {
+  const res = await send(path, { headers: { Accept: "*/*" } })
+  const name = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] ?? fallbackName
+  const url = URL.createObjectURL(await res.blob())
+  const link = document.createElement("a")
+  link.href = url
+  link.download = name
+  link.click()
+  // Revoking right away can cancel the download in some browsers
+  setTimeout(() => URL.revokeObjectURL(url), 10_000)
 }

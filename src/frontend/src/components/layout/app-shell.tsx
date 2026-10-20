@@ -28,8 +28,8 @@ const NAV: NavItem[] = [
   { label: "Overview", icon: LayoutDashboard, to: "/overview" },
   { label: "Agent Catalog", icon: LayoutGrid, to: "/catalog" },
   { label: "My Worklist", icon: ListTodo },
-  { label: "Approvals", icon: CircleCheck },
-  { label: "Audit Trail", icon: History },
+  { label: "Approvals", icon: CircleCheck, to: "/approvals" },
+  { label: "Audit Trail", icon: History, to: "/audit" },
   { label: "Data Sources", icon: Database, to: "/data-sources" },
   { label: "Admin Settings", icon: Settings, to: "/admin", adminOnly: true },
 ]

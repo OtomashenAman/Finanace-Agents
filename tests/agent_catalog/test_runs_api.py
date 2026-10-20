@@ -49,10 +49,9 @@ async def preparer(make_user: MakeUser, db: AsyncSession) -> User:
 
 
 @pytest.fixture
-async def reviewer(make_user: MakeUser, db: AsyncSession) -> User:
-    user = await make_user("ap.approver@example.com", UserRole.USER)
-    await assign(db, user, AgentCapacity.REVIEWER)
-    return user
+async def reviewer(make_user: MakeUser) -> User:
+    """Only Finance Admins approve runs."""
+    return await make_user("ap.approver@example.com", UserRole.FINANCE_ADMIN)
 
 
 @pytest.fixture
@@ -282,35 +281,47 @@ async def test_duplicate_invoice_is_flagged(prep: AsyncClient, fake_llm: FakeLLM
 # --- permissions ----------------------------------------------------------------------------
 
 
-async def test_preparer_cannot_review_own_run(
-    preparer: User, prep: AsyncClient, db: AsyncSession, fake_llm: FakeLLM
-) -> None:
-    await assign(db, preparer, AgentCapacity.REVIEWER)  # same person holds both capacities
+async def test_users_cannot_review_runs(prep: AsyncClient, fake_llm: FakeLLM) -> None:
     run = await act(prep, await analyzed_run(prep), "submit")
+    assert run["permissions"]["can_review"] is False
     r = await prep.post(
         f"{RUNS}/{run['id']}/reviews", json={"decision": "approved", "comment": "ok!"}
     )
     assert r.status_code == 403
-    assert "segregation of duties" in r.json()["detail"]["message"]
+    assert r.json()["detail"]["message"] == "Only a Finance Admin can approve runs."
 
 
-async def test_review_requires_reviewer_assignment(
+async def test_users_only_see_their_own_runs(
     make_user: MakeUser,
     db: AsyncSession,
     prep: AsyncClient,
+    admin: User,
     signed_in_client: ClientFactory,
     fake_llm: FakeLLM,
 ) -> None:
+    mine = await act(prep, await analyzed_run(prep), "submit")
+    admins = await act(
+        a := await signed_in_client(admin), await analyzed_run(a, invoice_number="ADM-1"), "submit"
+    )
+
     other = await make_user("other.analyst@example.com", UserRole.USER)
     await assign(db, other, AgentCapacity.PREPARER)
-    run = await act(prep, await analyzed_run(prep), "submit")
-
     c = await signed_in_client(other)
-    assert (await c.get(f"{RUNS}/{run['id']}")).status_code == 200  # same team can view
-    r = await c.post(f"{RUNS}/{run['id']}/reviews", json={"decision": "approved", "comment": "ok!"})
-    assert r.status_code == 403
-    edit = await c.put(f"{RUNS}/{run['id']}/input", json={"values": PDF_EXAMPLE})
-    assert edit.status_code == 403
+    assert (await c.get(RUNS)).json() == []
+    for run in (mine, admins):
+        assert (await c.get(f"{RUNS}/{run['id']}")).status_code == 404
+        r = await c.post(
+            f"{RUNS}/{run['id']}/reviews", json={"decision": "approved", "comment": "ok!"}
+        )
+        assert r.status_code in (403, 404)
+        assert (
+            await c.put(f"{RUNS}/{run['id']}/input", json={"values": PDF_EXAMPLE})
+        ).status_code == 404
+
+    # The preparer doesn't see the admin's run either, and their overview counts only their own
+    assert [r["id"] for r in (await prep.get(RUNS)).json()] == [mine["id"]]
+    assert (await prep.get(SUMMARY)).json()["kpis"]["pending_review"] == 1
+    assert (await a.get(SUMMARY)).json()["kpis"]["pending_review"] == 2
 
 
 async def test_unassigned_user_cannot_see_runs(

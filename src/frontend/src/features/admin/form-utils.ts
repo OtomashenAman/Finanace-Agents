@@ -6,8 +6,8 @@ export function describedBy(id: string, error?: string) {
 }
 
 const ROLE_HINTS: Record<UserRole, string> = {
-  finance_admin: "Every agent (prepare and approve, including own runs), user management and settings.",
-  user: "Only the agents and capacities assigned below.",
+  finance_admin: "Every agent and every user's runs: approves them (own runs too), manages users.",
+  user: "Only the agents assigned below, on their own data. Sees only their own runs.",
 }
 
 export function roleHint(role: UserRole): string {

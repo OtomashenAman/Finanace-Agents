@@ -14,10 +14,10 @@ class RecordNotFoundError(AppError):
     message = "Record not found in this data source."
 
 
-class IntegrationNotConfiguredError(AppError):
+class AppCredentialsError(AppError):
     status_code = 409
-    code = "integration_not_configured"
-    message = "QuickBooks isn't set up yet. Ask your Finance Admin to add the QuickBooks app."
+    code = "app_credentials_missing"
+    message = "Add your QuickBooks app's Client ID and Client Secret first."
 
 
 class SourceNotSyncableError(AppError):
@@ -36,9 +36,3 @@ class SyncFailedError(AppError):
 class UploadRejectedError(AppError):
     status_code = 422
     code = "upload_rejected"
-
-
-class ClientSecretRequiredError(AppError):
-    status_code = 422
-    code = "client_secret_required"
-    message = "Enter the Client Secret."

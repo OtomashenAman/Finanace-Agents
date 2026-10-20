@@ -141,7 +141,7 @@ function AccessSection({ user }: { user: ManagedUser }) {
     return (
       <Section title="Agent access">
         <p className="text-sm text-muted-foreground">
-          Finance Admins can prepare and approve runs on every agent, so no assignments are needed.
+          Finance Admins can run every agent and approve every user's runs, so no assignments are needed.
         </p>
       </Section>
     )

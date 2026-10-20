@@ -280,3 +280,47 @@ async def test_require_roles_blocks_other_roles(user: User) -> None:
         r = await c.get("/admin-only")
     assert r.status_code == 403
     assert r.json()["detail"]["code"] == "permission_denied"
+
+
+# --- per-tab sessions -----------------------------------------------------------------------
+
+
+async def test_each_tab_slot_keeps_its_own_session(
+    client: AsyncClient, user: User, db: AsyncSession
+) -> None:
+    """One browser (one cookie jar), two tabs: an admin and a user signed in side by side."""
+    db.add(
+        User(
+            email="admin@example.com",
+            full_name="Admin",
+            role=UserRole.FINANCE_ADMIN,
+            password_hash=hash_password(PASSWORD),
+        )
+    )
+    await db.commit()
+    tab_a, tab_b = {"X-Session-Slot": "tabaaaa1"}, {"X-Session-Slot": "tabbbbb2"}
+
+    r = await client.post(LOGIN, json={"email": EMAIL, "password": PASSWORD}, headers=tab_a)
+    assert r.status_code == 200
+    assert "facc_access_tabaaaa1=" in r.headers["set-cookie"]
+    r = await client.post(
+        LOGIN, json={"email": "admin@example.com", "password": PASSWORD}, headers=tab_b
+    )
+    assert r.status_code == 200
+
+    assert (await client.get(ME, headers=tab_a)).json()["email"] == EMAIL
+    assert (await client.get(ME, headers=tab_b)).json()["email"] == "admin@example.com"
+    assert (await client.get(ME)).status_code == 401  # no slot: the plain cookie, never set
+
+    assert (await client.post(REFRESH, headers=tab_a)).status_code == 204
+    await client.post(LOGOUT, headers=tab_a)
+    assert (await client.get(ME, headers=tab_a)).status_code == 401
+    assert (await client.get(ME, headers=tab_b)).json()["email"] == "admin@example.com"
+
+
+async def test_malformed_slot_falls_back_to_the_plain_cookie(
+    client: AsyncClient, user: User
+) -> None:
+    await login(client)
+    r = await client.get(ME, headers={"X-Session-Slot": "../../etc"})
+    assert r.json()["email"] == EMAIL

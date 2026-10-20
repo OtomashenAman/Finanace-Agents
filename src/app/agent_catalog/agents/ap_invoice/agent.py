@@ -88,6 +88,8 @@ class ApInvoiceAgent(BaseAgent):
             .join(ApInvoiceRun, ApInvoiceRun.run_id == AgentRun.id)
             .where(
                 AgentRun.id != ctx.run.id,
+                # Each user's runs are isolated: only their own earlier invoices count
+                AgentRun.preparer_id == ctx.run.preparer_id,
                 AgentRun.status.not_in([RunStatus.DRAFT, RunStatus.VALIDATION_FAILED]),
                 func.lower(ApInvoiceRun.supplier) == invoice.supplier.lower(),
                 func.lower(ApInvoiceRun.invoice_number) == invoice.invoice_number.lower(),

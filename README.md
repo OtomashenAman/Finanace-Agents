@@ -70,21 +70,34 @@ registry are retired, never deleted.
 Implemented for **AP Invoice** so far; other agents show "workspace coming soon" until their
 folder gets an `input_schema`, `run_model` and `analyze()` (see `agents/ap_invoice/`).
 
-- Roles: **Finance Admin** prepares and approves on every agent (own runs included, audited as
-  `self_review`) and manages users under Admin Settings (`/admin/users`, API `/api/v1/users`);
-  a **User** only gets the agents and capacities (prepare / approve) an admin assigns, and can
-  never approve their own run.
+- Roles: **Finance Admin** runs every agent, sees and approves every user's runs (own runs
+  included, audited as `self_review`) and manages users under Admin Settings (`/admin/users`,
+  API `/api/v1/users`). A **User** only runs the agents an admin assigns, on their own data, and
+  only ever sees their own runs; users never approve.
 - Data sources (`/data-sources`, API `/api/v1/data-sources`): every user connects **their own**
   QuickBooks company or uploads CSV/XLSX (vendors, bills, purchase orders, chart of accounts).
   Records are normalized into `finance_records`, private to their owner; agents read them through
   `AnalysisContext.data` (e.g. AP Invoice checks the vendor master) and runs can be prefilled
   from a record (`PUT .../runs/{id}/source`), freezing a snapshot the reviewer sees.
-  - A Finance Admin sets up one Intuit app under Admin Settings → Integrations and registers the
-    Redirect URI shown there (`PUBLIC_BASE_URL` + `/api/v1/data-sources/quickbooks/callback`).
-  - OAuth tokens and the client secret are encrypted with `DATA_ENCRYPTION_KEY` (required in
+  - Each user connects with **their own Intuit app** (Client ID/Secret entered on Connect) and
+    registers the Redirect URI shown there (`PUBLIC_BASE_URL` +
+    `/api/v1/data-sources/quickbooks/callback`). Nothing about a connection is shared.
+  - OAuth tokens and client secrets are encrypted with `DATA_ENCRYPTION_KEY` (required in
     production). The OAuth `state` is signed, expires in 15 minutes and is single use.
+  - Intuit remembers its sign-in in the browser: to connect a different QuickBooks login, sign
+    out of Intuit first or use a private window.
+- Approvals (`/approvals`, API `/api/v1/approvals`): the admin's queue of submitted runs across
+  agents (plus recent decisions); users see their own runs still waiting.
+- Audit Trail (`/audit`, API `/api/v1/audit-events`): read-only, newest first with keyset
+  pagination and filters. Admins see every event and can export CSV (itself audited); users see
+  their own actions, changes to their account and events on their own runs, without other
+  people's IP or browser. Each run also shows its own timeline (`.../runs/{id}/timeline`).
+- Sessions are per browser tab: the SPA sends its tab's id in `X-Session-Slot` and the httpOnly
+  auth cookies are named after it, so an admin and a user can be signed in side by side. A new
+  tab opens with the last account used; the user menu's "another account" icon signs in a
+  different one in that tab only.
 - Demo users from `uv run poe seed` (password = `DEMO_ADMIN_PASSWORD`): `finance.admin@example.com`
-  and `demo.user@example.com` (prepares and approves AP Invoice runs).
+  and `demo.user@example.com` (runs AP Invoice; the admin approves).
 - Each agent stores its fields as typed columns in its own table (`ap_invoice_runs`); the common
   lifecycle, findings, documents, LLM calls and reviews live in `agent_runs`, `run_flags`,
   `run_documents`, `run_narratives` and `run_reviews`.

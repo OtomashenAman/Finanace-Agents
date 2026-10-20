@@ -37,36 +37,20 @@ class IntegrationEnvironment(StrEnum):
     PRODUCTION = "production"
 
 
-class IntegrationApp(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """Organization-wide OAuth app (e.g. one Intuit app), set up once by a Finance Admin.
-
-    Every user connects their own company through it; they never see these credentials.
-    """
-
-    __tablename__ = "integration_apps"
-    __table_args__ = (
-        enum_check("provider", SourceKind),
-        enum_check("environment", IntegrationEnvironment),
-    )
-    __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012 - SQLAlchemy class config
-
-    provider: Mapped[SourceKind] = mapped_column(string_enum(SourceKind, 32), unique=True)
-    client_id: Mapped[str] = mapped_column(String(255))
-    client_secret_enc: Mapped[str] = mapped_column(Text)
-    environment: Mapped[IntegrationEnvironment] = mapped_column(
-        string_enum(IntegrationEnvironment, 16)
-    )
-    updated_by: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL")
-    )
-
-
 class DataSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """One user's connected company or uploaded file. Visible to its owner only
-    (admins see status, never credentials or records)."""
+    (admins see status, never credentials or records).
+
+    A QuickBooks source carries the user's own Intuit app (client id/secret): nothing about
+    one user's connection is shared with another.
+    """
 
     __tablename__ = "data_sources"
-    __table_args__ = (enum_check("kind", SourceKind), enum_check("status", SourceStatus))
+    __table_args__ = (
+        enum_check("kind", SourceKind),
+        enum_check("status", SourceStatus),
+        enum_check("environment", IntegrationEnvironment),
+    )
     __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012 - SQLAlchemy class config
 
     owner_id: Mapped[uuid.UUID] = mapped_column(
@@ -75,7 +59,12 @@ class DataSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     kind: Mapped[SourceKind] = mapped_column(string_enum(SourceKind, 32))
     name: Mapped[str] = mapped_column(String(200))
     status: Mapped[SourceStatus] = mapped_column(string_enum(SourceStatus, 32))
-    # QuickBooks: realmId (company id)
+    # QuickBooks: the user's Intuit app, and the company (realmId) they authorized
+    client_id: Mapped[str | None] = mapped_column(String(255))
+    client_secret_enc: Mapped[str | None] = mapped_column(Text)
+    environment: Mapped[IntegrationEnvironment | None] = mapped_column(
+        string_enum(IntegrationEnvironment, 16)
+    )
     external_id: Mapped[str | None] = mapped_column(String(100))
     # Encrypted JSON: {"refresh_token", "access_token", "access_expires_at"}
     credentials_enc: Mapped[str | None] = mapped_column(Text)
