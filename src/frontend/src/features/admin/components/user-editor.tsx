@@ -9,10 +9,11 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { Panel } from "@/features/agent-catalog/workspace/components/panel"
+import { errorMessage } from "@/lib/api"
 import { formatDateTime } from "@/features/agent-catalog/workspace/format"
 
 import type { Assignment, ManagedUser } from "../api"
-import { describedBy, errorMessage, roleHint } from "../form-utils"
+import { describedBy, roleHint } from "../form-utils"
 import { useDeleteUser, useResetPassword, useSetAssignments, useUpdateUser } from "../hooks"
 import {
   passwordSchema,

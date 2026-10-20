@@ -12,6 +12,8 @@ export interface Agent {
   reviewer: string
   is_active: boolean
   has_workspace: boolean
+  /** Data source record type that can prefill a run (e.g. "bill"); null: manual input only */
+  source_record_type: string | null
   my_capacities: AgentCapacity[]
 }
 

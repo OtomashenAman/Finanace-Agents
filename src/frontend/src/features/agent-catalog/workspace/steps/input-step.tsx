@@ -5,12 +5,15 @@ import { toast } from "sonner"
 
 import { Alert } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
+import { SourceRecordPicker } from "@/features/data-sources/components/source-record-picker"
 import { ApiError } from "@/lib/api"
 
+import { useAgent } from "../../hooks"
 import type { FieldValue, FormField, FormSpec, RunDetail } from "../api"
 import { DynamicField, type FormValues } from "../components/dynamic-field"
 import { EvidencePanel } from "../components/evidence-panel"
 import { Panel } from "../components/panel"
+import { SourceSnapshot } from "../components/source-snapshot"
 import { parseMoneyInput } from "../format"
 import { useAnalyzeRun, useDeleteRun, useSaveInput } from "../hooks"
 
@@ -46,6 +49,8 @@ export function InputStep({ agentKey, run, form }: InputStepProps) {
   const save = useSaveInput(agentKey, run.id)
   const analyze = useAnalyzeRun(agentKey, run.id)
   const deleteRun = useDeleteRun(agentKey, run.id)
+  const { data: agent } = useAgent(agentKey)
+  const recordType = agent?.source_record_type ?? null
   const canEdit = run.permissions.can_edit
   const busy = save.isPending || analyze.isPending
 
@@ -53,6 +58,7 @@ export function InputStep({ agentKey, run, form }: InputStepProps) {
     register,
     handleSubmit,
     setError,
+    reset,
     formState: { errors },
   } = useForm<FormValues>({ defaultValues: toFormValues(form.fields, run.input) })
 
@@ -104,6 +110,21 @@ export function InputStep({ agentKey, run, form }: InputStepProps) {
           {run.validation_errors && (
             <Alert className="mb-5">Some required fields are missing or invalid. Correct them and analyze again.</Alert>
           )}
+          {canEdit && recordType && (
+            <div className="mb-5">
+              <SourceRecordPicker
+                agentKey={agentKey}
+                run={run}
+                recordType={recordType}
+                onLinked={(updated) => reset(toFormValues(form.fields, updated.input))}
+              />
+            </div>
+          )}
+          {!canEdit && run.source && (
+            <div className="mb-5">
+              <SourceSnapshot source={run.source} />
+            </div>
+          )}
           <fieldset disabled={!canEdit || busy} className="grid gap-x-6 gap-y-5 sm:grid-cols-2">
             {form.fields.map((field) => (
               <DynamicField
@@ -116,7 +137,11 @@ export function InputStep({ agentKey, run, form }: InputStepProps) {
             ))}
           </fieldset>
           <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t pt-5">
-            <p className="text-xs text-muted-foreground">Values are entered manually; not connected to a live ERP.</p>
+            <p className="text-xs text-muted-foreground">
+              {run.source
+                ? `Prefilled from ${run.source.source_name}; edit anything the source doesn't know.`
+                : "Enter the values, or prefill them from your QuickBooks or uploaded data."}
+            </p>
             {canEdit && (
               <div className="flex gap-2">
                 {run.permissions.can_delete && (

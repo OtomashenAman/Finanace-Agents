@@ -41,6 +41,7 @@ from src.app.agent_catalog.runs.models import (
     RunNarrative,
     RunPriority,
     RunReview,
+    RunSourceSnapshot,
     RunStatus,
 )
 from src.app.agent_catalog.runs.schemas import (
@@ -57,7 +58,9 @@ from src.app.agent_catalog.runs.schemas import (
     ReviewOut,
     RunDetail,
     RunPermissions,
+    RunSourceOut,
     RunSummary,
+    SourceLink,
 )
 from src.app.agent_catalog.service import ADMIN_CAPACITIES, visible_agent_ids
 from src.app.audit.service import record_event
@@ -68,6 +71,8 @@ from src.app.common.text_extraction.base import ExtractionError
 from src.app.common.text_extraction.registry import extract_text
 from src.app.core.config import get_settings
 from src.app.core.llm.base import LLMProvider
+from src.app.data_sources import service as data_sources
+from src.app.data_sources.access import FinanceData
 
 TEXT_PREVIEW_CHARS = 400
 
@@ -270,6 +275,7 @@ async def _detail(
         )
     people = await _people(session, {run.preparer_id} | {r.reviewer_id for r in reviews})
     refs = await _business_refs(session, [run])
+    snapshot = await session.get(RunSourceSnapshot, run.id)
 
     user = access.user
     is_owner = run.preparer_id == user.id
@@ -344,6 +350,20 @@ async def _detail(
             )
             for r in reviews
         ],
+        source=(
+            RunSourceOut(
+                source_id=snapshot.source_id,
+                source_kind=snapshot.source_kind,
+                source_name=snapshot.source_name,
+                record_type=snapshot.record_type,
+                record_reference=snapshot.record_reference,
+                records=snapshot.records,
+                source_synced_at=snapshot.source_synced_at,
+                captured_at=snapshot.created_at,
+            )
+            if snapshot
+            else None
+        ),
         result_hash=run.result_hash,
         analyzed_at=run.analyzed_at,
         submitted_at=run.submitted_at,
@@ -423,6 +443,90 @@ async def update_input(
     return await _detail(session, access, run, detail)
 
 
+async def link_source(
+    session: AsyncSession,
+    user: User,
+    key: str,
+    run_id: uuid.UUID,
+    body: SourceLink,
+    ctx: RequestContext,
+) -> RunDetail:
+    """Prefill the input from one of the preparer's own data source records and freeze a
+    snapshot of them for the reviewer. Fields the source doesn't know are left as they are."""
+    access = await _access(session, user, key)
+    run, detail = await _load(session, access, run_id, lock=True)
+    _require_owner(run, user)
+    ensure_allowed(run.status, RunAction.EDIT)
+    record_type = access.definition.source_record_type
+    if record_type is None:
+        raise WorkspaceUnavailableError("This agent can't be prefilled from a data source.")
+
+    source, record = await data_sources.owned_record(
+        session, user, body.source_id, record_type, body.record_id
+    )
+    prefill = await access.definition.prefill(
+        record, source, FinanceData(session, user.id, source.id)
+    )
+    values = {**_input_values(access, detail), **prefill.values}
+    try:
+        draft = draft_schema(access.input_schema).model_validate(values)
+    except ValidationError as exc:
+        raise RequestValidationError(
+            [{**e, "loc": ("body", "values", *e["loc"])} for e in exc.errors(include_url=False)]
+        ) from exc
+    for name, value in draft.model_dump().items():
+        setattr(detail, name, value)
+
+    records = {
+        record_type.value: record.model_dump(mode="json"),
+        **{name: r.model_dump(mode="json") for name, r in prefill.related.items()},
+    }
+    snapshot = await session.get(RunSourceSnapshot, run.id)
+    if snapshot is None:
+        snapshot = RunSourceSnapshot(run_id=run.id)
+        session.add(snapshot)
+    snapshot.source_id = source.id
+    snapshot.source_kind = source.kind.value
+    snapshot.source_name = source.name
+    snapshot.record_type = record_type.value
+    snapshot.record_reference = record.reference
+    snapshot.records = records
+    snapshot.source_synced_at = source.last_synced_at
+    snapshot.created_at = utcnow()
+
+    if run.status != RunStatus.DRAFT:
+        await _reset_analysis(session, run)
+    record_event(
+        session,
+        "run.source_linked",
+        ctx,
+        actor_id=user.id,
+        run=run.reference,
+        source_id=str(source.id),
+        record=f"{record_type.value}:{record.external_id}",
+    )
+    await session.commit()
+    return await _detail(session, access, run, detail)
+
+
+async def unlink_source(
+    session: AsyncSession, user: User, key: str, run_id: uuid.UUID, ctx: RequestContext
+) -> RunDetail:
+    """Drop the snapshot; the input values stay for the preparer to edit."""
+    access = await _access(session, user, key)
+    run, detail = await _load(session, access, run_id, lock=True)
+    _require_owner(run, user)
+    ensure_allowed(run.status, RunAction.EDIT)
+    snapshot = await session.get(RunSourceSnapshot, run.id)
+    if snapshot is not None:
+        await session.delete(snapshot)
+        if run.status != RunStatus.DRAFT:
+            await _reset_analysis(session, run)
+        record_event(session, "run.source_unlinked", ctx, actor_id=user.id, run=run.reference)
+        await session.commit()
+    return await _detail(session, access, run, detail)
+
+
 async def delete_run(
     session: AsyncSession, user: User, key: str, run_id: uuid.UUID, ctx: RequestContext
 ) -> None:
@@ -466,8 +570,11 @@ async def analyze_run(
             select(RunDocument).where(RunDocument.run_id == run.id).order_by(RunDocument.created_at)
         )
     )
+    snapshot = await session.get(RunSourceSnapshot, run.id)
+    finance_data = FinanceData(session, run.preparer_id, snapshot.source_id if snapshot else None)
     analysis = await access.definition.analyze(
-        data, AnalysisContext(session=session, run=run, document_count=len(documents))
+        data,
+        AnalysisContext(session=session, run=run, document_count=len(documents), data=finance_data),
     )
 
     await session.execute(delete(RunFlag).where(RunFlag.run_id == run.id))
@@ -632,6 +739,7 @@ def _result_hash(run: AgentRun, detail: RunDetail) -> str:
         "calculations": [c.model_dump() for c in detail.calculations],
         "flags": [f.model_dump(mode="json") for f in detail.flags],
         "documents": sorted(d.sha256 for d in detail.documents),
+        "source": detail.source.records if detail.source else None,
         "narrative": detail.narrative.output.model_dump()
         if detail.narrative and detail.narrative.output
         else None,

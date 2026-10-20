@@ -63,6 +63,16 @@ export function useRemoveDocument(key: string, id: string) {
   return useRunMutation<string>(key, (documentId) => runsApi.removeDocument(key, id, documentId))
 }
 
+export function useLinkSource(key: string, id: string) {
+  return useRunMutation<{ sourceId: string; recordId: string }>(key, ({ sourceId, recordId }) =>
+    runsApi.linkSource(key, id, sourceId, recordId),
+  )
+}
+
+export function useUnlinkSource(key: string, id: string) {
+  return useRunMutation<void>(key, () => runsApi.unlinkSource(key, id))
+}
+
 export function useDeleteRun(key: string, id: string) {
   return useMutation({ mutationFn: () => runsApi.remove(key, id), meta: { invalidates: [RUNS_TAG] } })
 }

@@ -65,6 +65,29 @@ def decode_access_token(token: str) -> dict[str, Any]:
     return payload
 
 
+def create_purpose_token(purpose: str, claims: dict[str, str], ttl: timedelta) -> str:
+    """Short-lived signed token for one flow (e.g. an OAuth state). Never valid as a login."""
+    now = utcnow()
+    payload = {**claims, "type": purpose, "iss": JWT_ISSUER, "iat": now, "exp": now + ttl}
+    return jwt.encode(
+        payload, get_settings().secret_key.get_secret_value(), algorithm=JWT_ALGORITHM
+    )
+
+
+def decode_purpose_token(token: str, purpose: str) -> dict[str, Any]:
+    """Raise jwt.InvalidTokenError (incl. expiry) unless the token was made for `purpose`."""
+    payload: dict[str, Any] = jwt.decode(
+        token,
+        get_settings().secret_key.get_secret_value(),
+        algorithms=[JWT_ALGORITHM],
+        issuer=JWT_ISSUER,
+        options={"require": ["exp", "iat", "type"]},
+    )
+    if payload["type"] != purpose:
+        raise jwt.InvalidTokenError(f"not a {purpose} token")
+    return payload
+
+
 def new_refresh_token() -> str:
     return secrets.token_urlsafe(48)
 

@@ -1,5 +1,5 @@
 from decimal import Decimal
-from typing import cast
+from typing import Any, cast
 
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -12,8 +12,12 @@ from src.app.agent_catalog.agents.base import (
     BaseAgent,
     Calculation,
     Finding,
+    Prefill,
 )
 from src.app.agent_catalog.runs.models import AgentRun, FlagSeverity, RunStatus
+from src.app.data_sources.access import FinanceData
+from src.app.data_sources.models import DataSource, SourceKind
+from src.app.data_sources.records import Bill, PurchaseOrder, Record, RecordType, Vendor
 
 ZERO = Decimal("0.00")
 
@@ -49,6 +53,30 @@ class ApInvoiceAgent(BaseAgent):
         "duplicate risk and missing coding or evidence. Point out what the AP approver "
         "should verify in the source documents."
     )
+    source_record_type = RecordType.BILL
+
+    @classmethod
+    async def prefill(cls, record: Record, source: DataSource, data: FinanceData) -> Prefill:
+        bill = cast(Bill, record)
+        values: dict[str, Any] = {
+            "supplier": bill.vendor_name,
+            "invoice_number": bill.doc_number,
+            "invoice_total": bill.total,
+            "tax_total": bill.tax_total,
+            "proposed_gl_account": bill.account,
+        }
+        if source.kind == SourceKind.QUICKBOOKS:
+            values["legal_entity"] = source.name  # the QuickBooks company
+        related: dict[str, Record] = {}
+        if bill.po_number:
+            po = await data.find(PurchaseOrder, RecordType.PURCHASE_ORDER, bill.po_number)
+            if po is not None:
+                related["purchase_order"] = po
+                values["po_authorized_amount"] = po.total
+                if po.received_amount is not None:
+                    values["received_amount"] = po.received_amount
+        # Only what the source knows: the preparer completes the rest
+        return Prefill({k: v for k, v in values.items() if v is not None}, related)
 
     @classmethod
     async def analyze(cls, data: BaseModel, ctx: AnalysisContext) -> Analysis:
@@ -85,6 +113,8 @@ class ApInvoiceAgent(BaseAgent):
                     "invoice_number",
                 )
             )
+
+        findings.extend(await cls._vendor_master_check(invoice.supplier, ctx))
 
         invoice_vs_po = invoice.invoice_total - invoice.po_authorized_amount
         invoice_vs_receipt = invoice.invoice_total - invoice.received_amount
@@ -187,3 +217,36 @@ class ApInvoiceAgent(BaseAgent):
             findings=findings,
             computed={"invoice_vs_po": invoice_vs_po, "invoice_vs_receipt": invoice_vs_receipt},
         )
+
+    @staticmethod
+    async def _vendor_master_check(supplier: str, ctx: AnalysisContext) -> list[Finding]:
+        """Against the preparer's vendor master (QuickBooks or an upload), when they have one."""
+        if not await ctx.data.has(RecordType.VENDOR):
+            return []
+        vendor = await ctx.data.find(Vendor, RecordType.VENDOR, supplier)
+        if vendor is None:
+            return [
+                Finding(
+                    "VENDOR_NOT_IN_MASTER",
+                    FlagSeverity.WARNING,
+                    f"'{supplier}' is not in your vendor master: confirm the supplier is approved",
+                    "supplier",
+                )
+            ]
+        if not vendor.active:
+            return [
+                Finding(
+                    "VENDOR_INACTIVE",
+                    FlagSeverity.HIGH,
+                    f"'{vendor.name}' is inactive in your vendor master",
+                    "supplier",
+                )
+            ]
+        return [
+            Finding(
+                "VENDOR_IN_MASTER",
+                FlagSeverity.PASS,
+                f"'{vendor.name}' is an active vendor in your vendor master",
+                "supplier",
+            )
+        ]

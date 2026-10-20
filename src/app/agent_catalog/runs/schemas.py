@@ -110,6 +110,26 @@ class ReviewOut(BaseModel):
     created_at: datetime
 
 
+class SourceLink(BaseModel):
+    """Prefill the run from a record of one of your data sources."""
+
+    source_id: uuid.UUID
+    record_id: str = Field(min_length=1, max_length=100, description="The record's external_id")
+
+
+class RunSourceOut(BaseModel):
+    """Frozen copy of the source records the run was prefilled from (what reviewers see)."""
+
+    source_id: uuid.UUID | None  # None once the preparer deleted the source
+    source_kind: str
+    source_name: str
+    record_type: str
+    record_reference: str
+    records: dict[str, Any]
+    source_synced_at: datetime | None
+    captured_at: datetime
+
+
 class RunPermissions(BaseModel):
     can_edit: bool
     can_analyze: bool
@@ -145,6 +165,7 @@ class RunDetail(RunSummary):
     documents: list[DocumentOut]
     narrative: NarrativeOut | None
     reviews: list[ReviewOut]
+    source: RunSourceOut | None
     result_hash: str | None
     analyzed_at: datetime | None
     submitted_at: datetime | None

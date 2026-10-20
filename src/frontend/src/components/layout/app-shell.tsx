@@ -30,8 +30,8 @@ const NAV: NavItem[] = [
   { label: "My Worklist", icon: ListTodo },
   { label: "Approvals", icon: CircleCheck },
   { label: "Audit Trail", icon: History },
-  { label: "Data Sources", icon: Database },
-  { label: "Admin Settings", icon: Settings, to: "/admin/users", adminOnly: true },
+  { label: "Data Sources", icon: Database, to: "/data-sources" },
+  { label: "Admin Settings", icon: Settings, to: "/admin", adminOnly: true },
 ]
 
 function Brand() {

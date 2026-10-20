@@ -13,7 +13,7 @@ from src.app.common.text_extraction.base import (
 CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
-def _cell(value: object) -> str:
+def cell_text(value: object) -> str:
     if value is None:
         return ""
     if isinstance(value, datetime | date):
@@ -37,7 +37,7 @@ def extract_xlsx(data: bytes) -> ExtractedText:
         for sheet in workbook.worksheets:
             rows = []
             for row in sheet.iter_rows(values_only=True):
-                cells = [_cell(v) for v in row]
+                cells = [cell_text(v) for v in row]
                 if any(cells):
                     rows.append(" | ".join(cells).rstrip(" |"))
             if rows:

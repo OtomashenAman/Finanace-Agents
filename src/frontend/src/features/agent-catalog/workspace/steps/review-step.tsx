@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils"
 
 import type { ReviewDecision, RunDetail } from "../api"
 import { Panel } from "../components/panel"
+import { SourceSnapshot } from "../components/source-snapshot"
 import { StatusBadge } from "../components/status-badge"
 import { formatDateTime } from "../format"
 import { useReviewRun } from "../hooks"
@@ -95,6 +96,8 @@ export function ReviewStep({ agentKey, run }: { agentKey: string; run: RunDetail
               <p className="mt-1 text-sm">{run.narrative.output.summary}</p>
             </div>
           )}
+
+          {run.source && <SourceSnapshot source={run.source} />}
 
           <div>
             <h3 className="text-sm font-semibold text-brand-navy">Evidence</h3>

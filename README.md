@@ -74,6 +74,15 @@ folder gets an `input_schema`, `run_model` and `analyze()` (see `agents/ap_invoi
   `self_review`) and manages users under Admin Settings (`/admin/users`, API `/api/v1/users`);
   a **User** only gets the agents and capacities (prepare / approve) an admin assigns, and can
   never approve their own run.
+- Data sources (`/data-sources`, API `/api/v1/data-sources`): every user connects **their own**
+  QuickBooks company or uploads CSV/XLSX (vendors, bills, purchase orders, chart of accounts).
+  Records are normalized into `finance_records`, private to their owner; agents read them through
+  `AnalysisContext.data` (e.g. AP Invoice checks the vendor master) and runs can be prefilled
+  from a record (`PUT .../runs/{id}/source`), freezing a snapshot the reviewer sees.
+  - A Finance Admin sets up one Intuit app under Admin Settings → Integrations and registers the
+    Redirect URI shown there (`PUBLIC_BASE_URL` + `/api/v1/data-sources/quickbooks/callback`).
+  - OAuth tokens and the client secret are encrypted with `DATA_ENCRYPTION_KEY` (required in
+    production). The OAuth `state` is signed, expires in 15 minutes and is single use.
 - Demo users from `uv run poe seed` (password = `DEMO_ADMIN_PASSWORD`): `finance.admin@example.com`
   and `demo.user@example.com` (prepares and approves AP Invoice runs).
 - Each agent stores its fields as typed columns in its own table (`ap_invoice_runs`); the common

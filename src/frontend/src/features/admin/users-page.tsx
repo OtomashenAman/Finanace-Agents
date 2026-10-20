@@ -10,6 +10,7 @@ import { ROLE_LABELS } from "@/features/auth/roles"
 import { cn } from "@/lib/utils"
 
 import type { ManagedUser } from "./api"
+import { AdminTabs } from "./components/admin-tabs"
 import { CreateUserForm } from "./components/create-user-form"
 import { UserEditor } from "./components/user-editor"
 import { useUsers } from "./hooks"
@@ -99,6 +100,7 @@ export function UsersPage() {
       title="Admin Settings · Users"
       subtitle="Create accounts, choose who prepares and approves each agent, reset passwords and deactivate access."
     >
+      <AdminTabs />
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
         <section className="rounded-lg border bg-card p-5 sm:p-6" aria-labelledby="users-title">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-4">

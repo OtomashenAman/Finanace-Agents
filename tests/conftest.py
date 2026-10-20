@@ -53,6 +53,10 @@ from src.app.core.llm.factory import get_llm_provider  # noqa: E402
 from src.app.main import app  # noqa: E402
 
 TABLES = (
+    "run_source_snapshots",
+    "finance_records",
+    "data_sources",
+    "integration_apps",
     "run_reviews",
     "run_narratives",
     "run_documents",

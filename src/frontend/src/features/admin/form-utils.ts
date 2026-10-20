@@ -1,9 +1,4 @@
 import type { UserRole } from "@/features/auth/api"
-import { ApiError } from "@/lib/api"
-
-export function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof ApiError ? error.message : fallback
-}
 
 /** aria props for a control inside <Field> */
 export function describedBy(id: string, error?: string) {

@@ -12,6 +12,7 @@ from src.app.agent_catalog.runs.schemas import (
     RunDetail,
     RunInputUpdate,
     RunSummary,
+    SourceLink,
 )
 from src.app.auth.dependencies import CurrentUser
 from src.app.common.context import RequestContextDep
@@ -156,3 +157,23 @@ async def review_run(
     """Approve, reject or request changes (assigned reviewer; only a Finance Admin may review
     their own run)."""
     return await service.review_run(session, user, key, run_id, body, ctx)
+
+
+@router.put("/runs/{run_id}/source", response_model=RunDetail, responses=_ERRORS)
+async def link_source(
+    key: str,
+    run_id: uuid.UUID,
+    body: SourceLink,
+    session: SessionDep,
+    user: CurrentUser,
+    ctx: RequestContextDep,
+) -> RunDetail:
+    """Prefill the input from a record of one of your data sources (preparer only)."""
+    return await service.link_source(session, user, key, run_id, body, ctx)
+
+
+@router.delete("/runs/{run_id}/source", response_model=RunDetail, responses=_ERRORS)
+async def unlink_source(
+    key: str, run_id: uuid.UUID, session: SessionDep, user: CurrentUser, ctx: RequestContextDep
+) -> RunDetail:
+    return await service.unlink_source(session, user, key, run_id, ctx)

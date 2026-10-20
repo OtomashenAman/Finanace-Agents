@@ -110,6 +110,18 @@ export interface Review {
   created_at: string
 }
 
+/** Frozen copy of the data source records a run was prefilled from */
+export interface RunSource {
+  source_id: string | null
+  source_kind: "quickbooks" | "upload"
+  source_name: string
+  record_type: string
+  record_reference: string
+  records: Record<string, Record<string, unknown>>
+  source_synced_at: string | null
+  captured_at: string
+}
+
 export interface RunDetail extends RunSummary {
   input: Record<string, FieldValue>
   validation_errors: { field: string | null; message: string }[] | null
@@ -122,6 +134,7 @@ export interface RunDetail extends RunSummary {
   documents: RunDocument[]
   narrative: Narrative | null
   reviews: Review[]
+  source: RunSource | null
   result_hash: string | null
   analyzed_at: string | null
   submitted_at: string | null
@@ -157,6 +170,12 @@ export const runsApi = {
   },
   removeDocument: (key: string, id: string, documentId: string) =>
     apiRequest<RunDetail>(`${run(key, id)}/documents/${encodeURIComponent(documentId)}`, { method: "DELETE" }),
+  linkSource: (key: string, id: string, sourceId: string, recordId: string) =>
+    apiRequest<RunDetail>(`${run(key, id)}/source`, {
+      method: "PUT",
+      json: { source_id: sourceId, record_id: recordId },
+    }),
+  unlinkSource: (key: string, id: string) => apiRequest<RunDetail>(`${run(key, id)}/source`, { method: "DELETE" }),
   documentText: (key: string, id: string, documentId: string) =>
     apiRequest<{ id: string; filename: string; extracted_text: string }>(
       `${run(key, id)}/documents/${encodeURIComponent(documentId)}`,

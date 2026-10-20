@@ -25,6 +25,11 @@ interface RequestOptions extends Omit<RequestInit, "body" | "headers"> {
   skipAuthRefresh?: boolean
 }
 
+/** User-facing message for a failed call: the server's own message when it sent one. */
+export function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof ApiError ? error.message : fallback
+}
+
 async function toApiError(res: Response): Promise<ApiError> {
   let code = "http_error"
   let message = `Request failed (${res.status}).`

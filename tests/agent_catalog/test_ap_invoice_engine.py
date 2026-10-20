@@ -7,6 +7,7 @@ from src.app.agent_catalog.agents.ap_invoice import ApInvoiceAgent
 from src.app.agent_catalog.agents.ap_invoice.schemas import ApInvoiceInput
 from src.app.agent_catalog.agents.base import Analysis, AnalysisContext
 from src.app.agent_catalog.runs.models import AgentRun, RunPriority
+from src.app.data_sources.access import FinanceData
 
 # Values from the requirement deck's AP Invoice example
 PDF_EXAMPLE = {
@@ -22,8 +23,9 @@ PDF_EXAMPLE = {
 async def analyze(db: AsyncSession, documents: int = 0, **overrides: object) -> Analysis:
     data = ApInvoiceInput.model_validate({**PDF_EXAMPLE, **overrides})
     run = AgentRun(id=uuid.uuid4(), run_number=1)
+    no_sources = FinanceData(db, uuid.uuid4(), None)  # a preparer without data sources
     return await ApInvoiceAgent.analyze(
-        data, AnalysisContext(session=db, run=run, document_count=documents)
+        data, AnalysisContext(session=db, run=run, document_count=documents, data=no_sources)
     )
 
 

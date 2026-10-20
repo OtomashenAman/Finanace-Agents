@@ -6,6 +6,7 @@ from src.app.agent_catalog import service as catalog
 from src.app.agent_catalog.runs import service as runs
 from src.app.auth.models import User, UserRole
 from src.app.core.config import get_settings
+from src.app.data_sources import service as data_sources
 from src.app.overview.schemas import AdminControls, OverviewKpis, OverviewSummary, WorklistItem
 
 ALL_ENTITIES = "All entities"
@@ -37,7 +38,7 @@ async def get_summary(session: AsyncSession, user: User, period: str) -> Overvie
             entity=ALL_ENTITIES,
             period_label=start.strftime("%B %Y"),
             review_sla_hours=get_settings().review_sla_hours,
-            connector_health="Not configured",
+            connector_health=await data_sources.health_summary(session),
             model_execution="Guarded",
         )
     worklist = [

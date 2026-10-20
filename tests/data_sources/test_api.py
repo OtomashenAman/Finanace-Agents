@@ -1,0 +1,505 @@
+import json
+import urllib.parse
+from collections.abc import Iterator
+from datetime import timedelta
+from typing import Any
+
+import httpx
+import pytest
+from httpx import AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.app.agent_catalog.models import Agent, AgentAssignment, AgentCapacity
+from src.app.auth.models import User, UserRole
+from src.app.common.clock import utcnow
+from src.app.data_sources import crypto
+from src.app.data_sources.models import DataSource, SourceStatus
+from src.app.data_sources.providers import quickbooks as qb
+from tests.conftest import ClientFactory, FakeLLM, MakeUser
+
+SOURCES = "/api/v1/data-sources"
+INTEGRATION = "/api/v1/admin/integrations/quickbooks"
+RUNS = "/api/v1/agents/ap_invoice/runs"
+REALM = "9130350000000001"
+
+pytestmark = pytest.mark.usefixtures("synced_agents")
+
+
+class FakeIntuit:
+    """Intuit's OAuth and accounting API, as far as the app uses them."""
+
+    def __init__(self) -> None:
+        self.issued = 0
+        self.revoked: list[str] = []
+        self.refresh_rejected = False
+        self.vendors: list[dict[str, Any]] = [
+            {"Id": "56", "DisplayName": "Acme Cloud Services", "Active": True},
+            {"Id": "57", "DisplayName": "Old Supplier", "Active": False},
+        ]
+
+    def _tokens(self) -> httpx.Response:
+        self.issued += 1
+        return httpx.Response(
+            200,
+            json={
+                "access_token": f"at-{self.issued}",
+                "refresh_token": f"rt-{self.issued}",
+                "expires_in": 3600,
+            },
+        )
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if url == qb.TOKEN_URL:
+            form = urllib.parse.parse_qs(request.content.decode())
+            if form["grant_type"] == ["authorization_code"]:
+                if form["code"] != ["good-code"]:
+                    return httpx.Response(400, json={"error": "invalid_grant"})
+                return self._tokens()
+            if self.refresh_rejected:
+                return httpx.Response(400, json={"error": "invalid_grant"})
+            return self._tokens()
+        if url == qb.REVOKE_URL:
+            self.revoked.append(json.loads(request.content)["token"])
+            return httpx.Response(200)
+        if "/companyinfo/" in url:
+            return httpx.Response(200, json={"CompanyInfo": {"CompanyName": "Acme Holdings Ltd"}})
+        if "/query" in url:
+            statement = request.url.params["query"]
+            entity = statement.split(" FROM ")[1].split(" ")[0]
+            rows = {
+                "Vendor": self.vendors,
+                "PurchaseOrder": [
+                    {
+                        "Id": "301",
+                        "DocNumber": "PO-77",
+                        "VendorRef": {"value": "56", "name": "Acme Cloud Services"},
+                        "TotalAmt": 12500.0,
+                        "POStatus": "Open",
+                        "TxnDate": "2026-09-30",
+                    }
+                ],
+                "Bill": [
+                    {
+                        "Id": "145",
+                        "DocNumber": "INV-2048",
+                        "VendorRef": {"value": "56", "name": "Acme Cloud Services"},
+                        "TotalAmt": 12500.0,
+                        "TxnTaxDetail": {"TotalTax": 500.0},
+                        "TxnDate": "2026-10-01",
+                        "LinkedTxn": [{"TxnId": "301", "TxnType": "PurchaseOrder"}],
+                        "Line": [
+                            {
+                                "AccountBasedExpenseLineDetail": {
+                                    "AccountRef": {"value": "7", "name": "6100 Cloud Hosting"}
+                                }
+                            }
+                        ],
+                    }
+                ],
+                "Account": [
+                    {
+                        "Id": "7",
+                        "AcctNum": "6100",
+                        "Name": "Cloud Hosting",
+                        "AccountType": "Expense",
+                    }
+                ],
+            }[entity]
+            return httpx.Response(200, json={"QueryResponse": {entity: rows}})
+        return httpx.Response(404)
+
+
+@pytest.fixture
+def intuit(monkeypatch: pytest.MonkeyPatch) -> Iterator[FakeIntuit]:
+    fake = FakeIntuit()
+    monkeypatch.setattr(qb, "transport", httpx.MockTransport(fake.handler))
+    yield fake
+
+
+@pytest.fixture
+async def admin(make_user: MakeUser) -> User:
+    return await make_user("admin@example.com", UserRole.FINANCE_ADMIN)
+
+
+async def assign(db: AsyncSession, user: User, capacity: AgentCapacity) -> None:
+    agent = await db.scalar(select(Agent).where(Agent.key == "ap_invoice"))
+    assert agent is not None
+    db.add(AgentAssignment(user_id=user.id, agent_id=agent.id, capacity=capacity))
+    await db.commit()
+
+
+@pytest.fixture
+async def analyst(make_user: MakeUser, db: AsyncSession) -> User:
+    user = await make_user("ap.analyst@example.com")
+    await assign(db, user, AgentCapacity.PREPARER)
+    return user
+
+
+@pytest.fixture
+async def adm(admin: User, signed_in_client: ClientFactory) -> AsyncClient:
+    return await signed_in_client(admin)
+
+
+@pytest.fixture
+async def me(analyst: User, signed_in_client: ClientFactory) -> AsyncClient:
+    return await signed_in_client(analyst)
+
+
+async def configure_app(adm: AsyncClient) -> None:
+    r = await adm.put(
+        INTEGRATION,
+        json={"client_id": "ABclient", "client_secret": "super-secret", "environment": "sandbox"},
+    )
+    assert r.status_code == 200, r.text
+
+
+async def connect(client: AsyncClient, source_id: str | None = None, realm: str = REALM) -> Any:
+    """Run the OAuth round trip the browser would do; returns the callback redirect."""
+    r = await client.post(f"{SOURCES}/quickbooks/authorize", json={"source_id": source_id})
+    assert r.status_code == 200, r.text
+    query = urllib.parse.parse_qs(urllib.parse.urlparse(r.json()["url"]).query)
+    assert query["redirect_uri"] == [
+        "http://localhost:8081/api/v1/data-sources/quickbooks/callback"
+    ]
+    callback = await client.get(
+        f"{SOURCES}/quickbooks/callback",
+        params={"state": query["state"][0], "code": "good-code", "realmId": realm},
+    )
+    assert callback.status_code == 303
+    return urllib.parse.parse_qs(urllib.parse.urlparse(callback.headers["location"]).query)
+
+
+# --- integration app ----------------------------------------------------------------------
+
+
+async def test_quickbooks_app_is_admin_only_and_secret_never_returned(
+    adm: AsyncClient, me: AsyncClient, db: AsyncSession
+) -> None:
+    assert (await me.get(INTEGRATION)).status_code == 403
+    assert (await me.get(f"{SOURCES}/quickbooks/status")).json() == {
+        "configured": False,
+        "environment": None,
+    }
+    first = await adm.put(INTEGRATION, json={"client_id": "ABclient", "environment": "sandbox"})
+    assert first.json()["detail"]["code"] == "client_secret_required"
+
+    await configure_app(adm)
+    body = (await adm.get(INTEGRATION)).json()
+    assert body["has_client_secret"] is True
+    assert "super-secret" not in json.dumps(body)
+    assert body["redirect_uri"].endswith("/api/v1/data-sources/quickbooks/callback")
+
+    # Updating without a secret keeps the stored one
+    r = await adm.put(INTEGRATION, json={"client_id": "ABclient2", "environment": "production"})
+    assert r.json()["client_id"] == "ABclient2"
+    assert (await me.get(f"{SOURCES}/quickbooks/status")).json()["configured"] is True
+
+
+async def test_connect_requires_the_app(me: AsyncClient) -> None:
+    r = await me.post(f"{SOURCES}/quickbooks/authorize", json={})
+    assert r.status_code == 409
+    assert r.json()["detail"]["code"] == "integration_not_configured"
+
+
+# --- OAuth + sync -------------------------------------------------------------------------
+
+
+async def test_user_connects_own_quickbooks_and_it_syncs(
+    adm: AsyncClient, me: AsyncClient, intuit: FakeIntuit, db: AsyncSession
+) -> None:
+    await configure_app(adm)
+    result = await connect(me)
+    assert result["quickbooks"] == ["connected"]
+
+    [source] = (await me.get(SOURCES)).json()
+    assert source["id"] == result["source"][0]
+    assert source["status"] == "connected"
+    assert source["name"] == "Acme Holdings Ltd"
+    assert source["record_counts"] == {"vendor": 2, "purchase_order": 1, "bill": 1, "account": 1}
+    assert "credentials" not in json.dumps(source)
+
+    bills = (await me.get(f"{SOURCES}/{source['id']}/records", params={"type": "bill"})).json()
+    assert bills[0]["data"]["po_number"] == "PO-77"  # linked PO resolved to its number
+    assert bills[0]["data"]["account"] == "6100 Cloud Hosting"
+
+    row = await db.get(DataSource, source["id"])
+    assert row is not None and row.credentials_enc is not None
+    assert "rt-1" not in row.credentials_enc  # encrypted at rest
+    assert crypto.decrypt_json(row.credentials_enc)["refresh_token"] == "rt-1"
+
+
+async def test_callback_state_is_signed_and_single_use(
+    adm: AsyncClient, me: AsyncClient, intuit: FakeIntuit
+) -> None:
+    await configure_app(adm)
+    r = await me.post(f"{SOURCES}/quickbooks/authorize", json={})
+    state = urllib.parse.parse_qs(urllib.parse.urlparse(r.json()["url"]).query)["state"][0]
+    params = {"state": state, "code": "good-code", "realmId": REALM}
+
+    assert (await me.get(f"{SOURCES}/quickbooks/callback", params=params)).status_code == 303
+    replay = await me.get(f"{SOURCES}/quickbooks/callback", params=params)
+    assert "quickbooks=error" in replay.headers["location"]
+
+    forged = await me.get(
+        f"{SOURCES}/quickbooks/callback", params={**params, "state": "not-a-token"}
+    )
+    assert "quickbooks=error" in forged.headers["location"]
+
+
+async def test_cancelled_authorization_is_reported(
+    adm: AsyncClient, me: AsyncClient, intuit: FakeIntuit
+) -> None:
+    await configure_app(adm)
+    r = await me.post(f"{SOURCES}/quickbooks/authorize", json={})
+    state = urllib.parse.parse_qs(urllib.parse.urlparse(r.json()["url"]).query)["state"][0]
+    callback = await me.get(
+        f"{SOURCES}/quickbooks/callback", params={"state": state, "error": "access_denied"}
+    )
+    location = urllib.parse.parse_qs(urllib.parse.urlparse(callback.headers["location"]).query)
+    assert location["quickbooks"] == ["error"]
+    assert "cancelled" in location["message"][0]
+    [source] = (await me.get(SOURCES)).json()
+    assert source["status"] == "pending_auth"
+
+
+async def test_expired_access_is_refreshed_and_rotation_kept(
+    adm: AsyncClient, me: AsyncClient, intuit: FakeIntuit, db: AsyncSession
+) -> None:
+    await configure_app(adm)
+    source_id = (await connect(me))["source"][0]
+    row = await db.get(DataSource, source_id)
+    assert row is not None and row.credentials_enc is not None
+    tokens = crypto.decrypt_json(row.credentials_enc)
+    tokens["access_expires_at"] = (utcnow() - timedelta(minutes=5)).isoformat()
+    row.credentials_enc = crypto.encrypt_json(tokens)
+    await db.commit()
+
+    r = await me.post(f"{SOURCES}/{source_id}/sync")
+    assert r.status_code == 200, r.text
+    await db.refresh(row)
+    assert row.credentials_enc is not None
+    assert crypto.decrypt_json(row.credentials_enc)["refresh_token"] == "rt-2"
+
+
+async def test_revoked_access_needs_reauthorization_of_the_same_company(
+    adm: AsyncClient, me: AsyncClient, intuit: FakeIntuit, db: AsyncSession
+) -> None:
+    await configure_app(adm)
+    source_id = (await connect(me))["source"][0]
+    row = await db.get(DataSource, source_id)
+    assert row is not None and row.credentials_enc is not None
+    tokens = crypto.decrypt_json(row.credentials_enc)
+    tokens["access_expires_at"] = (utcnow() - timedelta(minutes=5)).isoformat()
+    row.credentials_enc = crypto.encrypt_json(tokens)
+    await db.commit()
+    intuit.refresh_rejected = True
+
+    r = await me.post(f"{SOURCES}/{source_id}/sync")
+    assert r.status_code == 409
+    assert "Re-authorize" in r.json()["detail"]["message"]
+    assert (await me.get(f"{SOURCES}/{source_id}")).json()["status"] == "needs_reauth"
+
+    other = await connect(me, source_id, realm="999")
+    assert "different company" in other["message"][0]
+
+    intuit.refresh_rejected = False
+    again = await connect(me, source_id)
+    assert again["quickbooks"] == ["connected"]
+    assert (await me.get(f"{SOURCES}/{source_id}")).json()["status"] == "connected"
+
+
+async def test_disconnect_revokes_access(
+    adm: AsyncClient, me: AsyncClient, intuit: FakeIntuit
+) -> None:
+    await configure_app(adm)
+    source_id = (await connect(me))["source"][0]
+    assert (await me.delete(f"{SOURCES}/{source_id}")).status_code == 204
+    assert intuit.revoked == ["rt-1"]
+    assert (await me.get(SOURCES)).json() == []
+
+
+# --- privacy ------------------------------------------------------------------------------
+
+
+async def test_sources_are_private_to_their_owner(
+    adm: AsyncClient,
+    me: AsyncClient,
+    intuit: FakeIntuit,
+    make_user: MakeUser,
+    signed_in_client: ClientFactory,
+) -> None:
+    await configure_app(adm)
+    source_id = (await connect(me))["source"][0]
+    other = await signed_in_client(await make_user("other@example.com"))
+
+    assert (await other.get(SOURCES)).json() == []
+    assert (await other.get(f"{SOURCES}/{source_id}")).status_code == 404
+    r = await other.get(f"{SOURCES}/{source_id}/records", params={"type": "bill"})
+    assert r.status_code == 404
+    assert (await other.post(f"{SOURCES}/{source_id}/sync")).status_code == 404
+    assert (await other.delete(f"{SOURCES}/{source_id}")).status_code == 404
+    reauth = await other.post(f"{SOURCES}/quickbooks/authorize", json={"source_id": source_id})
+    assert reauth.status_code == 404
+
+    # The admin sees status per user, never credentials or records
+    assert (await adm.get(f"{SOURCES}/{source_id}")).status_code == 404
+    [listed] = (await adm.get("/api/v1/admin/data-sources")).json()
+    assert listed["owner"]["email"] == "ap.analyst@example.com"
+    assert listed["status"] == "connected"
+    assert (await me.get("/api/v1/admin/data-sources")).status_code == 403
+
+
+# --- uploads ------------------------------------------------------------------------------
+
+BILLS_CSV = (
+    b"Invoice No,Supplier,Amount,Tax,Invoice Date,PO Number\n"
+    b'INV-1,Acme Cloud Services,"1,250.00",50,2026-10-01,PO-1\n'
+    b"INV-2,Globex,300.00,,05/10/2026,\n"
+    b"INV-3,,abc,,,\n"
+)
+
+
+async def upload(client: AsyncClient, path: str, data: bytes, **form: Any) -> httpx.Response:
+    return await client.post(
+        f"{SOURCES}/uploads{path}", files={"file": ("bills.csv", data)}, data=form
+    )
+
+
+async def test_upload_preview_suggests_a_mapping(me: AsyncClient) -> None:
+    r = await upload(me, "/preview", BILLS_CSV, record_type="bill")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["mapping"] == {
+        "external_id": None,
+        "doc_number": "Invoice No",
+        "vendor_name": "Supplier",
+        "total": "Amount",
+        "tax_total": "Tax",
+        "bill_date": "Invoice Date",
+        "due_date": None,
+        "po_number": "PO Number",
+        "account": None,
+    }
+    assert (body["row_count"], body["valid_count"], body["error_count"]) == (3, 2, 1)
+    assert body["errors"][0].startswith("Row 4: total: 'abc' is not an amount")
+
+
+async def test_upload_rejects_bad_rows_unless_skipped(me: AsyncClient) -> None:
+    mapping = (await upload(me, "/preview", BILLS_CSV, record_type="bill")).json()["mapping"]
+    form = {"record_type": "bill", "mapping": json.dumps(mapping)}
+
+    rejected = await upload(me, "", BILLS_CSV, **form)
+    assert rejected.status_code == 422
+    assert "1 row(s) have problems" in rejected.json()["detail"]["message"]
+
+    r = await upload(me, "", BILLS_CSV, **form, skip_invalid="true", name="October bills")
+    assert r.status_code == 201, r.text
+    assert (r.json()["imported"], r.json()["skipped"]) == (2, 1)
+    source = r.json()["source"]
+    assert (source["kind"], source["status"], source["name"]) == (
+        "upload",
+        "ready",
+        "October bills",
+    )
+
+    records = (await me.get(f"{SOURCES}/{source['id']}/records", params={"type": "bill"})).json()
+    by_ref = {rec["reference"]: rec for rec in records}
+    assert by_ref["INV-1"]["amount"] == "1250.00"
+    assert by_ref["INV-2"]["txn_date"] == "2026-10-05"  # DD/MM/YYYY
+
+    again = await upload(me, "", BILLS_CSV, **form, skip_invalid="true")
+    assert "already uploaded" in again.json()["detail"]["message"]
+
+
+# --- agents use the user's data -----------------------------------------------------------
+
+
+async def test_run_prefilled_from_quickbooks_with_snapshot_for_reviewer(
+    adm: AsyncClient,
+    me: AsyncClient,
+    intuit: FakeIntuit,
+    make_user: MakeUser,
+    signed_in_client: ClientFactory,
+    db: AsyncSession,
+    fake_llm: FakeLLM,
+) -> None:
+    await configure_app(adm)
+    source_id = (await connect(me))["source"][0]
+    run = (await me.post(RUNS)).json()
+
+    r = await me.put(
+        f"{RUNS}/{run['id']}/source", json={"source_id": source_id, "record_id": "145"}
+    )
+    assert r.status_code == 200, r.text
+    run = r.json()
+    assert run["input"]["supplier"] == "Acme Cloud Services"
+    assert run["input"]["invoice_number"] == "INV-2048"
+    assert run["input"]["legal_entity"] == "Acme Holdings Ltd"
+    assert run["input"]["po_authorized_amount"] == "12500.00"  # from the linked PO
+    assert run["input"]["proposed_gl_account"] == "6100 Cloud Hosting"
+    assert run["source"]["records"]["purchase_order"]["po_number"] == "PO-77"
+
+    # Received amount isn't in QuickBooks: the preparer completes it
+    values = {**run["input"], "received_amount": "12500.00"}
+    await me.put(f"{RUNS}/{run['id']}/input", json={"values": values})
+    run = (await me.post(f"{RUNS}/{run['id']}/analyze")).json()
+    flags = {f["code"]: f["severity"] for f in run["flags"]}
+    assert flags["VENDOR_IN_MASTER"] == "pass"
+    run = (await me.post(f"{RUNS}/{run['id']}/submit")).json()
+
+    reviewer = await make_user("ap.approver@example.com")
+    await assign(db, reviewer, AgentCapacity.REVIEWER)
+    seen = (await (await signed_in_client(reviewer)).get(f"{RUNS}/{run['id']}")).json()
+    assert seen["source"]["records"]["bill"]["doc_number"] == "INV-2048"
+
+    # Deleting the source keeps what the reviewer approves against
+    assert (await me.delete(f"{SOURCES}/{source_id}")).status_code == 204
+    kept = (await me.get(f"{RUNS}/{run['id']}")).json()
+    assert kept["source"]["source_id"] is None
+    assert kept["source"]["source_name"] == "Acme Holdings Ltd"
+    assert kept["result_hash"] == run["result_hash"]
+
+
+async def test_vendor_master_flags_unknown_and_inactive_suppliers(
+    adm: AsyncClient, me: AsyncClient, intuit: FakeIntuit, fake_llm: FakeLLM
+) -> None:
+    await configure_app(adm)
+    await connect(me)
+    run = (await me.post(RUNS)).json()
+    base = {
+        "invoice_number": "X-1",
+        "legal_entity": "US",
+        "invoice_total": "10.00",
+        "po_authorized_amount": "10.00",
+        "received_amount": "10.00",
+    }
+    for supplier, code in (
+        ("Unknown Co", "VENDOR_NOT_IN_MASTER"),
+        ("Old Supplier", "VENDOR_INACTIVE"),
+    ):
+        await me.put(f"{RUNS}/{run['id']}/input", json={"values": {**base, "supplier": supplier}})
+        analyzed = (await me.post(f"{RUNS}/{run['id']}/analyze")).json()
+        assert code in {f["code"] for f in analyzed["flags"]}
+
+
+async def test_cannot_prefill_from_someone_elses_source(
+    adm: AsyncClient,
+    me: AsyncClient,
+    intuit: FakeIntuit,
+    make_user: MakeUser,
+    signed_in_client: ClientFactory,
+    db: AsyncSession,
+) -> None:
+    await configure_app(adm)
+    source_id = (await connect(me))["source"][0]
+    other_user = await make_user("other@example.com")
+    await assign(db, other_user, AgentCapacity.PREPARER)
+    other = await signed_in_client(other_user)
+    run = (await other.post(RUNS)).json()
+    r = await other.put(
+        f"{RUNS}/{run['id']}/source", json={"source_id": source_id, "record_id": "145"}
+    )
+    assert r.status_code == 404
+    assert (await db.get(DataSource, source_id)).status == SourceStatus.CONNECTED  # type: ignore[union-attr]

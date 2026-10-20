@@ -7,6 +7,9 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.agent_catalog.runs.models import AgentRun, AgentRunDetail, FlagSeverity, RunPriority
+from src.app.data_sources.access import FinanceData
+from src.app.data_sources.models import DataSource
+from src.app.data_sources.records import Record, RecordType
 
 _KEY = re.compile(r"[a-z][a-z0-9_]*")
 _CODE = re.compile(r"\d{2}")
@@ -50,6 +53,17 @@ class AnalysisContext:
     session: AsyncSession
     run: AgentRun
     document_count: int
+    # The preparer's own data sources (QuickBooks, uploads): e.g. the vendor master
+    data: FinanceData
+
+
+@dataclass
+class Prefill:
+    """Input values taken from a data source record, plus the related records used."""
+
+    values: dict[str, Any]
+    # Frozen into the run's snapshot for the reviewer, e.g. {"purchase_order": PurchaseOrder}
+    related: dict[str, Record] = field(default_factory=dict)
 
 
 class BaseAgent:
@@ -74,6 +88,8 @@ class BaseAgent:
     reference_field: ClassVar[str | None] = None  # input field shown as the run's reference
     policy_version: ClassVar[str] = "v1"  # bump when rules or thresholds change
     narrative_guidance: ClassVar[str] = ""  # agent-specific instructions for the LLM
+    # Which data source records a user can pick to prefill a run (None: manual input only)
+    source_record_type: ClassVar[RecordType | None] = None
 
     _required: ClassVar[tuple[str, ...]] = (
         "key",
@@ -104,6 +120,11 @@ class BaseAgent:
     @classmethod
     def has_workspace(cls) -> bool:
         return cls.input_schema is not None
+
+    @classmethod
+    async def prefill(cls, record: Record, source: DataSource, data: FinanceData) -> Prefill:
+        """Map a `source_record_type` record to input values (only the fields it knows)."""
+        raise NotImplementedError(f"{cls.__name__} can't be prefilled from a data source")
 
     @classmethod
     async def analyze(cls, data: BaseModel, ctx: AnalysisContext) -> Analysis:

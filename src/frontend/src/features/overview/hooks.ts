@@ -10,8 +10,8 @@ export function useOverviewSummary(period?: string) {
   return useQuery({
     queryKey: overviewKeys.summary(period),
     queryFn: () => overviewApi.summary(period),
-    // Derived from the catalog (and later runs): refetched when those change
-    meta: { dependsOn: ["agents", "runs"] },
+    // Derived from the catalog, runs and data sources: refetched when those change
+    meta: { dependsOn: ["agents", "runs", "data-sources"] },
     // Other users' changes show up without a manual refresh
     refetchInterval: 60_000,
     refetchOnWindowFocus: true,

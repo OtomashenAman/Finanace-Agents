@@ -24,6 +24,7 @@ from src.app.common.models import (
     enum_check,
     string_enum,
 )
+from src.app.data_sources import models as _data_source_models  # noqa: F401 - FK target
 
 
 class RunStatus(StrEnum):
@@ -186,3 +187,27 @@ class RunReview(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     decision: Mapped[ReviewDecision] = mapped_column(string_enum(ReviewDecision, 32))
     comment: Mapped[str] = mapped_column(Text)
     result_hash: Mapped[str] = mapped_column(String(64))  # what exactly was approved
+
+
+class RunSourceSnapshot(CreatedAtMixin, Base):
+    """The data source records a run was prefilled from, frozen at that moment.
+
+    Reviewers see this, not the preparer's live source (which they can't access and which may
+    have changed since). Kept when the source is deleted.
+    """
+
+    __tablename__ = "run_source_snapshots"
+
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("agent_runs.id", ondelete="CASCADE"), primary_key=True
+    )
+    source_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("data_sources.id", ondelete="SET NULL"), index=True
+    )
+    source_kind: Mapped[str] = mapped_column(String(32))
+    source_name: Mapped[str] = mapped_column(String(200))
+    record_type: Mapped[str] = mapped_column(String(32))
+    record_reference: Mapped[str] = mapped_column(String(200))
+    # {"bill": {...}, "purchase_order": {...}}: the selected record and what it pulled in
+    records: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    source_synced_at: Mapped[datetime | None]

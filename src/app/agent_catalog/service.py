@@ -12,6 +12,7 @@ from src.app.audit.service import record_event
 from src.app.auth.models import User, UserRole
 from src.app.common.clock import utcnow
 from src.app.common.context import RequestContext
+from src.app.data_sources.records import RecordType
 
 # Columns the code registry owns; everything else (is_active, assignments) belongs to admins
 _CODE_OWNED = ("code", "name", "short_name", "description", "primary_user", "reviewer")
@@ -88,6 +89,11 @@ def _has_workspace(key: str) -> bool:
     return definition is not None and definition.has_workspace()
 
 
+def _source_record_type(key: str) -> RecordType | None:
+    definition = get_agent_definition(key)
+    return definition.source_record_type if definition and definition.has_workspace() else None
+
+
 def _capacities_for(
     user: User, agent: Agent, assigned: dict[uuid.UUID, list[AgentCapacity]]
 ) -> list[AgentCapacity]:
@@ -107,6 +113,7 @@ def _to_out(agent: Agent, capacities: list[AgentCapacity]) -> AgentOut:
         reviewer=agent.reviewer,
         is_active=agent.is_active,
         has_workspace=_has_workspace(agent.key),
+        source_record_type=_source_record_type(agent.key),
         my_capacities=sorted(capacities),
     )
 

@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal, Self
 
-from pydantic import SecretStr, model_validator
+from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -43,10 +43,23 @@ class Settings(BaseSettings):
     upload_max_files_per_run: int = 10
     extracted_text_max_chars: int = 200_000
 
+    # Where browsers reach the app (SPA + /api proxy): OAuth redirect URIs and return pages
+    public_base_url: str = "http://localhost:8081"
+    # Fernet key for data source credentials (OAuth tokens, client secrets). Optional outside
+    # production, where a key derived from SECRET_KEY is used instead
+    data_encryption_key: SecretStr | None = None
+    data_sync_timeout_seconds: float = 30
+    upload_max_rows: int = 20_000
+
     # Demo seed user (uv run poe seed)
     demo_admin_email: str = "finance.admin@example.com"
     demo_admin_name: str = "Finance Admin"
     demo_admin_password: SecretStr | None = None
+
+    @field_validator("data_encryption_key", mode="before")
+    @classmethod
+    def _blank_is_unset(cls, value: object) -> object:
+        return None if value == "" else value
 
     @property
     def is_production(self) -> bool:
@@ -74,6 +87,8 @@ class Settings(BaseSettings):
             key = self.secret_key.get_secret_value()
             if len(key) < 32 or key == "change-me":
                 raise ValueError("SECRET_KEY must be a random value of at least 32 characters")
+            if self.data_encryption_key is None:
+                raise ValueError("DATA_ENCRYPTION_KEY is required in production")
         return self
 
 
