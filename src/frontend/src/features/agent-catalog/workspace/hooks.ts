@@ -7,7 +7,7 @@ export const RUNS_TAG = "runs"
 
 export const runKeys = {
   form: (key: string) => [RUNS_TAG, "form", key] as const,
-  list: (key: string) => [RUNS_TAG, "list", key] as const,
+  list: (key: string, entityId?: string | null) => [RUNS_TAG, "list", key, entityId ?? "all"] as const,
   detail: (key: string, id: string) => [RUNS_TAG, "detail", key, id] as const,
 }
 
@@ -15,8 +15,13 @@ export function useFormSpec(key: string, enabled = true) {
   return useQuery({ queryKey: runKeys.form(key), queryFn: () => runsApi.form(key), enabled, staleTime: Infinity })
 }
 
-export function useRuns(key: string, enabled = true) {
-  return useQuery({ queryKey: runKeys.list(key), queryFn: () => runsApi.list(key), enabled })
+export function useRuns(key: string, enabled = true, entityId?: string | null) {
+  return useQuery({
+    queryKey: runKeys.list(key, entityId),
+    queryFn: () => runsApi.list(key, entityId),
+    enabled,
+    meta: { dependsOn: ["entities"] },
+  })
 }
 
 export function useRun(key: string, id: string) {
@@ -34,7 +39,7 @@ function useRunMutation<V>(key: string, fn: (vars: V) => Promise<RunDetail>) {
 }
 
 export function useCreateRun(key: string) {
-  return useRunMutation<void>(key, () => runsApi.create(key))
+  return useRunMutation<string | null>(key, (entityId) => runsApi.create(key, entityId))
 }
 
 export function useSaveInput(key: string, id: string) {

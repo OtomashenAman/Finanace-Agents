@@ -8,6 +8,8 @@ import { StatusBadge } from "@/features/agent-catalog/workspace/components/statu
 import { formatDateTime } from "@/features/agent-catalog/workspace/format"
 import { useCurrentUser } from "@/features/auth/hooks"
 import { isAdmin } from "@/features/auth/roles"
+import { EntitySelect } from "@/features/entities/entity-select"
+import { useEntities } from "@/features/entities/hooks"
 import { cn } from "@/lib/utils"
 
 import type { ApprovalItem } from "./api"
@@ -22,6 +24,7 @@ function ApprovalsTable({ runs, decided, admin }: { runs: ApprovalItem[]; decide
             <th className="py-2 pr-4 font-semibold">Run</th>
             <th className="py-2 pr-4 font-semibold">Agent</th>
             <th className="py-2 pr-4 font-semibold">Reference</th>
+            <th className="py-2 pr-4 font-semibold">Entity</th>
             <th className="py-2 pr-4 font-semibold">Result</th>
             {admin && <th className="py-2 pr-4 font-semibold">Preparer</th>}
             <th className="py-2 pr-4 font-semibold">{decided ? "Decided" : "Submitted"}</th>
@@ -41,6 +44,9 @@ function ApprovalsTable({ runs, decided, admin }: { runs: ApprovalItem[]; decide
               </td>
               <td className="py-3 pr-4">{run.agent_name}</td>
               <td className="py-3 pr-4">{run.business_reference ?? "—"}</td>
+              <td className="py-3 pr-4 font-mono text-xs" title={run.entity?.name}>
+                {run.entity?.code ?? "—"}
+              </td>
               <td className="py-3 pr-4">
                 {run.headline ?? "—"}
                 {run.priority === "high" && <span className="ml-2 text-xs font-semibold text-red-700">High priority</span>}
@@ -67,7 +73,9 @@ export function ApprovalsPage() {
   const [showDecided, setDecided] = useState(false)
   // Users only see what's still waiting; the decision history is the admin's
   const decided = admin && showDecided
-  const { data: runs, isPending, isError } = useApprovals(decided)
+  const [entityId, setEntityId] = useState<string | null>(null)
+  const entities = useEntities()
+  const { data: runs, isPending, isError } = useApprovals(decided, entityId)
   const tabs = [
     { decided: false, label: "Waiting for approval" },
     { decided: true, label: "Decided" },
@@ -83,6 +91,17 @@ export function ApprovalsPage() {
       }
     >
       <section className="rounded-lg border bg-card p-5 sm:p-6">
+        {admin && (entities.data?.length ?? 0) > 1 && (
+          <div className="mb-4 flex justify-end">
+            <EntitySelect
+              entities={entities.data ?? []}
+              value={entityId}
+              onChange={setEntityId}
+              allLabel="All entities"
+              aria-label="Filter approvals by legal entity"
+            />
+          </div>
+        )}
         {admin && (
           <nav aria-label="Approvals" className="mb-4 flex gap-1 border-b">
             {tabs.map((tab) => (

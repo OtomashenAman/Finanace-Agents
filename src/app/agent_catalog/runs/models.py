@@ -30,6 +30,7 @@ from src.app.common.models import (
     string_enum,
 )
 from src.app.data_sources import models as _data_source_models  # noqa: F401 - FK target
+from src.app.entities import models as _entity_models  # noqa: F401 - FK target
 
 
 class RunStatus(StrEnum):
@@ -87,11 +88,20 @@ class AgentRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     preparer_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), index=True
     )
+    # Legal entity the run is filed for; None for runs from before entities were set up
+    entity_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("legal_entities.id", ondelete="RESTRICT"), index=True
+    )
     status: Mapped[RunStatus] = mapped_column(string_enum(RunStatus, 32), default=RunStatus.DRAFT)
     priority: Mapped[RunPriority] = mapped_column(
         string_enum(RunPriority, 16), default=RunPriority.NORMAL
     )
     policy_version: Mapped[str | None] = mapped_column(String(50))
+    # The threshold values the analysis used (with policy_version: what exactly applied)
+    policy_values: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # Fixed on submit from the approval matrix: approvals needed and the matched tier
+    required_approvals: Mapped[int] = mapped_column(default=1, server_default=text("1"))
+    approval_rule: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     headline: Mapped[str | None] = mapped_column(String(200))
     proposed_decision: Mapped[str | None] = mapped_column(String(300))
     # Display snapshot of the engine's figures; the typed values live in the agent table

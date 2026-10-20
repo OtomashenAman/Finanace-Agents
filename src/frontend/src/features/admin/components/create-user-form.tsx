@@ -15,6 +15,7 @@ import { describedBy, roleHint } from "../form-utils"
 import { useCreateUser } from "../hooks"
 import { createUserSchema, PASSWORD_MIN_LENGTH, type CreateUserValues } from "../schema"
 import { AssignmentsEditor } from "./assignments-editor"
+import { EntitiesEditor } from "./entities-editor"
 import { Field, RoleSelect } from "./form-bits"
 
 interface CreateUserFormProps {
@@ -25,6 +26,7 @@ interface CreateUserFormProps {
 export function CreateUserForm({ onCreated, onCancel }: CreateUserFormProps) {
   const create = useCreateUser()
   const [assignments, setAssignments] = useState<Assignment[]>([])
+  const [entityIds, setEntityIds] = useState<string[]>([])
   const {
     register,
     handleSubmit,
@@ -39,8 +41,12 @@ export function CreateUserForm({ onCreated, onCancel }: CreateUserFormProps) {
 
   const onSubmit = handleSubmit((values) =>
     create.mutate(
-      // Admins get every agent anyway; don't store assignments for them
-      { ...values, assignments: values.role === "user" ? assignments : [] },
+      // Admins get every agent and entity anyway; don't store assignments for them
+      {
+        ...values,
+        assignments: values.role === "user" ? assignments : [],
+        entity_ids: values.role === "user" ? entityIds : [],
+      },
       {
         onSuccess: (user) => {
           toast.success(`${user.full_name} created`)
@@ -93,6 +99,12 @@ export function CreateUserForm({ onCreated, onCancel }: CreateUserFormProps) {
           <div className="space-y-2">
             <h3 className="text-sm font-semibold text-brand-navy">Agent access</h3>
             <AssignmentsEditor value={assignments} onChange={setAssignments} disabled={create.isPending} />
+          </div>
+        )}
+        {role === "user" && (
+          <div className="space-y-2">
+            <h3 className="text-sm font-semibold text-brand-navy">Legal entities</h3>
+            <EntitiesEditor value={entityIds} onChange={setEntityIds} disabled={create.isPending} />
           </div>
         )}
 

@@ -460,7 +460,6 @@ async def test_run_prefilled_from_quickbooks_with_snapshot_for_reviewer(
     run = r.json()
     assert run["input"]["supplier"] == "Acme Cloud Services"
     assert run["input"]["invoice_number"] == "INV-2048"
-    assert run["input"]["legal_entity"] == "Acme Holdings Ltd"
     assert run["input"]["po_authorized_amount"] == "12500.00"  # from the linked PO
     assert run["input"]["proposed_gl_account"] == "6100 Cloud Hosting"
     assert run["source"]["records"]["purchase_order"]["po_number"] == "PO-77"
@@ -493,7 +492,6 @@ async def test_vendor_master_flags_unknown_and_inactive_suppliers(
     run = (await me.post(RUNS)).json()
     base = {
         "invoice_number": "X-1",
-        "legal_entity": "US",
         "invoice_total": "10.00",
         "po_authorized_amount": "10.00",
         "received_amount": "10.00",

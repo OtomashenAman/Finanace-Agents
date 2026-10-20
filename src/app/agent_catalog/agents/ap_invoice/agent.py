@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 
 from src.app.agent_catalog.agents.ap_invoice.models import ApInvoiceRun
-from src.app.agent_catalog.agents.ap_invoice.schemas import ApInvoiceInput
+from src.app.agent_catalog.agents.ap_invoice.schemas import ApInvoiceInput, ApInvoicePolicy
 from src.app.agent_catalog.agents.base import (
     Analysis,
     AnalysisContext,
@@ -16,7 +16,7 @@ from src.app.agent_catalog.agents.base import (
 )
 from src.app.agent_catalog.runs.models import AgentRun, FlagSeverity, RunStatus
 from src.app.data_sources.access import FinanceData
-from src.app.data_sources.models import DataSource, SourceKind
+from src.app.data_sources.models import DataSource
 from src.app.data_sources.records import Bill, PurchaseOrder, Record, RecordType, Vendor
 
 ZERO = Decimal("0.00")
@@ -54,6 +54,12 @@ class ApInvoiceAgent(BaseAgent):
         "should verify in the source documents."
     )
     source_record_type = RecordType.BILL
+    policy_schema = ApInvoicePolicy
+    approval_amount_label = "Invoice total"
+
+    @classmethod
+    def approval_amount(cls, data: BaseModel) -> Decimal | None:
+        return cast(ApInvoiceInput, data).invoice_total
 
     @classmethod
     async def prefill(cls, record: Record, source: DataSource, data: FinanceData) -> Prefill:
@@ -65,8 +71,6 @@ class ApInvoiceAgent(BaseAgent):
             "tax_total": bill.tax_total,
             "proposed_gl_account": bill.account,
         }
-        if source.kind == SourceKind.QUICKBOOKS:
-            values["legal_entity"] = source.name  # the QuickBooks company
         related: dict[str, Record] = {}
         if bill.po_number:
             po = await data.find(PurchaseOrder, RecordType.PURCHASE_ORDER, bill.po_number)
@@ -81,6 +85,7 @@ class ApInvoiceAgent(BaseAgent):
     @classmethod
     async def analyze(cls, data: BaseModel, ctx: AnalysisContext) -> Analysis:
         invoice = cast(ApInvoiceInput, data)
+        policy = cast(ApInvoicePolicy, ctx.policy) if ctx.policy else ApInvoicePolicy()
         findings: list[Finding] = []
 
         duplicate_of = await ctx.session.scalar(
@@ -129,6 +134,16 @@ class ApInvoiceAgent(BaseAgent):
                     "po_authorized_amount",
                 )
             )
+        elif abs(invoice_vs_po) <= policy.po_tolerance:
+            findings.append(
+                Finding(
+                    "PO_MATCH",
+                    FlagSeverity.PASS,
+                    f"Invoice total is within the {_money(policy.po_tolerance)} PO tolerance "
+                    f"(difference {_money(invoice_vs_po)})",
+                    "po_authorized_amount",
+                )
+            )
         else:
             findings.append(
                 Finding(
@@ -148,6 +163,16 @@ class ApInvoiceAgent(BaseAgent):
                     "received_amount",
                 )
             )
+        elif abs(invoice_vs_receipt) <= policy.receipt_tolerance:
+            findings.append(
+                Finding(
+                    "RECEIPT_MATCH",
+                    FlagSeverity.PASS,
+                    f"Invoice total is within the {_money(policy.receipt_tolerance)} receipt "
+                    f"tolerance (difference {_money(invoice_vs_receipt)})",
+                    "received_amount",
+                )
+            )
         else:
             findings.append(
                 Finding(
@@ -159,6 +184,19 @@ class ApInvoiceAgent(BaseAgent):
                 )
             )
 
+        if (
+            policy.high_value_amount is not None
+            and invoice.invoice_total > policy.high_value_amount
+        ):
+            findings.append(
+                Finding(
+                    "HIGH_VALUE_INVOICE",
+                    FlagSeverity.WARNING,
+                    f"Invoice total exceeds the {_money(policy.high_value_amount)} high-value "
+                    "limit: review with extra care",
+                    "invoice_total",
+                )
+            )
         if invoice.tax_total is not None and invoice.tax_total > invoice.invoice_total:
             findings.append(
                 Finding(

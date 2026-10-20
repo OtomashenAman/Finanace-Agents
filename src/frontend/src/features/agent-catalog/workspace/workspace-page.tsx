@@ -1,3 +1,4 @@
+import { useState } from "react"
 import { Link, useNavigate, useParams } from "react-router"
 import { ArrowLeft, Inbox, LoaderCircle, Plus } from "lucide-react"
 import { toast } from "sonner"
@@ -5,6 +6,8 @@ import { toast } from "sonner"
 import { AppPage } from "@/components/layout/app-page"
 import { Alert } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
+import { EntitySelect } from "@/features/entities/entity-select"
+import { useEntities } from "@/features/entities/hooks"
 import { ApiError } from "@/lib/api"
 
 import type { AgentCapacity } from "../api"
@@ -42,6 +45,7 @@ function RunsTable({ agentKey, runs }: { agentKey: string; runs: RunSummary[] })
           <tr className="border-b text-left text-xs tracking-wide text-muted-foreground uppercase">
             <th className="py-2 pr-4 font-semibold">Run</th>
             <th className="py-2 pr-4 font-semibold">Reference</th>
+            <th className="py-2 pr-4 font-semibold">Entity</th>
             <th className="py-2 pr-4 font-semibold">Result</th>
             <th className="py-2 pr-4 font-semibold">Preparer</th>
             <th className="py-2 pr-4 font-semibold">Updated</th>
@@ -57,6 +61,9 @@ function RunsTable({ agentKey, runs }: { agentKey: string; runs: RunSummary[] })
                 </Link>
               </td>
               <td className="py-3 pr-4">{run.business_reference ?? "—"}</td>
+              <td className="py-3 pr-4 font-mono text-xs" title={run.entity?.name}>
+                {run.entity?.code ?? "—"}
+              </td>
               <td className="py-3 pr-4">
                 {run.headline ?? <span className="text-muted-foreground">Not analyzed</span>}
                 {run.priority === "high" && <span className="ml-2 text-xs font-semibold text-red-700">High priority</span>}
@@ -79,8 +86,14 @@ export function WorkspacePage() {
   const { agentKey = "" } = useParams()
   const navigate = useNavigate()
   const { data: agent, isPending, error } = useAgent(agentKey)
-  const runs = useRuns(agentKey, Boolean(agent?.has_workspace))
+  const entities = useEntities()
+  const [historyEntity, setHistoryEntity] = useState<string | null>(null)
+  const [newEntity, setNewEntity] = useState<string | null>(null)
+  const runs = useRuns(agentKey, Boolean(agent?.has_workspace), historyEntity)
   const create = useCreateRun(agentKey)
+  const activeEntities = (entities.data ?? []).filter((e) => e.is_active)
+  // With one entity it's used automatically; with several the preparer picks one
+  const mustPick = activeEntities.length > 1
 
   if (isPending) {
     return (
@@ -106,7 +119,7 @@ export function WorkspacePage() {
 
   const canPrepare = agent.has_workspace && agent.is_active && agent.my_capacities.includes("preparer")
   const startRun = () =>
-    create.mutate(undefined, {
+    create.mutate(mustPick ? newEntity : null, {
       onSuccess: (run) => void navigate(`/catalog/${agentKey}/runs/${run.id}`),
       onError: (e) => toast.error(e instanceof ApiError ? e.message : "Couldn't start a new analysis"),
     })
@@ -126,10 +139,20 @@ export function WorkspacePage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <BackLink />
           {canPrepare && (
-            <Button onClick={startRun} disabled={create.isPending}>
-              <Plus aria-hidden />
-              {create.isPending ? "Starting…" : "New analysis"}
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              {mustPick && (
+                <EntitySelect
+                  entities={activeEntities}
+                  value={newEntity}
+                  onChange={setNewEntity}
+                  aria-label="Legal entity for the new analysis"
+                />
+              )}
+              <Button onClick={startRun} disabled={create.isPending || (mustPick && !newEntity)}>
+                <Plus aria-hidden />
+                {create.isPending ? "Starting…" : "New analysis"}
+              </Button>
+            </div>
           )}
         </div>
 
@@ -150,9 +173,20 @@ export function WorkspacePage() {
           </p>
         ) : (
           <section className="rounded-lg border bg-card p-5 sm:p-6" aria-labelledby="runs-title">
-            <h2 id="runs-title" className="border-b pb-4 text-lg font-semibold text-brand-navy">
-              Run history
-            </h2>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-4">
+              <h2 id="runs-title" className="text-lg font-semibold text-brand-navy">
+                Run history
+              </h2>
+              {(entities.data?.length ?? 0) > 1 && (
+                <EntitySelect
+                  entities={entities.data ?? []}
+                  value={historyEntity}
+                  onChange={setHistoryEntity}
+                  allLabel="All entities"
+                  aria-label="Filter runs by legal entity"
+                />
+              )}
+            </div>
             {runs.isPending ? (
               <div className="flex justify-center py-10" role="status">
                 <LoaderCircle className="size-5 animate-spin text-primary" aria-hidden />

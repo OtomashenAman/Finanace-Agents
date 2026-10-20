@@ -69,6 +69,7 @@ def build_payload(
     data: BaseModel,
     analysis: Analysis,
     documents: list[RunDocument],
+    entity_name: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, str], list[str]]:
     """Payload for the LLM, map of prompt doc ids -> document ids, and notes about trimming."""
     notes: list[str] = []
@@ -88,6 +89,7 @@ def build_payload(
     payload = {
         "agent": definition.name,
         "run": run.reference,
+        "legal_entity": entity_name,
         "input": data.model_dump(mode="json"),
         "calculations": [
             {"key": c.key, "label": c.label, "value": None if c.value is None else str(c.value)}
@@ -160,9 +162,10 @@ async def generate(
     analysis: Analysis,
     documents: list[RunDocument],
     llm: LLMProvider,
+    entity_name: str | None = None,
 ) -> RunNarrative:
     """Call the LLM and record the attempt, whatever the outcome (caller commits)."""
-    payload, _, notes = build_payload(run, definition, data, analysis, documents)
+    payload, _, notes = build_payload(run, definition, data, analysis, documents, entity_name)
     system = SYSTEM_PROMPT.format(
         agent_name=definition.name, guidance=definition.narrative_guidance
     )

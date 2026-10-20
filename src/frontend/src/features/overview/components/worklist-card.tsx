@@ -8,9 +8,14 @@ import type { WorklistItem } from "../api"
 export function WorklistCard({ items }: { items: WorklistItem[] }) {
   return (
     <section className="rounded-lg border bg-card p-5 sm:p-6" aria-labelledby="worklist-title">
-      <h2 id="worklist-title" className="border-b pb-4 text-lg font-semibold text-brand-navy">
-        Operational worklist
-      </h2>
+      <div className="flex items-center justify-between gap-3 border-b pb-4">
+        <h2 id="worklist-title" className="text-lg font-semibold text-brand-navy">
+          Operational worklist
+        </h2>
+        <Link to="/worklist" className="text-sm font-medium text-primary hover:underline">
+          My Worklist
+        </Link>
+      </div>
 
       {items.length === 0 ? (
         <div className="flex flex-col items-center gap-2 py-12 text-center">
@@ -34,7 +39,10 @@ export function WorklistCard({ items }: { items: WorklistItem[] }) {
                     <span className="ml-2 align-middle text-xs font-semibold text-red-700">High priority</span>
                   )}
                 </span>
-                <span className="hidden text-sm text-muted-foreground sm:inline">{item.reference}</span>
+                <span className="hidden text-sm text-muted-foreground sm:inline">
+                  {item.reference}
+                  {item.entity_code && <span className="ml-2 font-mono text-xs">{item.entity_code}</span>}
+                </span>
                 <StatusBadge status={item.status} label={item.status_label} className="min-w-36" />
               </Link>
             </li>

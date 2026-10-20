@@ -1,6 +1,14 @@
 import { apiDownload, apiRequest } from "@/lib/api"
 
-export type AuditCategory = "security" | "users" | "runs" | "data_sources" | "agents" | "audit"
+export type AuditCategory =
+  | "security"
+  | "users"
+  | "runs"
+  | "data_sources"
+  | "agents"
+  | "entities"
+  | "governance"
+  | "audit"
 
 export interface AuditPerson {
   id: string
@@ -66,5 +74,7 @@ export const CATEGORY_LABELS: Record<AuditCategory, string> = {
   runs: "Runs & approvals",
   data_sources: "Data sources",
   agents: "Agents",
+  entities: "Legal entities",
+  governance: "Governance",
   audit: "Audit exports",
 }

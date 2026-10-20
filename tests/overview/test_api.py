@@ -25,6 +25,7 @@ async def test_admin_summary(make_user: MakeUser, signed_in_client: ClientFactor
     assert r.json() == {
         "period": "2026-10",
         "entity": "All entities",
+        "entity_id": None,
         "kpis": {
             "active_agents": 12,
             "runs_this_month": 0,
@@ -37,7 +38,7 @@ async def test_admin_summary(make_user: MakeUser, signed_in_client: ClientFactor
             "period_label": "October 2026",
             "review_sla_hours": 24,
             "connector_health": "Not configured",
-            "model_execution": "Guarded",
+            "model_execution": "Guarded · no calls in 7 days",
         },
     }
 

@@ -13,7 +13,9 @@ import src.app.agent_catalog.registry  # imports every agent, and with it each a
 import src.app.agent_catalog.runs.models
 import src.app.audit.models
 import src.app.auth.models
-import src.app.data_sources.models  # noqa: F401
+import src.app.data_sources.models
+import src.app.entities.models
+import src.app.governance.models  # noqa: F401
 from src.app.common.models import Base
 
 # this is the Alembic Config object, which provides

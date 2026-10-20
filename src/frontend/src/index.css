@@ -37,6 +37,9 @@
   --brand-navy-faint: #4a6390;
   --brand-ice: #dbe5f4;
   --brand-page: #eaf1fb;
+  /* Charts (validated with the dataviz palette checks): categorical slot 1 + status critical */
+  --viz-ok: #2a78d6;
+  --viz-failed: #d03b3b;
 }
 
 .dark {
@@ -59,6 +62,8 @@
   --border: #24406d;
   --input: #2b4a7a;
   --ring: #4f86e0;
+  --viz-ok: #3987e5;
+  --viz-failed: #d03b3b;
 }
 
 /* Expose tokens as Tailwind utilities: bg-primary, text-muted-foreground, bg-brand-navy ... */
@@ -90,6 +95,8 @@
   --color-brand-navy-faint: var(--brand-navy-faint);
   --color-brand-ice: var(--brand-ice);
   --color-brand-page: var(--brand-page);
+  --color-viz-ok: var(--viz-ok);
+  --color-viz-failed: var(--viz-failed);
 
   --radius-sm: calc(var(--radius) - 2px);
   --radius-md: var(--radius);

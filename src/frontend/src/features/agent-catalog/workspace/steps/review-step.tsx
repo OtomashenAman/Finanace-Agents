@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { RunTimeline } from "@/features/audit/components/run-timeline"
+import { useCurrentUser } from "@/features/auth/hooks"
+import { isAdmin } from "@/features/auth/roles"
 import { ApiError } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
@@ -38,6 +40,7 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
 
 export function ReviewStep({ agentKey, run }: { agentKey: string; run: RunDetail }) {
   const review = useReviewRun(agentKey, run.id)
+  const { data: viewer } = useCurrentUser()
   const [comment, setComment] = useState("")
   const [commentError, setCommentError] = useState<string | null>(null)
   const exceptions = run.flags.filter((f) => f.severity === "high" || f.severity === "warning")
@@ -67,8 +70,26 @@ export function ReviewStep({ agentKey, run }: { agentKey: string; run: RunDetail
           <dl className="grid gap-4 sm:grid-cols-2">
             <Fact label="Run identifier">{run.reference}</Fact>
             <Fact label="Preparer">{run.preparer.full_name}</Fact>
+            <Fact label="Legal entity">{run.entity ? `${run.entity.code} · ${run.entity.name}` : "—"}</Fact>
             <Fact label="Approver">Finance Admin ({run.reviewer_label})</Fact>
             <Fact label="Submitted">{formatDateTime(run.submitted_at)}</Fact>
+            <Fact label="Policy">{run.policy_version ?? "—"}</Fact>
+            {run.approval && (
+              <Fact label="Approvals">
+                {run.approval.received} of {run.approval.required}
+                {run.approval.approvers.length > 0 && (
+                  <span className="block text-xs text-muted-foreground">
+                    By: {run.approval.approvers.map((p) => p.full_name).join(", ")}
+                  </span>
+                )}
+                {run.approval.tier_min_amount && (
+                  <span className="block text-xs text-muted-foreground">
+                    Tier from {Number(run.approval.tier_min_amount).toLocaleString()} (amount{" "}
+                    {Number(run.approval.amount).toLocaleString()})
+                  </span>
+                )}
+              </Fact>
+            )}
           </dl>
 
           <div>
@@ -126,6 +147,18 @@ export function ReviewStep({ agentKey, run }: { agentKey: string; run: RunDetail
             <p className="text-sm text-muted-foreground">Current status</p>
             <StatusBadge status={run.status} label={run.status_label} className="mt-1.5" />
           </div>
+
+          {run.approval && run.approval.approved_by.length > 0 && run.status === "pending_approval" && (
+            <p className="text-sm">
+              Approved so far by {run.approval.approved_by.map((p) => p.full_name).join(", ")}:{" "}
+              {run.approval.required - run.approval.received} more approval(s) needed.
+            </p>
+          )}
+          {isAdmin(viewer) && run.permissions.review_blocked_reason && run.status === "pending_approval" && (
+            <p className="rounded-md border bg-secondary/40 px-3 py-2 text-sm text-muted-foreground">
+              {run.permissions.review_blocked_reason}
+            </p>
+          )}
 
           {run.permissions.can_review ? (
             <div className="space-y-3">

@@ -101,6 +101,24 @@ async def list_all_sources(session: AsyncSession) -> list[AdminDataSourceOut]:
     ]
 
 
+NEEDS_ATTENTION = (SourceStatus.NEEDS_REAUTH, SourceStatus.ERROR, SourceStatus.PENDING_AUTH)
+
+
+async def attention_sources(
+    session: AsyncSession, owner_id: uuid.UUID | None
+) -> list[tuple[DataSource, User]]:
+    """Connections that need their owner (one owner, or everyone's for an admin overview)."""
+    query = (
+        select(DataSource, User)
+        .join(User, User.id == DataSource.owner_id)
+        .where(DataSource.status.in_(NEEDS_ATTENTION))
+        .order_by(DataSource.updated_at)
+    )
+    if owner_id is not None:
+        query = query.where(DataSource.owner_id == owner_id)
+    return [(source, owner) for source, owner in await session.execute(query)]
+
+
 async def health_summary(session: AsyncSession) -> str:
     """One line for the admin overview, e.g. "3 connected · 1 needs re-authorization"."""
     result = await session.execute(

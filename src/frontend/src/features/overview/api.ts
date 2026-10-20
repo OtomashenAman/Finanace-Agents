@@ -13,6 +13,7 @@ export interface WorklistItem {
   agent_key: string
   agent_name: string
   reference: string
+  entity_code: string | null
   status: RunStatus
   status_label: string
   priority: "normal" | "high"
@@ -30,12 +31,27 @@ export interface AdminControls {
 export interface OverviewSummary {
   period: string
   entity: string
+  entity_id: string | null
   kpis: OverviewKpis
   worklist: WorklistItem[]
   controls: AdminControls | null
 }
 
+export interface OverviewFilters {
+  period?: string
+  entityId?: string | null
+  agent?: string | null
+  priority?: "high" | "normal" | null
+}
+
 export const overviewApi = {
-  summary: (period?: string) =>
-    apiRequest<OverviewSummary>(`/overview/summary${period ? `?period=${encodeURIComponent(period)}` : ""}`),
+  summary: ({ period, entityId, agent, priority }: OverviewFilters = {}) => {
+    const params = new URLSearchParams()
+    if (period) params.set("period", period)
+    if (entityId) params.set("entity_id", entityId)
+    if (agent) params.set("agent", agent)
+    if (priority) params.set("priority", priority)
+    const qs = params.toString()
+    return apiRequest<OverviewSummary>(`/overview/summary${qs ? `?${qs}` : ""}`)
+  },
 }

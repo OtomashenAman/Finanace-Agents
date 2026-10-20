@@ -1,3 +1,4 @@
+import type { EntityRef } from "@/features/entities/api"
 import { apiRequest } from "@/lib/api"
 
 export type RunStatus =
@@ -40,6 +41,8 @@ export interface RunSummary {
   agent_key: string
   agent_name: string
   business_reference: string | null
+  /** null for runs from before legal entities were set up */
+  entity: EntityRef | null
   status: RunStatus
   status_label: string
   priority: "normal" | "high"
@@ -122,11 +125,23 @@ export interface RunSource {
   captured_at: string
 }
 
+/** Routing fixed on submit by the approval matrix, and progress in this round */
+export interface RunApproval {
+  required: number
+  received: number
+  approvers: Person[] // empty = any Finance Admin
+  amount: string | null
+  tier_min_amount: string | null
+  approved_by: Person[]
+}
+
 export interface RunDetail extends RunSummary {
   input: Record<string, FieldValue>
   validation_errors: { field: string | null; message: string }[] | null
   proposed_decision: string | null
   policy_version: string | null
+  policy_values: Record<string, string | null> | null
+  approval: RunApproval | null
   calculations: Calculation[]
   flags: Flag[]
   controls: string[]
@@ -145,6 +160,8 @@ export interface RunDetail extends RunSummary {
     can_submit: boolean
     can_review: boolean
     can_delete: boolean
+    /** Why the viewer can't decide on a pending run (own run, already approved, not an approver) */
+    review_blocked_reason: string | null
   }
 }
 
@@ -153,9 +170,12 @@ const run = (key: string, id: string) => `${base(key)}/runs/${encodeURIComponent
 
 export const runsApi = {
   form: (key: string) => apiRequest<FormSpec>(`${base(key)}/form`),
-  list: (key: string) => apiRequest<RunSummary[]>(`${base(key)}/runs`),
+  list: (key: string, entityId?: string | null) =>
+    apiRequest<RunSummary[]>(`${base(key)}/runs${entityId ? `?entity_id=${encodeURIComponent(entityId)}` : ""}`),
   get: (key: string, id: string) => apiRequest<RunDetail>(run(key, id)),
-  create: (key: string) => apiRequest<RunDetail>(`${base(key)}/runs`, { method: "POST" }),
+  /** entityId may be omitted when the user works for exactly one legal entity */
+  create: (key: string, entityId?: string | null) =>
+    apiRequest<RunDetail>(`${base(key)}/runs`, { method: "POST", json: { entity_id: entityId ?? null } }),
   saveInput: (key: string, id: string, values: Record<string, FieldValue>) =>
     apiRequest<RunDetail>(`${run(key, id)}/input`, { method: "PUT", json: { values } }),
   remove: (key: string, id: string) => apiRequest<void>(run(key, id), { method: "DELETE" }),

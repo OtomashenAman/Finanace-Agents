@@ -46,6 +46,25 @@ def money_field(
     )
 
 
+class PolicySettings(BaseModel):
+    """An agent's thresholds: every field has a default, admins version their changes."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+def money_setting(label: str, default: Decimal | None, *, help: str | None = None) -> Any:
+    """A threshold amount (None = the check is off)."""
+    return Field(
+        default,
+        title=label,
+        description=help,
+        ge=Decimal(0),
+        max_digits=18,
+        decimal_places=2,
+        json_schema_extra={"ui": "money"},
+    )
+
+
 class FormField(BaseModel):
     name: str
     label: str

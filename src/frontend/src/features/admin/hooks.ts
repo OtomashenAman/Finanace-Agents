@@ -31,6 +31,10 @@ export function useSetAssignments() {
   return useMutation({ mutationFn: usersApi.setAssignments, meta: { invalidates } })
 }
 
+export function useSetEntities() {
+  return useMutation({ mutationFn: usersApi.setEntities, meta: { invalidates } })
+}
+
 export function useDeleteUser() {
   return useMutation({ mutationFn: usersApi.remove, meta: { invalidates } })
 }

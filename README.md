@@ -92,6 +92,29 @@ folder gets an `input_schema`, `run_model` and `analyze()` (see `agents/ap_invoi
   pagination and filters. Admins see every event and can export CSV (itself audited); users see
   their own actions, changes to their account and events on their own runs, without other
   people's IP or browser. Each run also shows its own timeline (`.../runs/{id}/timeline`).
+- AI monitoring (Admin Settings → AI monitoring, API `/api/v1/admin/ai-monitoring?days=7`):
+  every explanation call from `run_narratives`, i.e. volume, failure rate, p95 latency, tokens,
+  guard notes, per day, model and agent, plus recent failures. The overview's "Model execution"
+  line shows the 7-day figures.
+- Legal entities (Admin Settings → Legal entities, API `/api/v1/entities`): every run is filed
+  for one entity (`agent_runs.entity_id`, common to all agents). Admins assign entities to users
+  (`PUT /api/v1/users/{id}/entities`); users only start and see runs of their entities, admins
+  work across all. Scoping switches on with the first entity; with one entity it's picked
+  automatically. Overview, approvals and run history filter by entity.
+- Governance (Admin Settings → Governance, API `/api/v1/admin/governance/...`):
+  - Maker-checker: "Allow Finance Admins to approve their own runs" (on by default). Off, nobody
+    approves a run they prepared.
+  - Thresholds: an agent's `policy_schema` (AP Invoice: PO/receipt tolerance, high-value limit).
+    Saving makes a new version (`ap_invoice/v2`...); runs record `policy_version` and
+    `policy_values` from analysis, and both are part of the result hash.
+  - Approval matrix: amount tiers per agent (`approval_amount()`, e.g. invoice total) with 1–3
+    approvals and optional named approvers; fixed on the run at submit (`required_approvals`,
+    `approval_rule`). Each approval must come from a different admin; a resubmit starts over.
+- My Worklist (`/worklist`, API `/api/v1/worklist`): what needs the viewer now (approvals with
+  the review SLA, changes requested, validation failures, runs to submit, stale drafts, broken
+  data sources, and for admins locked accounts), what waits on others, and for admins users'
+  connection problems. The sidebar shows the count.
+- Overview filters: period, legal entity, agent and priority.
 - Sessions are per browser tab: the SPA sends its tab's id in `X-Session-Slot` and the httpOnly
   auth cookies are named after it, so an admin and a user can be signed in side by side. A new
   tab opens with the last account used; the user menu's "another account" icon signs in a

@@ -14,7 +14,7 @@ import { formatDateTime } from "@/features/agent-catalog/workspace/format"
 
 import type { Assignment, ManagedUser } from "../api"
 import { describedBy, roleHint } from "../form-utils"
-import { useDeleteUser, useResetPassword, useSetAssignments, useUpdateUser } from "../hooks"
+import { useDeleteUser, useResetPassword, useSetAssignments, useSetEntities, useUpdateUser } from "../hooks"
 import {
   passwordSchema,
   PASSWORD_MIN_LENGTH,
@@ -23,6 +23,7 @@ import {
   type ProfileValues,
 } from "../schema"
 import { AssignmentsEditor } from "./assignments-editor"
+import { EntitiesEditor } from "./entities-editor"
 import { Field, RoleSelect } from "./form-bits"
 
 interface EditorProps {
@@ -158,6 +159,53 @@ function AccessSection({ user }: { user: ManagedUser }) {
   )
 }
 
+function EntitiesSection({ user }: { user: ManagedUser }) {
+  const save = useSetEntities()
+  const [entityIds, setEntityIds] = useState(user.entities.map((e) => e.id))
+  const [dirty, setDirty] = useState(false)
+
+  if (user.role === "finance_admin") {
+    return (
+      <Section title="Legal entities">
+        <p className="text-sm text-muted-foreground">Finance Admins work across every legal entity.</p>
+      </Section>
+    )
+  }
+
+  return (
+    <Section title="Legal entities">
+      <EntitiesEditor
+        value={entityIds}
+        onChange={(value) => {
+          setEntityIds(value)
+          setDirty(true)
+        }}
+        disabled={save.isPending}
+      />
+      <Button
+        type="button"
+        size="sm"
+        onClick={() =>
+          save.mutate(
+            { id: user.id, entityIds },
+            {
+              onSuccess: () => {
+                setDirty(false)
+                toast.success("Legal entities saved")
+              },
+              onError: (error) => toast.error(errorMessage(error, "Couldn't save legal entities.")),
+            },
+          )
+        }
+        disabled={!dirty || save.isPending}
+      >
+        {save.isPending && <LoaderCircle className="animate-spin" aria-hidden />}
+        Save legal entities
+      </Button>
+    </Section>
+  )
+}
+
 function PasswordSection({ user }: { user: ManagedUser }) {
   const resetPassword = useResetPassword()
   const {
@@ -276,6 +324,7 @@ export function UserEditor({ user, isSelf, onDeleted }: UserEditorProps) {
         )}
         <ProfileSection user={user} isSelf={isSelf} />
         <AccessSection user={user} />
+        <EntitiesSection user={user} />
         <PasswordSection user={user} />
         {!isSelf && <DeleteSection user={user} onDeleted={onDeleted} />}
       </div>

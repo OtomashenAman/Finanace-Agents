@@ -15,6 +15,7 @@ import {
 
 import { useCurrentUser } from "@/features/auth/hooks"
 import { isAdmin } from "@/features/auth/roles"
+import { useWorklist } from "@/features/worklist/hooks"
 import { cn } from "@/lib/utils"
 
 interface NavItem {
@@ -27,7 +28,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { label: "Overview", icon: LayoutDashboard, to: "/overview" },
   { label: "Agent Catalog", icon: LayoutGrid, to: "/catalog" },
-  { label: "My Worklist", icon: ListTodo },
+  { label: "My Worklist", icon: ListTodo, to: "/worklist" },
   { label: "Approvals", icon: CircleCheck, to: "/approvals" },
   { label: "Audit Trail", icon: History, to: "/audit" },
   { label: "Data Sources", icon: Database, to: "/data-sources" },
@@ -46,6 +47,8 @@ function Brand() {
 function Nav({ onNavigate }: { onNavigate?: () => void }) {
   const { data: user } = useCurrentUser()
   const items = NAV.filter((item) => !item.adminOnly || isAdmin(user))
+  const worklist = useWorklist()
+  const todo = worklist.data?.action.length ?? 0
   const base = "flex items-center gap-3 rounded-lg px-4 py-3 text-[15px] transition-colors"
   return (
     <nav aria-label="Main" className="space-y-1.5">
@@ -66,6 +69,14 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
           >
             <Icon className="size-4" aria-hidden />
             {label}
+            {to === "/worklist" && todo > 0 && (
+              <span
+                className="ml-auto rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-brand-navy"
+                aria-label={`${todo} item${todo === 1 ? "" : "s"} need you`}
+              >
+                {todo}
+              </span>
+            )}
           </NavLink>
         ) : (
           <span

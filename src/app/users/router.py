@@ -10,6 +10,7 @@ from src.app.core.db import SessionDep
 from src.app.users import service
 from src.app.users.schemas import (
     AssignmentsUpdate,
+    EntitiesUpdate,
     ManagedUser,
     PasswordReset,
     UserCreate,
@@ -78,6 +79,18 @@ async def set_assignments(
 ) -> ManagedUser:
     """Replace which agents the user may prepare or review runs for."""
     return await service.set_assignments(session, user_id, body.assignments, admin, ctx)
+
+
+@router.put("/{user_id}/entities", response_model=ManagedUser, responses=_ERRORS)
+async def set_entities(
+    user_id: uuid.UUID,
+    body: EntitiesUpdate,
+    session: SessionDep,
+    ctx: RequestContextDep,
+    admin: AdminUser,
+) -> ManagedUser:
+    """Replace which legal entities the user files runs for and sees."""
+    return await service.set_entities(session, user_id, body.entity_ids, admin, ctx)
 
 
 @router.delete(

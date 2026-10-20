@@ -17,7 +17,6 @@ class ApInvoiceRun(AgentRunDetail, Base):
     # --- input ---
     supplier: Mapped[str | None] = mapped_column(String(200))
     invoice_number: Mapped[str | None] = mapped_column(String(100), index=True)
-    legal_entity: Mapped[str | None] = mapped_column(String(200))
     invoice_total: Mapped[Decimal | None] = mapped_column(MONEY)
     po_authorized_amount: Mapped[Decimal | None] = mapped_column(MONEY)
     received_amount: Mapped[Decimal | None] = mapped_column(MONEY)

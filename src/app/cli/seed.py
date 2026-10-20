@@ -6,6 +6,9 @@
 Users (both share DEMO_ADMIN_PASSWORD):
   finance.admin@example.com  Finance Admin (every agent, user management)
   demo.user@example.com      user: prepares AP Invoice runs (the admin approves them)
+
+Also a demo legal entity (US01 · US Operations) the demo user works for, unless entities
+already exist.
 """
 
 import argparse
@@ -20,6 +23,7 @@ from src.app.auth.models import User, UserRole
 from src.app.auth.security import hash_password
 from src.app.core.config import get_settings
 from src.app.core.db import get_engine, get_sessionmaker
+from src.app.entities.models import EntityAssignment, LegalEntity
 
 # email, full name, role, (agent key, capacity) assignments
 DEMO_TEAM: list[tuple[str, str, UserRole, list[tuple[str, AgentCapacity]]]] = [
@@ -70,6 +74,28 @@ async def _assign(
         print(f"  {user.email}: {capacity.value} on {agent_key}")
 
 
+async def _demo_entity(session: AsyncSession) -> LegalEntity | None:
+    """A first entity for a fresh database; existing setups are left alone."""
+    if await session.scalar(select(LegalEntity.id).limit(1)) is not None:
+        return await session.scalar(select(LegalEntity).where(LegalEntity.code == "US01"))
+    entity = LegalEntity(code="US01", name="US Operations")
+    session.add(entity)
+    await session.flush()
+    print("Created legal entity US01 · US Operations")
+    return entity
+
+
+async def _assign_entity(session: AsyncSession, user: User, entity: LegalEntity) -> None:
+    exists = await session.scalar(
+        select(EntityAssignment.id).where(
+            EntityAssignment.user_id == user.id, EntityAssignment.entity_id == entity.id
+        )
+    )
+    if exists is None:
+        session.add(EntityAssignment(user_id=user.id, entity_id=entity.id))
+        print(f"  {user.email}: works for {entity.code}")
+
+
 async def seed(reset_password: bool) -> None:
     settings = get_settings()
     if settings.is_production:
@@ -88,12 +114,15 @@ async def seed(reset_password: bool) -> None:
             password_hash,
             reset_password,
         )
+        entity = await _demo_entity(session)
         for email, full_name, role, assignments in DEMO_TEAM:
             user = await _upsert_user(
                 session, email, full_name, role, password_hash, reset_password
             )
             for agent_key, capacity in assignments:
                 await _assign(session, user, agent_key, capacity)
+            if entity is not None:
+                await _assign_entity(session, user, entity)
         await session.commit()
     await get_engine().dispose()
 

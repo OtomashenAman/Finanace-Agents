@@ -11,6 +11,8 @@ class AuditCategory(StrEnum):
     RUNS = "runs"
     DATA_SOURCES = "data_sources"
     AGENTS = "agents"
+    ENTITIES = "entities"
+    GOVERNANCE = "governance"
     AUDIT = "audit"
 
 
@@ -22,6 +24,8 @@ _PREFIXES: dict[str, AuditCategory] = {
     "data_source.": AuditCategory.DATA_SOURCES,
     "integration.": AuditCategory.DATA_SOURCES,
     "agent.": AuditCategory.AGENTS,
+    "entity.": AuditCategory.ENTITIES,
+    "governance.": AuditCategory.GOVERNANCE,
     "audit.": AuditCategory.AUDIT,
 }
 
@@ -89,6 +93,9 @@ _TEXT: dict[str, Describe] = {
     "run.approved": lambda d, s: (
         f"Approved {d.get('run')}" + (" (own run)" if d.get("self_review") else "")
     ),
+    "run.approval_recorded": lambda d, s: (
+        f"Approved {d.get('run')} ({d.get('approvals')} approvals, more needed)"
+    ),
     "run.rejected": lambda d, s: f"Rejected {d.get('run')}",
     "run.changes_requested": lambda d, s: f"Requested changes on {d.get('run')}",
     "run.deleted": lambda d, s: f"Deleted draft {d.get('run')}",
@@ -109,6 +116,24 @@ _TEXT: dict[str, Describe] = {
     "integration.quickbooks_updated": lambda d, s: "Updated the shared QuickBooks app",
     "agent.activated": lambda d, s: f"Enabled agent {d.get('agent_key')}",
     "agent.deactivated": lambda d, s: f"Disabled agent {d.get('agent_key')}",
+    "entity.created": lambda d, s: f"Created legal entity {d.get('code')} · {d.get('name')}",
+    "entity.updated": lambda d, s: (
+        f"Updated legal entity {d.get('code')}: "
+        + ", ".join(
+            f"{k.replace('_', ' ')} → {v}" for k, v in d.items() if k not in ("entity_id", "code")
+        )
+    ),
+    "user.entities_updated": lambda d, s: (
+        f"Changed legal entities of {s}: " + (", ".join(d.get("entities", [])) or "none")
+    ),
+    "governance.settings_updated": lambda d, s: (
+        "Admin self-approval "
+        + ("allowed" if d.get("self_approval") else "turned off (full maker-checker)")
+    ),
+    "governance.policy_updated": lambda d, s: f"Saved thresholds {d.get('version')}",
+    "governance.approval_matrix_updated": lambda d, s: (
+        f"Changed the approval matrix of {d.get('agent')} ({len(d.get('tiers', []))} tiers)"
+    ),
     "audit.exported": lambda d, s: f"Exported {d.get('rows')} audit events",
 }
 

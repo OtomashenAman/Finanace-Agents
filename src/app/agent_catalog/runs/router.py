@@ -9,6 +9,7 @@ from src.app.agent_catalog.runs.schemas import (
     DocumentText,
     FormSpec,
     ReviewCreate,
+    RunCreate,
     RunDetail,
     RunInputUpdate,
     RunSummary,
@@ -38,18 +39,24 @@ async def get_form(key: str, session: SessionDep, user: CurrentUser) -> FormSpec
 
 
 @router.get("/runs", response_model=list[RunSummary], responses=_ERRORS)
-async def list_runs(key: str, session: SessionDep, user: CurrentUser) -> list[RunSummary]:
-    return await service.list_runs(session, user, key)
+async def list_runs(
+    key: str, session: SessionDep, user: CurrentUser, entity_id: uuid.UUID | None = None
+) -> list[RunSummary]:
+    return await service.list_runs(session, user, key, entity_id)
 
 
 @router.post(
     "/runs", response_model=RunDetail, status_code=status.HTTP_201_CREATED, responses=_ERRORS
 )
 async def create_run(
-    key: str, session: SessionDep, user: CurrentUser, ctx: RequestContextDep
+    key: str,
+    session: SessionDep,
+    user: CurrentUser,
+    ctx: RequestContextDep,
+    body: RunCreate | None = None,
 ) -> RunDetail:
-    """Start a new draft run (preparer only)."""
-    return await service.create_run(session, user, key, ctx)
+    """Start a new draft run for a legal entity you work for (preparer only)."""
+    return await service.create_run(session, user, key, body or RunCreate(), ctx)
 
 
 @router.get("/runs/{run_id}", response_model=RunDetail, responses=_ERRORS)

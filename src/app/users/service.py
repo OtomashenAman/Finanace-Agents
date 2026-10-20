@@ -13,6 +13,8 @@ from src.app.auth.security import hash_password
 from src.app.auth.service import revoke_user_tokens
 from src.app.common.clock import utcnow
 from src.app.common.context import RequestContext
+from src.app.entities import service as entities
+from src.app.entities.schemas import EntityRef
 from src.app.users.exceptions import (
     EmailTakenError,
     SelfManagementError,
@@ -46,7 +48,9 @@ async def _assignments(
     return result
 
 
-def _to_out(user: User, assignments: list[AssignmentOut]) -> ManagedUser:
+def _to_out(
+    user: User, assignments: list[AssignmentOut], user_entities: list[EntityRef]
+) -> ManagedUser:
     return ManagedUser(
         id=user.id,
         email=user.email,
@@ -57,12 +61,14 @@ def _to_out(user: User, assignments: list[AssignmentOut]) -> ManagedUser:
         last_login_at=user.last_login_at,
         created_at=user.created_at,
         assignments=assignments,
+        entities=user_entities,
     )
 
 
 async def _managed(session: AsyncSession, user: User) -> ManagedUser:
     assignments = await _assignments(session, [user.id])
-    return _to_out(user, assignments.get(user.id, []))
+    user_entities = await entities.entities_of(session, [user.id])
+    return _to_out(user, assignments.get(user.id, []), user_entities.get(user.id, []))
 
 
 async def _get(session: AsyncSession, user_id: uuid.UUID, *, lock: bool = False) -> User:
@@ -99,14 +105,25 @@ async def _replace_assignments(
 # --- read -------------------------------------------------------------------------------
 
 
+async def locked_users(session: AsyncSession) -> list[User]:
+    """Accounts locked out by failed sign-ins right now."""
+    return list(
+        await session.scalars(
+            select(User).where(User.locked_until > utcnow()).order_by(User.locked_until)
+        )
+    )
+
+
 async def list_users(session: AsyncSession, search: str | None = None) -> list[ManagedUser]:
     query = select(User).order_by(User.full_name, User.email)
     if search and (term := search.strip()):
         pattern = f"%{term}%"
         query = query.where(or_(User.email.ilike(pattern), User.full_name.ilike(pattern)))
     users = list(await session.scalars(query))
-    assignments = await _assignments(session, [u.id for u in users])
-    return [_to_out(u, assignments.get(u.id, [])) for u in users]
+    ids = [u.id for u in users]
+    assignments = await _assignments(session, ids)
+    user_entities = await entities.entities_of(session, ids)
+    return [_to_out(u, assignments.get(u.id, []), user_entities.get(u.id, [])) for u in users]
 
 
 async def get_user(session: AsyncSession, user_id: uuid.UUID) -> ManagedUser:
@@ -131,6 +148,7 @@ async def create_user(
     session.add(user)
     await session.flush()
     assigned = await _replace_assignments(session, user, body.assignments)
+    entity_codes = await entities.set_user_entities(session, user, body.entity_ids)
     record_event(
         session,
         "user.created",
@@ -140,6 +158,7 @@ async def create_user(
         email=email,
         role=user.role.value,
         assignments=assigned,
+        entities=entity_codes,
     )
     await session.commit()
     return await _managed(session, user)
@@ -188,6 +207,27 @@ async def reset_password(
     user.locked_until = None
     await revoke_user_tokens(session, user.id)
     record_event(session, "user.password_reset", ctx, actor_id=actor.id, user_id=str(user.id))
+    await session.commit()
+    return await _managed(session, user)
+
+
+async def set_entities(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    entity_ids: list[uuid.UUID],
+    actor: User,
+    ctx: RequestContext,
+) -> ManagedUser:
+    user = await _get(session, user_id, lock=True)
+    codes = await entities.set_user_entities(session, user, entity_ids)
+    record_event(
+        session,
+        "user.entities_updated",
+        ctx,
+        actor_id=actor.id,
+        user_id=str(user.id),
+        entities=codes,
+    )
     await session.commit()
     return await _managed(session, user)
 

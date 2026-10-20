@@ -6,6 +6,7 @@ from typing import Any, ClassVar, Literal
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.app.agent_catalog.agents.fields import PolicySettings
 from src.app.agent_catalog.runs.models import AgentRun, AgentRunDetail, FlagSeverity, RunPriority
 from src.app.data_sources.access import FinanceData
 from src.app.data_sources.models import DataSource
@@ -55,6 +56,8 @@ class AnalysisContext:
     document_count: int
     # The preparer's own data sources (QuickBooks, uploads): e.g. the vendor master
     data: FinanceData
+    # The thresholds in force (the agent's policy_schema, current version); None if it has none
+    policy: PolicySettings | None = None
 
 
 @dataclass
@@ -90,6 +93,10 @@ class BaseAgent:
     narrative_guidance: ClassVar[str] = ""  # agent-specific instructions for the LLM
     # Which data source records a user can pick to prefill a run (None: manual input only)
     source_record_type: ClassVar[RecordType | None] = None
+    # Thresholds a Finance Admin can change (versioned); defaults are policy_version
+    policy_schema: ClassVar[type[PolicySettings] | None] = None
+    # What approval_amount() returns, for the approval matrix screen (e.g. "Invoice total")
+    approval_amount_label: ClassVar[str | None] = None
 
     _required: ClassVar[tuple[str, ...]] = (
         "key",
@@ -125,6 +132,11 @@ class BaseAgent:
     async def prefill(cls, record: Record, source: DataSource, data: FinanceData) -> Prefill:
         """Map a `source_record_type` record to input values (only the fields it knows)."""
         raise NotImplementedError(f"{cls.__name__} can't be prefilled from a data source")
+
+    @classmethod
+    def approval_amount(cls, data: BaseModel) -> Decimal | None:
+        """The amount the approval matrix routes on (e.g. the invoice total); None: lowest tier."""
+        return None
 
     @classmethod
     async def analyze(cls, data: BaseModel, ctx: AnalysisContext) -> Analysis:

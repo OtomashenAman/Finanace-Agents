@@ -18,6 +18,7 @@ class WorklistItem(BaseModel):
     agent_key: str
     agent_name: str
     reference: str  # business reference (e.g. INV-2048) or RUN-01048
+    entity_code: str | None
     status: str
     status_label: str
     priority: str
@@ -34,7 +35,8 @@ class AdminControls(BaseModel):
 
 class OverviewSummary(BaseModel):
     period: str  # YYYY-MM
-    entity: str
+    entity: str  # "All entities" or e.g. "US01 · US Operations"
+    entity_id: uuid.UUID | None
     kpis: OverviewKpis
     worklist: list[WorklistItem]
     controls: AdminControls | None  # Finance Admin only

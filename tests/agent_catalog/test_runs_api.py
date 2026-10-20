@@ -21,7 +21,6 @@ SUMMARY = "/api/v1/overview/summary"
 PDF_EXAMPLE: dict[str, Any] = {
     "supplier": "Acme Cloud Services",
     "invoice_number": "INV-2048",
-    "legal_entity": "US Operations",
     "invoice_total": "12500.00",
     "po_authorized_amount": "12500.00",
     "received_amount": "1000.00",
@@ -102,7 +101,6 @@ async def test_form_spec_describes_the_ap_invoice_fields(prep: AsyncClient) -> N
     assert [(f["name"], f["kind"], f["required"]) for f in body["fields"]] == [
         ("supplier", "text", True),
         ("invoice_number", "text", True),
-        ("legal_entity", "text", True),
         ("invoice_total", "money", True),
         ("po_authorized_amount", "money", True),
         ("received_amount", "money", True),
@@ -252,7 +250,6 @@ async def test_missing_required_fields_fail_validation(
     failed_fields = {e["field"] for e in run["validation_errors"]}
     assert failed_fields == {
         "invoice_number",
-        "legal_entity",
         "invoice_total",
         "po_authorized_amount",
         "received_amount",

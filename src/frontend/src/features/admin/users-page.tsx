@@ -25,9 +25,12 @@ function StatusPill({ user }: { user: ManagedUser }) {
 }
 
 function access(user: ManagedUser): string {
-  if (user.role === "finance_admin") return "All agents"
+  if (user.role === "finance_admin") return "All agents · all entities"
   const agents = new Set(user.assignments.map((a) => a.agent_name))
-  return agents.size ? [...agents].join(", ") : "No agents"
+  const entities = user.entities.map((e) => e.code)
+  return [agents.size ? [...agents].join(", ") : "No agents", entities.length ? entities.join(", ") : null]
+    .filter(Boolean)
+    .join(" · ")
 }
 
 interface UsersTableProps {

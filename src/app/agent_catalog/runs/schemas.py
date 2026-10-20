@@ -12,6 +12,7 @@ from src.app.agent_catalog.runs.models import (
     RunPriority,
     RunStatus,
 )
+from src.app.entities.schemas import EntityRef
 
 
 class NarrativeOutput(BaseModel):
@@ -110,6 +111,12 @@ class ReviewOut(BaseModel):
     created_at: datetime
 
 
+class RunCreate(BaseModel):
+    """Omit entity_id when you work for exactly one legal entity (it is then used)."""
+
+    entity_id: uuid.UUID | None = None
+
+
 class SourceLink(BaseModel):
     """Prefill the run from a record of one of your data sources."""
 
@@ -130,12 +137,25 @@ class RunSourceOut(BaseModel):
     captured_at: datetime
 
 
+class RunApproval(BaseModel):
+    """Routing fixed on submit by the approval matrix, and progress in this round."""
+
+    required: int
+    received: int  # approvals since the last submit
+    approvers: list[Person]  # empty = any Finance Admin
+    amount: str | None  # what was routed on, e.g. the invoice total
+    tier_min_amount: str | None  # None: default routing (no matching tier)
+    approved_by: list[Person]
+
+
 class RunPermissions(BaseModel):
     can_edit: bool
     can_analyze: bool
     can_submit: bool
     can_review: bool
     can_delete: bool
+    # Why the viewer can't review a pending run (e.g. own run, already approved), if they can't
+    review_blocked_reason: str | None = None
 
 
 class RunSummary(BaseModel):
@@ -144,6 +164,7 @@ class RunSummary(BaseModel):
     agent_key: str
     agent_name: str
     business_reference: str | None  # e.g. the invoice number
+    entity: EntityRef | None  # None for runs from before legal entities were set up
     status: RunStatus
     status_label: str
     priority: RunPriority
@@ -158,6 +179,8 @@ class RunDetail(RunSummary):
     validation_errors: list[FieldError] | None
     proposed_decision: str | None
     policy_version: str | None
+    policy_values: dict[str, Any] | None
+    approval: RunApproval | None  # None until submitted
     calculations: list[CalculationOut]
     flags: list[FlagOut]
     controls: list[str]

@@ -6,6 +6,7 @@ from pydantic import BaseModel, EmailStr, Field
 
 from src.app.agent_catalog.models import AgentCapacity
 from src.app.auth.models import UserRole
+from src.app.entities.schemas import EntityRef
 
 # Login accepts up to 256 characters; new passwords must be long enough to resist guessing
 PASSWORD_MIN_LENGTH = 12
@@ -31,6 +32,7 @@ class UserCreate(BaseModel):
     role: UserRole = UserRole.USER
     password: Password
     assignments: list[AssignmentIn] = []
+    entity_ids: list[uuid.UUID] = []
 
 
 class UserUpdate(BaseModel):
@@ -43,6 +45,12 @@ class UserUpdate(BaseModel):
 
 class PasswordReset(BaseModel):
     password: Password
+
+
+class EntitiesUpdate(BaseModel):
+    """The complete set of legal entities the user works for."""
+
+    entity_ids: list[uuid.UUID]
 
 
 class AssignmentsUpdate(BaseModel):
@@ -61,3 +69,4 @@ class ManagedUser(BaseModel):
     last_login_at: datetime | None
     created_at: datetime
     assignments: list[AssignmentOut]
+    entities: list[EntityRef]

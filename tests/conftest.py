@@ -53,6 +53,11 @@ from src.app.core.llm.factory import get_llm_provider  # noqa: E402
 from src.app.main import app  # noqa: E402
 
 TABLES = (
+    "org_settings",
+    "agent_policies",
+    "approval_rules",
+    "entity_assignments",
+    "legal_entities",
     "run_source_snapshots",
     "finance_records",
     "data_sources",

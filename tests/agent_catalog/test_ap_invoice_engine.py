@@ -13,7 +13,6 @@ from src.app.data_sources.access import FinanceData
 PDF_EXAMPLE = {
     "supplier": "Acme Cloud Services",
     "invoice_number": "INV-2048",
-    "legal_entity": "US Operations",
     "invoice_total": "12500.00",
     "po_authorized_amount": "12500.00",
     "received_amount": "1000",
