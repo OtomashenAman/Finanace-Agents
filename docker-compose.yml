@@ -27,6 +27,28 @@ services:
       timeout: 5s
       retries: 10
 
+  # One-off: schema to head + agent catalog sync, so a fresh pull never runs on a stale DB
+  migrate:
+    build:
+      context: .
+      dockerfile: src/Dockerfile
+      target: dev
+    restart: "no"
+    command: ["sh", "-c", "alembic upgrade head && python -m src.app.cli.sync_agents"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      ENVIRONMENT: development
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-finance}:${POSTGRES_PASSWORD:-finance}@db:5432/${POSTGRES_DB:-finance_acc}
+    volumes:
+      - ./src:/app/src
+      - ./alembic.ini:/app/alembic.ini
+      - ./pyproject.toml:/app/pyproject.toml
+    depends_on:
+      db:
+        condition: service_healthy
+
   backend:
     build:
       context: .
@@ -49,8 +71,8 @@ services:
       - ./tests:/app/tests
       - ./pyproject.toml:/app/pyproject.toml
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   # Background jobs (AI explanations, QuickBooks write-back). Restarts on code changes.
   worker:
@@ -71,8 +93,8 @@ services:
       - ./src:/app/src
       - ./pyproject.toml:/app/pyproject.toml
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   frontend:
     build:
