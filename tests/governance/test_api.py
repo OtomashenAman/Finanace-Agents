@@ -79,8 +79,8 @@ async def test_self_approval_can_be_turned_off(
 async def test_thresholds_are_versioned_and_applied(
     adm: AsyncClient, me: AsyncClient, fake_llm: FakeLLM
 ) -> None:
-    [policy] = (await adm.get(f"{GOV}/policies")).json()
-    assert policy["agent_key"] == "ap_invoice"
+    policies = (await adm.get(f"{GOV}/policies")).json()
+    [policy] = [p for p in policies if p["agent_key"] == "ap_invoice"]
     assert [f["name"] for f in policy["fields"]] == [
         "po_tolerance",
         "receipt_tolerance",

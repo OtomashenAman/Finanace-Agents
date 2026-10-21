@@ -19,7 +19,12 @@ class AgentInput(BaseModel):
 
 
 def text_field(
-    label: str, *, required: bool = True, max_length: int = 200, help: str | None = None
+    label: str,
+    *,
+    required: bool = True,
+    max_length: int = 200,
+    pattern: str | None = None,
+    help: str | None = None,
 ) -> Any:
     return Field(
         ... if required else None,
@@ -27,6 +32,7 @@ def text_field(
         description=help,
         min_length=1 if required else None,
         max_length=max_length,
+        pattern=pattern,
         json_schema_extra={"ui": "text"},
     )
 

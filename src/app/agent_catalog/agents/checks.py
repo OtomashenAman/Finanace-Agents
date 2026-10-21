@@ -5,7 +5,7 @@ Agents keep their own codes and wording; these helpers only remove the repeated 
 """
 
 from collections.abc import Iterable
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from sqlalchemy import func, select
@@ -22,6 +22,13 @@ def money(value: Decimal) -> str:
 
 def percent(value: Decimal) -> str:
     return f"{value.normalize():f}%"
+
+
+def ratio_pct(part: Decimal | int, whole: Decimal | int) -> Decimal | None:
+    """part / whole as a percentage rounded to 2 places (8.00 for 2 of 25); None if whole is 0."""
+    if not whole:
+        return None
+    return (Decimal(part) / Decimal(whole) * 100).quantize(Decimal("0.01"), ROUND_HALF_UP)
 
 
 def has_severity(findings: Iterable[Finding], severity: FlagSeverity) -> bool:

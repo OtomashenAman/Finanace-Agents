@@ -5,7 +5,8 @@
 
 Users (both share DEMO_ADMIN_PASSWORD):
   finance.admin@example.com  Finance Admin (every agent, user management)
-  demo.user@example.com      user: prepares AP Invoice runs (the admin approves them)
+  demo.user@example.com      user: prepares runs on the agents with a workspace (the admin
+                             approves them)
 
 Also a demo legal entity (US01 · US Operations) the demo user works for, unless entities
 already exist.
@@ -28,7 +29,9 @@ from src.app.entities.models import EntityAssignment, LegalEntity
 # email, full name, role, (agent key, capacity) assignments
 DEMO_TEAM: list[tuple[str, str, UserRole, list[tuple[str, AgentCapacity]]]] = [
     ("demo.user@example.com", "Demo User", UserRole.USER,
-     [("ap_invoice", AgentCapacity.PREPARER)]),
+     [(key, AgentCapacity.PREPARER)
+      for key in ("ap_invoice", "financial_close", "treasury_cash", "sox_controls",
+                  "board_reporting")]),
 ]  # fmt: skip
 
 
