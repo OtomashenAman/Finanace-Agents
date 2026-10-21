@@ -90,7 +90,9 @@ class BaseAgent:
     controls: ClassVar[tuple[str, ...]] = ()  # "Review these controls" checklist
     reference_field: ClassVar[str | None] = None  # input field shown as the run's reference
     policy_version: ClassVar[str] = "v1"  # bump when rules or thresholds change
-    narrative_guidance: ClassVar[str] = ""  # agent-specific instructions for the LLM
+    # LLM instructions, kept in the agent's prompt.py: appended to the shared system prompt
+    narrative_guidance: ClassVar[str] = ""
+    prompt_version: ClassVar[str] = ""  # e.g. "treasury_cash/v1": bump when guidance changes
     # Which data source records a user can pick to prefill a run (None: manual input only)
     source_record_type: ClassVar[RecordType | None] = None
     # Thresholds a Finance Admin can change (versioned); defaults are policy_version
@@ -124,6 +126,14 @@ class BaseAgent:
             raise TypeError(f"{cls.__name__}.code must be two digits, got {cls.code!r}")
         if (cls.input_schema is None) != (cls.run_model is None):
             raise TypeError(f"{cls.__name__} must define both input_schema and run_model")
+        if cls.input_schema is not None:
+            if not cls.narrative_guidance.strip():
+                raise TypeError(f"{cls.__name__} has a workspace but no narrative_guidance")
+            if not re.fullmatch(rf"{cls.key}/v\d+", cls.prompt_version):
+                raise TypeError(
+                    f"{cls.__name__}.prompt_version must look like '{cls.key}/v1', "
+                    f"got {cls.prompt_version!r}"
+                )
 
     @classmethod
     def sort_order(cls) -> int:

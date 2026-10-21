@@ -18,6 +18,7 @@ from src.app.agent_catalog.agents.checks import (
     missing,
     money,
 )
+from src.app.agent_catalog.agents.financial_close import prompt
 from src.app.agent_catalog.agents.financial_close.models import FinancialCloseRun
 from src.app.agent_catalog.agents.financial_close.schemas import FinancialCloseInput
 from src.app.agent_catalog.runs.models import FlagSeverity
@@ -42,12 +43,8 @@ class FinancialCloseAgent(BaseAgent):
         "Evidence gaps",
         "Preparer-reviewer separation",
     )
-    narrative_guidance = (
-        "Explain the reconciliation from GL balance to subledger balance, how much the known "
-        "reconciling items explain, and the unexplained difference against materiality. If an "
-        "adjustment rationale was given, summarise it as a draft for review; never state that a "
-        "journal was or should be posted. Point out what the reviewing controller should verify."
-    )
+    narrative_guidance = prompt.GUIDANCE
+    prompt_version = prompt.PROMPT_VERSION
     approval_amount_label = "Absolute variance"
 
     @classmethod

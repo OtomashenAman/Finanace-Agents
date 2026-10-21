@@ -18,6 +18,7 @@ from src.app.agent_catalog.agents.checks import (
     money,
     over_limit,
 )
+from src.app.agent_catalog.agents.treasury_cash import prompt
 from src.app.agent_catalog.agents.treasury_cash.models import TreasuryCashRun
 from src.app.agent_catalog.agents.treasury_cash.schemas import (
     TreasuryCashInput,
@@ -53,13 +54,8 @@ class TreasuryCashAgent(BaseAgent):
         "Dual authorization",
         "Bank signatories",
     )
-    narrative_guidance = (
-        "Explain the cash bridge from opening cash through inflows and outflows to projected "
-        "closing cash over the horizon, and any gap to the minimum liquidity buffer. List only "
-        "the permitted funding options the preparer entered; never recommend moving funds. Point "
-        "out what the treasury approver should verify (bank balances, timing of flows, "
-        "signatories)."
-    )
+    narrative_guidance = prompt.GUIDANCE
+    prompt_version = prompt.PROMPT_VERSION
     policy_schema = TreasuryCashPolicy
     approval_amount_label = "Funding gap"
 

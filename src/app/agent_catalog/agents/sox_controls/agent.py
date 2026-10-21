@@ -10,6 +10,7 @@ from src.app.agent_catalog.agents.base import (
     Finding,
 )
 from src.app.agent_catalog.agents.checks import has_severity, missing, percent, ratio_pct
+from src.app.agent_catalog.agents.sox_controls import prompt
 from src.app.agent_catalog.agents.sox_controls.models import SoxControlsRun
 from src.app.agent_catalog.agents.sox_controls.schemas import SoxControlsInput, SoxControlsPolicy
 from src.app.agent_catalog.runs.models import FlagSeverity
@@ -38,12 +39,8 @@ class SoxControlsAgent(BaseAgent):
         "Evidence lineage",
         "Auditor sign-off",
     )
-    narrative_guidance = (
-        "Draft a control test workpaper summary: the control, population, sample tested, "
-        "exceptions and the exception rate. Describe missing evidence and a remediation request "
-        "for the control owner as a draft. Do not conclude on deficiency severity: that is the "
-        "SOX reviewer's judgement."
-    )
+    narrative_guidance = prompt.GUIDANCE
+    prompt_version = prompt.PROMPT_VERSION
     policy_schema = SoxControlsPolicy
 
     @classmethod

@@ -9,6 +9,7 @@ from src.app.agent_catalog.agents.base import (
     Calculation,
     Finding,
 )
+from src.app.agent_catalog.agents.board_reporting import prompt
 from src.app.agent_catalog.agents.board_reporting.models import BoardReportingRun
 from src.app.agent_catalog.agents.board_reporting.schemas import (
     BoardReportingInput,
@@ -44,12 +45,8 @@ class BoardReportingAgent(BaseAgent):
         "Disclosure control",
         "CFO sign-off",
     )
-    narrative_guidance = (
-        "Draft a short, factual board summary using only the calculated figures: revenue vs the "
-        "prior period, the change and growth rate, and operating margin. Cite the source dataset "
-        "ID if given and the known disclosures; do not add claims, forecasts or disclosures that "
-        "are not in the input. This is a draft for CFO review, never for external release."
-    )
+    narrative_guidance = prompt.GUIDANCE
+    prompt_version = prompt.PROMPT_VERSION
     policy_schema = BoardReportingPolicy
 
     @classmethod

@@ -3,6 +3,7 @@ from typing import Any, cast
 
 from pydantic import BaseModel
 
+from src.app.agent_catalog.agents.ap_invoice import prompt
 from src.app.agent_catalog.agents.ap_invoice.models import ApInvoiceRun
 from src.app.agent_catalog.agents.ap_invoice.schemas import ApInvoiceInput, ApInvoicePolicy
 from src.app.agent_catalog.agents.base import (
@@ -53,11 +54,8 @@ class ApInvoiceAgent(BaseAgent):
         "Missing GL or evidence",
         "Amount validity",
     )
-    narrative_guidance = (
-        "Explain the three-way match between invoice, purchase order and receipt, any "
-        "duplicate risk and missing coding or evidence. Point out what the AP approver "
-        "should verify in the source documents."
-    )
+    narrative_guidance = prompt.GUIDANCE
+    prompt_version = prompt.PROMPT_VERSION
     source_record_type = RecordType.BILL
     policy_schema = ApInvoicePolicy
     approval_amount_label = "Invoice total"
