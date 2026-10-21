@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import cast
 
@@ -9,6 +11,7 @@ from src.app.agent_catalog.agents.base import (
     BaseAgent,
     Calculation,
     Finding,
+    Prefill,
 )
 from src.app.agent_catalog.agents.checks import (
     ZERO,
@@ -18,13 +21,70 @@ from src.app.agent_catalog.agents.checks import (
     money,
     over_limit,
 )
+from src.app.agent_catalog.agents.fields import PolicySettings
 from src.app.agent_catalog.agents.treasury_cash import prompt
 from src.app.agent_catalog.agents.treasury_cash.models import TreasuryCashRun
 from src.app.agent_catalog.agents.treasury_cash.schemas import (
     TreasuryCashInput,
     TreasuryCashPolicy,
+    TreasuryPrefillParams,
 )
 from src.app.agent_catalog.runs.models import FlagSeverity
+from src.app.common.clock import utcnow
+from src.app.data_sources.access import FinanceData
+from src.app.data_sources.records import Account, Bill, Invoice, RecordType
+
+
+@dataclass(frozen=True)
+class CashPosition:
+    """Cash over a horizon, from bank balances and open invoices and bills."""
+
+    banks: list[Account]  # bank accounts with a known balance
+    invoices_due: list[Invoice]  # open, due within the horizon (or with no due date)
+    overdue_invoices: list[Invoice]  # open and already past due: not counted
+    bills_due: list[Bill]  # open, due by the end of the horizon, overdue included
+
+    @property
+    def opening_cash(self) -> Decimal:
+        return sum((a.current_balance or ZERO for a in self.banks), ZERO)
+
+    @property
+    def inflows(self) -> Decimal:
+        return sum((i.open_amount for i in self.invoices_due), ZERO)
+
+    @property
+    def overdue_receivables(self) -> Decimal:
+        return sum((i.open_amount for i in self.overdue_invoices), ZERO)
+
+    @property
+    def outflows(self) -> Decimal:
+        return sum((b.open_amount for b in self.bills_due), ZERO)
+
+
+def cash_position(
+    accounts: list[Account],
+    invoices: list[Invoice],
+    bills: list[Bill],
+    today: date,
+    horizon_days: int,
+) -> CashPosition:
+    """Conservative: receivables already overdue aren't counted (collection is uncertain),
+    payables already overdue are (they still have to be paid)."""
+    end = today + timedelta(days=horizon_days)
+    banks = [
+        a
+        for a in accounts
+        if (a.account_type or "").lower() == "bank" and a.current_balance is not None
+    ]
+    open_invoices = [i for i in invoices if i.open_amount > ZERO]
+    return CashPosition(
+        banks=banks,
+        invoices_due=[i for i in open_invoices if i.due_date is None or today <= i.due_date <= end],
+        overdue_invoices=[i for i in open_invoices if i.due_date and i.due_date < today],
+        bills_due=[
+            b for b in bills if b.open_amount > ZERO and (b.due_date is None or b.due_date <= end)
+        ],
+    )
 
 
 def _closing_cash(data: TreasuryCashInput) -> Decimal:
@@ -58,6 +118,72 @@ class TreasuryCashAgent(BaseAgent):
     prompt_version = prompt.PROMPT_VERSION
     policy_schema = TreasuryCashPolicy
     approval_amount_label = "Funding gap"
+    prefill_params = TreasuryPrefillParams
+
+    @classmethod
+    async def prefill_from_data(
+        cls, params: BaseModel, data: FinanceData, policy: PolicySettings | None = None
+    ) -> Prefill:
+        horizon = cast(TreasuryPrefillParams, params).forecast_horizon_days
+        today = utcnow().date()
+        accounts = await data.records(Account, RecordType.ACCOUNT)
+        invoices = await data.records(Invoice, RecordType.INVOICE)
+        bills = await data.records(Bill, RecordType.BILL)
+        position = cash_position(accounts, invoices, bills, today, horizon)
+
+        values: dict[str, object] = {"forecast_horizon_days": horizon}
+        # Only what the data supports: no bank balances means opening cash stays for the preparer
+        if position.banks:
+            values["opening_cash"] = position.opening_cash
+        if invoices:
+            values["expected_inflows"] = position.inflows
+        if bills:
+            values["expected_outflows"] = position.outflows
+        return Prefill(
+            values,
+            reference=f"Next {horizon} days from {today:%d %b %Y}",
+            summary={
+                "as_of": today,
+                "horizon_days": horizon,
+                "bank_accounts": len(position.banks),
+                "opening_cash": position.opening_cash,
+                "invoices_due": len(position.invoices_due),
+                "expected_inflows": position.inflows,
+                "overdue_receivables_not_counted": position.overdue_receivables,
+                "bills_due": len(position.bills_due),
+                "expected_outflows": position.outflows,
+            },
+            lines={
+                "bank_accounts": position.banks,
+                "invoices_due": position.invoices_due,
+                "overdue_invoices": position.overdue_invoices,
+                "bills_due": position.bills_due,
+            },
+        )
+
+    @staticmethod
+    async def _receivables_checks(ctx: AnalysisContext) -> list[Finding]:
+        """Overdue receivables in the preparer's data: not counted, but worth knowing."""
+        if not await ctx.data.has(RecordType.INVOICE):
+            return []
+        invoices = await ctx.data.records(Invoice, RecordType.INVOICE)
+        today = utcnow().date()
+        overdue = [
+            i for i in invoices if i.open_amount > ZERO and i.due_date and i.due_date < today
+        ]
+        if not overdue:
+            return []
+        total = sum((i.open_amount for i in overdue), ZERO)
+        return [
+            Finding(
+                "OVERDUE_RECEIVABLES",
+                FlagSeverity.WARNING,
+                f"{money(total)} of receivables ({len(overdue)} invoice"
+                f"{'' if len(overdue) == 1 else 's'}) is already overdue: not counted in "
+                "prefilled inflows; confirm before relying on it",
+                "expected_inflows",
+            )
+        ]
 
     @classmethod
     def approval_amount(cls, data: BaseModel) -> Decimal | None:
@@ -130,6 +256,7 @@ class TreasuryCashAgent(BaseAgent):
                 )
             )
 
+        findings.extend(await cls._receivables_checks(ctx))
         optional_checks = [
             over_limit(
                 cash.expected_outflows,

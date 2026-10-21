@@ -14,7 +14,7 @@ Use **one** data source per user while testing:
 Don't connect QuickBooks and upload files for the same user at once. If you switch,
 remove the old source first.
 
-Four agents read the data source:
+Eight agents read the data source:
 
 | Agent | Pick a… | Also checks against the data |
 |---|---|---|
@@ -22,10 +22,37 @@ Four agents read the data source:
 | Expense Audit | expense (card / cash / check) | the card charge itself, double charges |
 | Cash Application | customer payment | the candidate invoice exists and is that customer's |
 | AR Collections | customer | (prefill only: balance, aging, late history from invoices) |
+| Treasury | *nothing*: enter a horizon (days) | overdue receivables (not counted in inflows) |
+| Financial Close | *nothing*: choose account + month | books closing date |
+| Board Reporting | *nothing*: choose a period | books closing date |
+| FP&A | *nothing*: choose unit + period + metric | whether the data has a budget |
 
-The other 6 agents are manual input only, so they test the same with either source, or with
-none. After a sync, the source card on Data Sources shows how many records of each type came
-in (vendors, bills, purchase orders, accounts, customers, invoices, payments, expenses).
+The other 2 agents (Intercompany, SOX Controls) are manual input only, so they test the same
+with either source, or with none. After a sync, the source card on Data Sources shows how many
+records of each type came in.
+
+**Month-end history** (needed by Financial Close, Board Reporting and FP&A) comes in the
+background after each QuickBooks sync: 24 months of trial balances, AR/AP aging totals and
+P&L, plus budgets and the books closing date. The source card shows *Fetching month-end
+balances (24 months)…* and then the time it finished (and *books closed through …* if set).
+Wait for that before testing those three agents. If it fails, the card shows the error; the
+records from the sync are still there.
+
+### What the QuickBooks sandbox has (checked on 21 Oct 2026)
+
+The connected sandbox ("Sandbox Company US …") was checked against these parsers:
+- **Trial balance:** 46 accounts, debits − credits = 0; A/R 20,431.52 = the AR aging total
+  (reconciles)
+- **AR / AP aging:** grand totals read correctly (customer sub-sections are not double counted)
+- **P&L:** activity only from **March to July 2026** (July revenue 43,659.80). Other months
+  are 0. **No classes**: only the company total (QuickBooks' "Not Specified" column, a copy of
+  the total, is dropped)
+- **No budget** and **no books closing date** are set
+
+So in the sandbox: test Board Reporting and FP&A on 2026-03 … 2026-07 (or 2026-Q2); FP&A's
+business unit list is only *Whole company*; the budget stays manual (`BUDGET_NOT_IN_DATA`);
+the period checks don't appear until a closing date is set in QuickBooks (Settings → Advanced
+→ Accounting → Close the books).
 
 > Note: the app itself currently allows several sources per user and merges them for
 > lookups (`src/app/data_sources/access.py`). "One at a time" is a testing rule for now,
@@ -253,7 +280,37 @@ the remittance), open 1,000.00 → **Short payment**, `DEDUCTION_REVIEW`.
 
 ## Financial Close
 
-**Data source:** not used (manual input). Business reference = GL account.
+**Data source:** month-end trial balance + AR/AP aging totals. Business reference = GL
+account.
+
+**With QuickBooks** (after the month-end history is ready): New analysis → *Prefill from your
+data* → choose *GL account* and *Close period* → **Prefill**. Check:
+- *Accounts Receivable (A/R)*: GL balance = the trial balance at that month end, subledger =
+  the AR aging total (in the sandbox both are 20,431.52 for 2026-09 → **Account reconciled**
+  once materiality is entered and a file attached)
+- *Accounts Payable (A/P)*: GL balance shown **positive** (credit), subledger = the AP aging
+  total
+- a bank or other account: GL balance only, subledger left for you; the snapshot says
+  "Not in the data for this account type"
+- with a books closing date in QuickBooks: a month after it → `PERIOD_NOT_CLOSED`, on or
+  before it → `PERIOD_CLOSED`
+
+**With an upload:** types *Account balances by month* and *AR / AP subledger totals by month*:
+```csv
+Account,Account Number,Type,Period,Balance
+Accounts Receivable (A/R),1200,Accounts Receivable,2026-09,120000.00
+Accounts Payable (A/P),2000,Accounts Payable,2026-09,-49000.00
+```
+```csv
+Ledger,Period,Total
+AR,2026-09,119000.00
+AP,2026-09,49000.00
+```
+Balances are debit-positive (a payable is negative, as in a trial balance). Prefill A/R
+2026-09 → GL 120,000.00, subledger 119,000.00 → with materiality 500: **Material close
+variance**. No closing date with uploads, so no period check.
+
+**Manual cases:**
 
 | Case | Input | Expected |
 |---|---|---|
@@ -283,7 +340,28 @@ absolute variance.
 
 ## FP&A
 
-**Data source:** not used (manual input). Business reference = business unit.
+**Data source:** monthly P&L (actual) and budget, by business unit. Business reference =
+business unit.
+
+**With QuickBooks:** New analysis → *Prefill from your data* → *Business unit*, *Forecast
+period*, *Metric* → **Prefill**. Check actual = the metric added up over the period for that
+unit, budget = the same from the QuickBooks budget. In the sandbox: *Whole company*, `2026-07`,
+*Revenue* → actual 43,659.80, budget empty (no budget) → analyze shows `BUDGET_NOT_IN_DATA`.
+To test budgets, create one in QuickBooks (Plus/Advanced: Settings → Budgeting) and sync again.
+
+**With an upload:** type *Profit and loss by month*:
+```csv
+Period,Business Unit,Basis,Revenue,COGS,Operating Expenses
+2026-07,,Actual,100000,30000,20000
+2026-07,East,Actual,60000,18000,12000
+2026-07,,Budget,90000,0,18000
+2026-07,East,Budget,54000,0,0
+```
+(empty business unit = whole company; operating profit is calculated if not given). East,
+2026-07, Revenue → actual 60,000.00, budget 54,000.00. Whole company, Operating profit →
+50,000.00 vs 72,000.00.
+
+**Manual cases:**
 
 | Case | Input | Expected |
 |---|---|---|
@@ -296,7 +374,41 @@ absolute variance.
 
 ## Treasury
 
-**Data source:** not used (manual input). The entity is the run's legal entity, not a field.
+**Data source:** bank balances + open invoices + open bills, over a horizon (no record to
+pick). The entity is the run's legal entity, not a field.
+
+**With QuickBooks:** New analysis → *Prefill from your data* → horizon `30` → **Prefill**. Check:
+- opening cash = the balances of the QuickBooks **Bank** accounts
+- expected inflows = open invoices due between today and today + 30 (or with no due date)
+- expected outflows = open bills due by today + 30, **overdue bills included**
+- the snapshot lists the bank accounts, invoices due, overdue invoices (not counted) and bills
+  due, with a summary
+
+Enter currency and buffer → analyze. If the data has overdue invoices →
+`OVERDUE_RECEIVABLES` (warning). *Prefill again* with horizon `5` → the totals change and the
+run goes back to draft.
+
+**With an upload:** three files, types *Chart of accounts*, *Customer invoices* and *Bills*
+(use due dates a few days after today):
+```csv
+Name,Type,Balance
+Operating Account,Bank,250000.00
+Cloud Hosting,Expense,
+```
+```csv
+Invoice No,Customer,Total,Balance,Due Date
+INV-9001,Quiet Customer,400.00,400.00,<today + 10 days>
+INV-8021,Harbor Distribution,1000.00,1000.00,2026-09-30
+```
+```csv
+Bill No,Vendor,Total,Balance,Due Date
+INV-2048,Acme Cloud Services,12500.00,12500.00,<today + 20 days>
+```
+Prefill with 30 days → opening 250,000.00, inflows 400.00 (INV-8021 is overdue: not counted),
+outflows 12,500.00.
+
+**Manual cases:**
+
 
 | Case | Input | Expected |
 |---|---|---|
@@ -330,7 +442,20 @@ Also check: the AI explanation doesn't call the result a deficiency or material 
 
 ## Board Reporting
 
-**Data source:** not used (manual input). Business reference = report name.
+**Data source:** monthly P&L (company total). Business reference = report name.
+
+**With QuickBooks:** New analysis → *Prefill from your data* → *Reporting period* (months,
+then complete quarters and years) → **Prefill**. Check reported revenue and operating profit =
+the period's months added up, prior period revenue = the same period last year, and *Source
+dataset / approval ID* filled with the source and sync time. In the sandbox: `2026-Q2` →
+revenue 5,849.72 (Apr 521.00 + May 942.00 + Jun 4,386.72), prior 2025-Q2 = 0.00 →
+`NO_PRIOR_PERIOD`. A year whose previous year isn't fully in the 24 months leaves the prior
+revenue empty (the snapshot says why). Enter the report name, then analyze.
+
+**With an upload:** the same *Profit and loss by month* file as FP&A (company rows with an
+empty business unit), covering the period and the same period last year.
+
+**Manual cases:**
 
 | Case | Input | Expected |
 |---|---|---|
@@ -360,3 +485,9 @@ uv run pytest tests/agent_catalog -q
   expenses
 - `test_data_source_prefill.py`: Cash Application, Expense Audit and AR Collections prefilled
   from the fake QuickBooks, the candidate invoice rules, category limits and aging
+- `test_treasury_prefill.py`: Treasury's cash position (what is and isn't counted) and the
+  prefill from parameters, end to end
+- `test_financial_close_prefill.py`: trial balance and aging parsing, the 24-month window,
+  account/period choices, AR vs aging, AP sign, and a failed history sync
+- `test_reporting_prefill.py`: periods (month/quarter/year, last year), P&L by class and
+  budget parsing, Board quarter vs last year, FP&A by unit and metric, no budget

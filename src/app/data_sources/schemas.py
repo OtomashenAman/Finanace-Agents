@@ -5,7 +5,12 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.app.data_sources.models import IntegrationEnvironment, SourceKind, SourceStatus
+from src.app.data_sources.models import (
+    HistoryStatus,
+    IntegrationEnvironment,
+    SourceKind,
+    SourceStatus,
+)
 from src.app.data_sources.records import RecordType
 
 
@@ -24,6 +29,11 @@ class DataSourceOut(BaseModel):
     last_error: str | None
     record_counts: dict[str, int]
     filename: str | None
+    # QuickBooks month-end history: pending / ready / error, and the books closing date
+    history_status: HistoryStatus | None
+    history_synced_at: datetime | None
+    history_error: str | None
+    books_closed_through: date | None
     created_at: datetime
     updated_at: datetime
 

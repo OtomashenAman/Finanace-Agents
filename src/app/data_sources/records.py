@@ -4,9 +4,16 @@ these shapes, so agents read the same data whichever system it came from."""
 from datetime import date
 from decimal import Decimal
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Literal
 
-from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, Field
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    model_validator,
+)
 
 CENT = Decimal("0.01")
 
@@ -20,6 +27,25 @@ Money = Annotated[
 ]
 
 
+def _period(value: object) -> object:
+    """A month as YYYY-MM; a full date (2026-09-30) is taken as its month."""
+    if isinstance(value, date):
+        return f"{value:%Y-%m}"
+    if isinstance(value, str) and len(value) >= 10 and value[4] == "-" and value[7] == "-":
+        return value[:7]
+    return value
+
+
+# A month, e.g. "2026-09" (a close period)
+Period = Annotated[str, BeforeValidator(_period), Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")]
+
+
+def month_end(period: str) -> date:
+    year, month = int(period[:4]), int(period[5:7])
+    following = date(year + month // 12, month % 12 + 1, 1)
+    return date.fromordinal(following.toordinal() - 1)
+
+
 class RecordType(StrEnum):
     VENDOR = "vendor"
     BILL = "bill"
@@ -29,6 +55,9 @@ class RecordType(StrEnum):
     INVOICE = "invoice"
     PAYMENT = "payment"
     EXPENSE = "expense"
+    ACCOUNT_BALANCE = "account_balance"
+    SUBLEDGER_TOTAL = "subledger_total"
+    PERIOD_RESULT = "period_result"
 
 
 class Record(BaseModel):
@@ -76,6 +105,7 @@ class Bill(Record):
     due_date: date | None = None
     po_number: str | None = Field(default=None, max_length=100)
     account: str | None = Field(default=None, max_length=100)
+    balance: Money | None = None  # still to pay; None when the source doesn't say
 
     @property
     def reference(self) -> str:
@@ -92,6 +122,11 @@ class Bill(Record):
     @property
     def txn_date(self) -> date | None:
         return self.bill_date
+
+    @property
+    def open_amount(self) -> Decimal:
+        """The balance; without one, the whole total (a bill is unpaid unless told otherwise)."""
+        return self.balance if self.balance is not None else self.total
 
 
 class PurchaseOrder(Record):
@@ -124,7 +159,8 @@ class Account(Record):
 
     number: str | None = Field(default=None, max_length=50)
     name: str = Field(min_length=1, max_length=200)
-    account_type: str | None = Field(default=None, max_length=100)
+    account_type: str | None = Field(default=None, max_length=100)  # e.g. Bank, Expense
+    current_balance: Money | None = None
 
     @property
     def reference(self) -> str:
@@ -235,6 +271,90 @@ class Expense(Record):
         return self.expense_date
 
 
+class AccountBalance(Record):
+    """An account's balance at a month end (from the trial balance), debits positive."""
+
+    account_name: str = Field(min_length=1, max_length=200)
+    account_number: str | None = Field(default=None, max_length=50)
+    account_type: str | None = Field(default=None, max_length=100)  # e.g. Accounts Receivable
+    period: Period
+    balance: Money
+
+    @property
+    def reference(self) -> str:
+        return f"{self.period} {self.account_number or self.account_name}"
+
+    @property
+    def amount(self) -> Decimal | None:
+        return self.balance
+
+    @property
+    def txn_date(self) -> date | None:
+        return month_end(self.period)
+
+    def matches(self, account: str) -> bool:
+        """Whether `account` names this account (by name or number, ignoring case)."""
+        wanted = account.strip().lower()
+        return wanted in (self.account_name.lower(), (self.account_number or "").lower())
+
+
+class SubledgerTotal(Record):
+    """A subledger's total at a month end, e.g. the AR aging total."""
+
+    ledger: Literal["AR", "AP"]
+    period: Period
+    total: Money
+
+    @property
+    def reference(self) -> str:
+        return f"{self.ledger} {self.period}"
+
+    @property
+    def amount(self) -> Decimal | None:
+        return self.total
+
+    @property
+    def txn_date(self) -> date | None:
+        return month_end(self.period)
+
+
+class PeriodResult(Record):
+    """A month's profit and loss (actual or budget), for the company or one business unit."""
+
+    period: Period
+    business_unit: str | None = Field(default=None, max_length=200)  # None: the whole company
+    basis: Annotated[
+        Literal["actual", "budget"],
+        BeforeValidator(lambda v: v.strip().lower() if isinstance(v, str) else v),
+    ] = "actual"
+    revenue: Money
+    cogs: Money = Decimal("0.00")
+    operating_expenses: Money = Decimal("0.00")
+    operating_profit: Money | None = None  # if not given: revenue - cogs - operating expenses
+
+    @model_validator(mode="after")
+    def _derive_profit(self) -> "PeriodResult":
+        if self.operating_profit is None:
+            self.operating_profit = self.revenue - self.cogs - self.operating_expenses
+        return self
+
+    @property
+    def reference(self) -> str:
+        return f"{self.basis} {self.period} {self.business_unit or 'company'}"
+
+    @property
+    def counterparty(self) -> str | None:
+        return self.business_unit
+
+    @property
+    def amount(self) -> Decimal | None:
+        return self.revenue
+
+    @property
+    def txn_date(self) -> date | None:
+        return month_end(self.period)
+
+
 RECORD_MODELS: dict[RecordType, type[Record]] = {
     RecordType.VENDOR: Vendor,
     RecordType.BILL: Bill,
@@ -244,6 +364,9 @@ RECORD_MODELS: dict[RecordType, type[Record]] = {
     RecordType.INVOICE: Invoice,
     RecordType.PAYMENT: Payment,
     RecordType.EXPENSE: Expense,
+    RecordType.ACCOUNT_BALANCE: AccountBalance,
+    RecordType.SUBLEDGER_TOTAL: SubledgerTotal,
+    RecordType.PERIOD_RESULT: PeriodResult,
 }
 
 RECORD_LABELS: dict[RecordType, str] = {
@@ -255,4 +378,7 @@ RECORD_LABELS: dict[RecordType, str] = {
     RecordType.INVOICE: "Invoices (customer invoices)",
     RecordType.PAYMENT: "Customer payments",
     RecordType.EXPENSE: "Expenses (card, cash, check)",
+    RecordType.ACCOUNT_BALANCE: "Account balances by month (trial balance)",
+    RecordType.SUBLEDGER_TOTAL: "AR / AP subledger totals by month",
+    RecordType.PERIOD_RESULT: "Profit and loss by month (actual or budget)",
 }

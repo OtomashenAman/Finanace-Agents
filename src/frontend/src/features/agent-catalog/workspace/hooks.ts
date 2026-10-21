@@ -82,6 +82,12 @@ export function useLinkSource(key: string, id: string) {
   )
 }
 
+export function usePrefillFromData(key: string, id: string) {
+  return useRunMutation<{ sourceId: string; params: Record<string, FieldValue> }>(key, ({ sourceId, params }) =>
+    runsApi.prefillFromData(key, id, sourceId, params),
+  )
+}
+
 export function useUnlinkSource(key: string, id: string) {
   return useRunMutation<void>(key, () => runsApi.unlinkSource(key, id))
 }
@@ -97,4 +103,13 @@ export function useEvidencePack(key: string, id: string) {
 
 export function useDeleteRun(key: string, id: string) {
   return useMutation({ mutationFn: () => runsApi.remove(key, id), meta: { invalidates: [RUNS_TAG] } })
+}
+
+/** Choices for an agent's prefill parameters from one of your sources (e.g. its accounts) */
+export function usePrefillOptions(key: string, sourceId: string | null) {
+  return useQuery({
+    queryKey: ["agents", key, "prefill-options", sourceId],
+    queryFn: () => runsApi.prefillOptions(key, sourceId as string),
+    enabled: sourceId !== null,
+  })
 }

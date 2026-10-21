@@ -5,6 +5,7 @@ import { toast } from "sonner"
 
 import { Alert } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
+import { SourceParamsPrefill } from "@/features/data-sources/components/source-params-prefill"
 import { SourceRecordPicker } from "@/features/data-sources/components/source-record-picker"
 import { ApiError } from "@/lib/api"
 
@@ -110,7 +111,17 @@ export function InputStep({ agentKey, run, form }: InputStepProps) {
           {run.validation_errors && (
             <Alert className="mb-5">Some required fields are missing or invalid. Correct them and analyze again.</Alert>
           )}
-          {canEdit && recordType && (
+          {canEdit && form.prefill_fields.length > 0 && (
+            <div className="mb-5">
+              <SourceParamsPrefill
+                agentKey={agentKey}
+                run={run}
+                fields={form.prefill_fields}
+                onPrefilled={(updated) => reset(toFormValues(form.fields, updated.input))}
+              />
+            </div>
+          )}
+          {canEdit && recordType && form.prefill_fields.length === 0 && (
             <div className="mb-5">
               <SourceRecordPicker
                 agentKey={agentKey}

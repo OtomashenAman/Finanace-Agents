@@ -3,6 +3,7 @@ from decimal import Decimal
 from src.app.agent_catalog.agents.fields import (
     AgentInput,
     PolicySettings,
+    choice_field,
     money_field,
     percent_setting,
     signed_money_field,
@@ -33,4 +34,13 @@ class BoardReportingPolicy(PolicySettings):
         "Revenue change review threshold",
         Decimal("25"),
         help="Revenue moving more than this vs the prior period needs a confirmed explanation",
+    )
+
+
+class BoardPrefillParams(AgentInput):
+    """Which period to take from the preparer's monthly profit and loss."""
+
+    reporting_period: str = choice_field(
+        "Reporting period",
+        help="A month, quarter or year: compared with the same period last year",
     )

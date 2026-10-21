@@ -3,7 +3,7 @@
 import contextlib
 import urllib.parse
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -15,15 +15,19 @@ from src.app.core.config import get_settings
 from src.app.data_sources.models import IntegrationEnvironment
 from src.app.data_sources.records import (
     Account,
+    AccountBalance,
     Bill,
     Customer,
     Expense,
     Invoice,
     Payment,
+    PeriodResult,
     PurchaseOrder,
     Record,
     RecordType,
+    SubledgerTotal,
     Vendor,
+    month_end,
 )
 
 AUTHORIZE_URL = "https://appcenter.intuit.com/connect/oauth2"
@@ -265,6 +269,17 @@ class Api:
         created: dict[str, Any] = (await self._post("bill", body)).get("Bill", {})
         return created
 
+    async def report(self, name: str, **params: str) -> dict[str, Any]:
+        """A report (e.g. TrialBalance) as QuickBooks returns it: Header, Columns, Rows."""
+        # name comes from fetch_history's fixed list, never from user input
+        return await self._get(f"reports/{name}", **params)
+
+    async def books_closed_through(self) -> str | None:
+        """The company's books closing date (YYYY-MM-DD), if set."""
+        prefs = (await self._get("preferences")).get("Preferences", {})
+        closed = (prefs.get("AccountingInfoPrefs") or {}).get("BookCloseDate")
+        return str(closed) if closed else None
+
     async def company_name(self, realm_id: str) -> str | None:
         body = await self._get(f"companyinfo/{realm_id}")
         name = body.get("CompanyInfo", {}).get("CompanyName")
@@ -336,6 +351,7 @@ def _bill(row: dict[str, Any], po_numbers: dict[str, str]) -> Bill:
         due_date=row.get("DueDate"),
         po_number=po_numbers.get(str(linked_po)) if linked_po else None,
         account=account,
+        balance=row.get("Balance"),
     )
 
 
@@ -345,6 +361,7 @@ def _account(row: dict[str, Any]) -> Account:
         number=row.get("AcctNum"),
         name=row.get("FullyQualifiedName") or row.get("Name") or f"Account {row['Id']}",
         account_type=row.get("AccountType"),
+        current_balance=row.get("CurrentBalance"),
     )
 
 
@@ -430,6 +447,212 @@ def _receipts(attachables: list[dict[str, Any]]) -> set[str]:
         for ref in a.get("AttachableRef", [])
         if (ref.get("EntityRef") or {}).get("type") == "Purchase"
     }
+
+
+# --- month-end history (reports) ---------------------------------------------------------
+
+HISTORY_MONTHS = 24
+
+
+def _rows(report: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every row of a report, sections flattened (summary rows included)."""
+    found: list[dict[str, Any]] = []
+
+    def walk(rows: list[dict[str, Any]]) -> None:
+        for row in rows:
+            found.append(row)
+            walk((row.get("Rows") or {}).get("Row", []))
+
+    walk((report.get("Rows") or {}).get("Row", []))
+    return found
+
+
+def _amount(cell: dict[str, Any] | None) -> Decimal:
+    raw = (cell or {}).get("value") or "0"
+    return Decimal(str(raw).replace(",", ""))
+
+
+def _trial_balance(
+    report: dict[str, Any], period: str, accounts: dict[str, dict[str, Any]]
+) -> list[AccountBalance]:
+    """One balance per account row (debit - credit); the TOTAL row is skipped."""
+    balances = []
+    for row in _rows(report):
+        cells = row.get("ColData") or []
+        if len(cells) < 3 or not cells[0].get("id"):
+            continue
+        account_id = str(cells[0]["id"])
+        account = accounts.get(account_id, {})
+        name = account.get("FullyQualifiedName") or cells[0].get("value") or account_id
+        balances.append(
+            AccountBalance(
+                external_id=f"{account_id}-{period}",
+                account_name=name,
+                account_number=account.get("AcctNum"),
+                account_type=account.get("AccountType"),
+                period=period,
+                balance=_amount(cells[1]) - _amount(cells[2]),
+            )
+        )
+    return balances
+
+
+def _aging_total(report: dict[str, Any]) -> Decimal:
+    """The grand total of an aging summary (its last column), else the sum of its rows."""
+    for row in _rows(report):
+        if row.get("group") == "GrandTotal":
+            cells = (row.get("Summary") or {}).get("ColData") or []
+            if cells:
+                return _amount(cells[-1])
+    return sum(
+        (_amount((row.get("ColData") or [{}])[-1]) for row in _rows(report) if row.get("ColData")),
+        Decimal(0),
+    )
+
+
+# P&L sections (report row groups) -> PeriodResult fields
+_PL_GROUPS = {
+    "Income": "revenue",
+    "COGS": "cogs",
+    "Expenses": "operating_expenses",
+    "NetOperatingIncome": "operating_profit",
+}
+
+
+NOT_SPECIFIED = "Not Specified"  # QuickBooks' column for transactions without a class
+
+
+def _profit_and_loss(report: dict[str, Any], period: str) -> list[PeriodResult]:
+    """One actual result per column: each business unit (class) and the company total."""
+    columns = (report.get("Columns") or {}).get("Column", [])
+    units: list[str | None] = []
+    for column in columns[1:]:  # the first column is the row label
+        title = (column.get("ColTitle") or "").strip()
+        units.append(None if title.lower() in ("total", "") else title)
+    figures: list[dict[str, Decimal]] = [{} for _ in units]
+    for row in _rows(report):
+        name = _PL_GROUPS.get(row.get("group") or "")
+        cells = (row.get("Summary") or {}).get("ColData") or []
+        if name is None or len(cells) < 2:
+            continue
+        for i, cell in enumerate(cells[1 : len(units) + 1]):
+            figures[i][name] = _amount(cell)
+    # Without any classes, QuickBooks still shows "Not Specified": a copy of the total
+    no_classes = {u for u in units if u} == {NOT_SPECIFIED}
+    return [
+        PeriodResult(
+            external_id=f"actual-{period}-{unit or 'company'}",
+            period=period,
+            business_unit=unit,
+            basis="actual",
+            revenue=values.get("revenue", Decimal(0)),
+            cogs=values.get("cogs", Decimal(0)),
+            operating_expenses=values.get("operating_expenses", Decimal(0)),
+            operating_profit=values.get("operating_profit"),
+        )
+        for unit, values in zip(units, figures, strict=True)
+        if values and not (no_classes and unit == NOT_SPECIFIED)
+    ]
+
+
+# Budget lines by the type of account they're for (operating P&L only)
+_BUDGET_FIELDS = {
+    "Income": "revenue",
+    "Cost of Goods Sold": "cogs",
+    "Expense": "operating_expenses",
+}
+
+
+def _budgets(
+    budgets: list[dict[str, Any]], accounts: dict[str, dict[str, Any]], periods: set[str]
+) -> list[PeriodResult]:
+    """Active budgets added up per month, for the company and per class (business unit)."""
+    totals: dict[tuple[str, str | None], dict[str, Decimal]] = {}
+    for budget in budgets:
+        if budget.get("Active") is False:
+            continue
+        for line in budget.get("BudgetDetail", []):
+            period = str(line.get("BudgetDate", ""))[:7]
+            account = accounts.get(str((line.get("AccountRef") or {}).get("value")), {})
+            name = _BUDGET_FIELDS.get(account.get("AccountType", ""))
+            if period not in periods or name is None:
+                continue
+            unit = (line.get("ClassRef") or line.get("DepartmentRef") or {}).get("name")
+            amount = Decimal(str(line.get("Amount") or 0))
+            for key in {(period, None), (period, unit)}:
+                bucket = totals.setdefault(key, {})
+                bucket[name] = bucket.get(name, Decimal(0)) + amount
+    return [
+        PeriodResult(
+            external_id=f"budget-{period}-{unit or 'company'}",
+            period=period,
+            business_unit=unit,
+            basis="budget",
+            revenue=values.get("revenue", Decimal(0)),
+            cogs=values.get("cogs", Decimal(0)),
+            operating_expenses=values.get("operating_expenses", Decimal(0)),
+        )
+        for (period, unit), values in sorted(totals.items(), key=lambda t: (t[0][0], t[0][1] or ""))
+    ]
+
+
+def history_periods(today: date, months: int = HISTORY_MONTHS) -> list[str]:
+    """The last `months` complete months, newest first (e.g. 2026-09 back to 2024-10)."""
+    year, month = today.year, today.month
+    periods = []
+    for _ in range(months):
+        year, month = (year, month - 1) if month > 1 else (year - 1, 12)
+        periods.append(f"{year:04d}-{month:02d}")
+    return periods
+
+
+@dataclass
+class History:
+    records: dict[RecordType, list[Record]]
+    books_closed_through: str | None
+
+
+async def fetch_history(qbo: Api, today: date) -> History:
+    """Month-end trial balances and AR/AP aging totals for the last HISTORY_MONTHS months."""
+    accounts = {str(a["Id"]): a for a in await qbo.query_all("Account")}
+    balances: list[Record] = []
+    totals: list[Record] = []
+    results: list[Record] = []
+    periods = history_periods(today)
+    for period in periods:
+        end = month_end(period).isoformat()
+        trial = await qbo.report("TrialBalance", start_date=f"{period}-01", end_date=end)
+        balances.extend(_trial_balance(trial, period, accounts))
+        for ledger, report in (("AR", "AgedReceivables"), ("AP", "AgedPayables")):
+            aging = await qbo.report(report, report_date=end)
+            totals.append(
+                SubledgerTotal(
+                    external_id=f"{ledger}-{period}",
+                    ledger=ledger,
+                    period=period,
+                    total=_aging_total(aging),
+                )
+            )
+        pnl = await qbo.report(
+            "ProfitAndLoss",
+            start_date=f"{period}-01",
+            end_date=end,
+            summarize_column_by="Classes",
+        )
+        results.extend(_profit_and_loss(pnl, period))
+    try:
+        budgets = await qbo.query_all("Budget")
+    except QuickBooksError:
+        budgets = []  # budgets need QuickBooks Plus or Advanced
+    results.extend(_budgets(budgets, accounts, set(periods)))
+    return History(
+        records={
+            RecordType.ACCOUNT_BALANCE: balances,
+            RecordType.SUBLEDGER_TOTAL: totals,
+            RecordType.PERIOD_RESULT: results,
+        },
+        books_closed_through=await qbo.books_closed_through(),
+    )
 
 
 @dataclass

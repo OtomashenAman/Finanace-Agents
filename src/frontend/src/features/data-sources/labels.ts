@@ -17,6 +17,9 @@ export const RECORD_LABELS: Record<RecordType, string> = {
   invoice: "Customer invoices",
   payment: "Customer payments",
   expense: "Expenses",
+  account_balance: "Month-end account balances",
+  subledger_total: "Month-end AR/AP totals",
+  period_result: "Monthly P&L (actual and budget)",
 }
 
 /** Singular, for pickers: "Pick a bill" */
@@ -29,8 +32,23 @@ export const RECORD_NOUN: Record<string, string> = {
   invoice: "invoice",
   payment: "payment",
   expense: "expense",
+  account_balance: "account balance",
+  subledger_total: "subledger total",
+  period_result: "P&L month",
   // what a prefill pulled in alongside the picked record (run source snapshots)
   oldest_open_invoice: "oldest open invoice",
+  // a prefill from parameters (e.g. Treasury's cash position)
+  parameters: "parameters",
+  summary: "summary",
+  bank_accounts: "bank accounts",
+  invoices_due: "invoices due (inflows)",
+  overdue_invoices: "overdue invoices (not counted)",
+  bills_due: "bills due (outflows)",
+  // Board Reporting and FP&A: the months behind each total
+  months: "months",
+  prior_year_months: "same months last year",
+  actual_months: "actual by month",
+  budget_months: "budget by month",
 }
 
 export const FIELD_LABELS: Record<string, string> = {
@@ -67,6 +85,16 @@ export const FIELD_LABELS: Record<string, string> = {
   payment_type: "Payment type",
   employee: "Employee",
   has_receipt: "Receipt attached (yes/no)",
+  account_name: "Account",
+  account_number: "Account number",
+  period: "Period (YYYY-MM)",
+  ledger: "Ledger (AR or AP)",
+  business_unit: "Business unit (empty: whole company)",
+  basis: "Actual or budget",
+  revenue: "Revenue",
+  cogs: "Cost of goods sold",
+  operating_expenses: "Operating expenses",
+  operating_profit: "Operating profit (optional: calculated)",
 }
 
 export function fieldLabel(name: string): string {

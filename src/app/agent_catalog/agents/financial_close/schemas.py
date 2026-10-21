@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from src.app.agent_catalog.agents.fields import (
     AgentInput,
+    choice_field,
     money_field,
     signed_money_field,
     text_field,
@@ -23,3 +24,10 @@ class FinancialCloseInput(AgentInput):
         help="Net amount of identified items (timing, in-transit) explaining GL minus subledger",
     )
     proposed_adjustment_rationale: str | None = textarea_field("Proposed adjustment rationale")
+
+
+class FinancialClosePrefillParams(AgentInput):
+    """Which account and month to take from the preparer's month-end balances."""
+
+    gl_account: str = choice_field("GL account")
+    close_period: str = choice_field("Close period")

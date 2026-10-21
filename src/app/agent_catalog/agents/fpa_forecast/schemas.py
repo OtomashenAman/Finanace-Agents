@@ -1,8 +1,10 @@
 from decimal import Decimal
+from typing import Literal
 
 from src.app.agent_catalog.agents.fields import (
     AgentInput,
     PolicySettings,
+    choice_field,
     percent_field,
     percent_setting,
     signed_money_field,
@@ -40,4 +42,23 @@ class FpaForecastPolicy(PolicySettings):
         "Scenario change review limit",
         Decimal("25"),
         help="Any scenario driver beyond this % is flagged as unusual. Empty: no check",
+    )
+
+
+WHOLE_COMPANY = "Whole company"
+# Metric -> PeriodResult field
+METRICS = {
+    "Revenue": "revenue",
+    "Operating profit": "operating_profit",
+    "Operating expenses": "operating_expenses",
+}
+
+
+class FpaPrefillParams(AgentInput):
+    """Which unit, period and figure to take from the preparer's monthly P&L and budget."""
+
+    business_unit: str = choice_field("Business unit", help="A QuickBooks class, or the company")
+    forecast_period: str = choice_field("Forecast period", help="A month, quarter or year")
+    metric: Literal["Revenue", "Operating profit", "Operating expenses"] = choice_field(
+        "Metric", options=list(METRICS)
     )

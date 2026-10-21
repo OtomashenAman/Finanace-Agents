@@ -27,6 +27,8 @@ pytestmark = pytest.mark.usefixtures("synced_agents")
 
 
 HARBOR = {"value": "81", "name": "Harbor Distribution"}
+QUIET = {"value": "82", "name": "Quiet Customer"}
+IN_10_DAYS = (utcnow().date() + timedelta(days=10)).isoformat()
 HOTEL = {"value": "90", "name": "Northbridge Hotel", "type": "Vendor"}
 LODGING = [{"AccountBasedExpenseLineDetail": {"AccountRef": {"value": "9", "name": "Lodging"}}}]
 
@@ -43,6 +45,9 @@ RECEIVABLES_AND_EXPENSES: dict[str, list[dict[str, Any]]] = {
         # Paid five days late (due 08-15, paid 08-20 by payment 401)
         {"Id": "600", "DocNumber": "INV-8000", "CustomerRef": HARBOR, "TotalAmt": 500.0,
          "Balance": 0, "TxnDate": "2026-07-16", "DueDate": "2026-08-15"},
+        # Due in 10 days: inside a 30-day treasury horizon
+        {"Id": "602", "DocNumber": "INV-9001", "CustomerRef": QUIET, "TotalAmt": 400.0,
+         "Balance": 400.0, "TxnDate": "2026-10-01", "DueDate": IN_10_DAYS},
     ],
     "Payment": [
         # Applied to INV-8000 in QuickBooks
@@ -68,6 +73,87 @@ RECEIVABLES_AND_EXPENSES: dict[str, list[dict[str, Any]]] = {
 }  # fmt: skip
 
 
+def _cell(value: str, account_id: str | None = None) -> dict[str, str]:
+    return {"value": value, "id": account_id} if account_id else {"value": value}
+
+
+# Month-end reports, as QuickBooks returns them (the same figures for every month)
+REPORTS: dict[str, dict[str, Any]] = {
+    "TrialBalance": {
+        "Header": {"ReportName": "TrialBalance"},
+        "Rows": {
+            "Row": [
+                {"ColData": [_cell("Operating Account", "3"), _cell("250,000.00"), _cell("")]},
+                {"ColData": [_cell("Accounts Receivable (A/R)", "84"), _cell("120000.00"),
+                             _cell("")]},
+                {"ColData": [_cell("Accounts Payable (A/P)", "33"), _cell(""), _cell("49000.00")]},
+                {"type": "Section", "group": "GrandTotal",
+                 "Summary": {"ColData": [_cell("TOTAL"), _cell("370000.00"), _cell("49000.00")]}},
+            ]
+        },
+    },
+    "AgedReceivables": {
+        "Rows": {
+            "Row": [
+                {"ColData": [_cell("Harbor Distribution", "81"), _cell("1000.00"),
+                             _cell("119000.00")]},
+                {"type": "Section", "group": "GrandTotal",
+                 "Summary": {"ColData": [_cell("TOTAL"), _cell("1000.00"), _cell("119000.00")]}},
+            ]
+        },
+    },
+    # Per class (business unit) and the company total, the same every month
+    "ProfitAndLoss": {
+        "Columns": {"Column": [{"ColTitle": ""}, {"ColTitle": "East"}, {"ColTitle": "West"},
+                               {"ColTitle": "TOTAL"}]},
+        "Rows": {
+            "Row": [
+                {"type": "Section", "group": "Income", "Summary": {"ColData": [
+                    _cell("Total Income"), _cell("60000.00"), _cell("40000.00"),
+                    _cell("100000.00")]}},
+                {"type": "Section", "group": "COGS", "Summary": {"ColData": [
+                    _cell("Total Cost of Goods Sold"), _cell("18000.00"), _cell("12000.00"),
+                    _cell("30000.00")]}},
+                {"type": "Section", "group": "Expenses", "Summary": {"ColData": [
+                    _cell("Total Expenses"), _cell("12000.00"), _cell("8000.00"),
+                    _cell("20000.00")]}},
+                {"type": "Section", "group": "NetOperatingIncome", "Summary": {"ColData": [
+                    _cell("Net Operating Income"), _cell("30000.00"), _cell("20000.00"),
+                    _cell("50000.00")]}},
+            ]
+        },
+    },
+    # No grand total row: the rows are added up
+    "AgedPayables": {
+        "Rows": {
+            "Row": [
+                {"ColData": [_cell("Acme Cloud Services", "56"), _cell("40000.00")]},
+                {"ColData": [_cell("Old Supplier", "57"), _cell("9000.00")]},
+            ]
+        },
+    },
+}  # fmt: skip
+
+
+def monthly_budget() -> list[dict[str, Any]]:
+    """A budget for every month of the history window: Sales by class, Rent for the company."""
+    lines = []
+    for period in qb.history_periods(utcnow().date()):
+        day = f"{period}-01"
+        lines += [
+            {"BudgetDate": day, "Amount": 54000, "AccountRef": {"value": "79"},
+             "ClassRef": {"value": "1", "name": "East"}},
+            {"BudgetDate": day, "Amount": 36000, "AccountRef": {"value": "79"},
+             "ClassRef": {"value": "2", "name": "West"}},
+            {"BudgetDate": day, "Amount": 18000, "AccountRef": {"value": "80"}},
+        ]  # fmt: skip
+    return [
+        {"Id": "1", "Name": "FY budget", "Active": True, "BudgetDetail": lines},
+        # Inactive budgets are ignored
+        {"Id": "2", "Name": "Old draft", "Active": False, "BudgetDetail": lines},
+    ]
+
+
 class FakeIntuit:
     """Intuit's OAuth and accounting API, as far as the app uses them."""
 
@@ -79,6 +165,9 @@ class FakeIntuit:
         self.sync_token = 3
         self.updates = 0
         self.created: list[dict[str, Any]] = []
+        self.report_calls = 0
+        self.reports_fail = False
+        self.budgets = monthly_budget()
         self.vendors: list[dict[str, Any]] = [
             {"Id": "56", "DisplayName": "Acme Cloud Services", "Active": True},
             {"Id": "57", "DisplayName": "Old Supplier", "Active": False},
@@ -153,6 +242,15 @@ class FakeIntuit:
                     }
                 },
             )
+        if "/reports/" in url:
+            self.report_calls += 1
+            if self.reports_fail:
+                return httpx.Response(500)
+            name = url.split("/reports/")[1].split("?")[0]
+            return httpx.Response(200, json=REPORTS[name])
+        if "/preferences" in url:
+            prefs = {"AccountingInfoPrefs": {"BookCloseDate": "2026-08-31"}}
+            return httpx.Response(200, json={"Preferences": prefs})
         if "/companyinfo/" in url:
             return httpx.Response(200, json={"CompanyInfo": {"CompanyName": "Acme Holdings Ltd"}})
         if "/query" in url:
@@ -202,8 +300,29 @@ class FakeIntuit:
                         "AcctNum": "6100",
                         "Name": "Cloud Hosting",
                         "AccountType": "Expense",
-                    }
+                    },
+                    {
+                        "Id": "3",
+                        "Name": "Operating Account",
+                        "AccountType": "Bank",
+                        "CurrentBalance": 250000.0,
+                    },
+                    {
+                        "Id": "84",
+                        "AcctNum": "1200",
+                        "Name": "Accounts Receivable (A/R)",
+                        "AccountType": "Accounts Receivable",
+                    },
+                    {
+                        "Id": "33",
+                        "AcctNum": "2000",
+                        "Name": "Accounts Payable (A/P)",
+                        "AccountType": "Accounts Payable",
+                    },
+                    {"Id": "79", "Name": "Sales", "AccountType": "Income"},
+                    {"Id": "80", "Name": "Rent", "AccountType": "Expense"},
                 ],
+                "Budget": self.budgets,
                 **RECEIVABLES_AND_EXPENSES,
             }[entity]
             return httpx.Response(200, json={"QueryResponse": {entity: rows}})
@@ -352,12 +471,21 @@ async def test_user_connects_own_quickbooks_and_it_syncs(
         "vendor": 2,
         "purchase_order": 1,
         "bill": 1,
-        "account": 1,
+        "account": 6,
         "customer": 2,
-        "invoice": 2,
+        "invoice": 3,
         "payment": 2,
         "expense": 2,
+        # month-end history, fetched by the background job (run inline in tests)
+        "account_balance": 3 * 24,
+        "subledger_total": 2 * 24,
+        # East, West and company: actual P&L and budget, every month
+        "period_result": 3 * 24 + 3 * 24,
     }
+    assert source["history_status"] == "ready"
+    assert source["books_closed_through"] == "2026-08-31"
+    # trial balance, AR and AP aging, and P&L, per month
+    assert intuit.report_calls == 4 * 24
     assert "credentials" not in json.dumps(source)
 
     bills = (await me.get(f"{SOURCES}/{source['id']}/records", params={"type": "bill"})).json()
@@ -531,6 +659,7 @@ async def test_upload_preview_suggests_a_mapping(me: AsyncClient) -> None:
         "due_date": None,
         "po_number": "PO Number",
         "account": None,
+        "balance": None,
     }
     assert (body["row_count"], body["valid_count"], body["error_count"]) == (3, 2, 1)
     assert body["errors"][0].startswith("Row 4: total: 'abc' is not an amount")

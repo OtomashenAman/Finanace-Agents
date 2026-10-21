@@ -19,7 +19,9 @@ from pydantic import (
     model_validator,
 )
 
-FieldKind = Literal["text", "textarea", "money", "number", "percent", "boolean", "money_map"]
+FieldKind = Literal[
+    "text", "textarea", "money", "number", "percent", "boolean", "money_map", "choice"
+]
 
 # A name -> amount table in a policy, e.g. expense limits per category
 MoneyMap = dict[
@@ -155,6 +157,15 @@ def percent_field(
     )
 
 
+def choice_field(label: str, *, options: list[str] | None = None, help: str | None = None) -> Any:
+    """Pick one value. Fixed `options` go in the form spec; without them the agent supplies
+    them from the user's data (BaseAgent.prefill_options)."""
+    extra: dict[str, Any] = {"ui": "choice", "options": options}
+    return Field(
+        ..., title=label, description=help, min_length=1, max_length=200, json_schema_extra=extra
+    )
+
+
 def bool_field(label: str, *, default: bool = False, help: str | None = None) -> Any:
     """A checkbox: always sent, so it has a default rather than being required."""
     return Field(default, title=label, description=help, json_schema_extra={"ui": "boolean"})
@@ -212,6 +223,8 @@ class FormField(BaseModel):
     required: bool
     help: str | None
     max_length: int | None
+    default: Any = None  # the value an empty optional field starts with (e.g. 30 days)
+    options: list[str] | None = None  # fixed choices of a "choice" field
 
 
 def form_fields(schema: type[BaseModel]) -> list[FormField]:
@@ -228,6 +241,8 @@ def form_fields(schema: type[BaseModel]) -> list[FormField]:
                 required=info.is_required(),
                 help=info.description,
                 max_length=max_length,
+                default=None if info.is_required() else info.get_default(call_default_factory=True),
+                options=extra.get("options"),
             )
         )
     return fields

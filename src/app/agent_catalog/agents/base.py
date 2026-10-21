@@ -1,4 +1,5 @@
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any, ClassVar, Literal
@@ -62,11 +63,17 @@ class AnalysisContext:
 
 @dataclass
 class Prefill:
-    """Input values taken from a data source record, plus the related records used."""
+    """Input values taken from a data source, plus what they came from (frozen into the run's
+    snapshot for the reviewer)."""
 
     values: dict[str, Any]
-    # Frozen into the run's snapshot for the reviewer, e.g. {"purchase_order": PurchaseOrder}
+    # Single related records, e.g. {"purchase_order": PurchaseOrder}
     related: dict[str, Record] = field(default_factory=dict)
+    # For a prefill from parameters (see BaseAgent.prefill_params): what it covers, e.g.
+    # "Next 30 days", the figures it derived, and the records behind each total
+    reference: str | None = None
+    summary: dict[str, Any] = field(default_factory=dict)
+    lines: dict[str, Sequence[Record]] = field(default_factory=dict)
 
 
 class BaseAgent:
@@ -107,6 +114,9 @@ class BaseAgent:
     bill_fields: ClassVar[tuple[str, str, str] | None] = None
     # Input field with the proposed expense account: prefills the account search for that bill
     bill_account_field: ClassVar[str | None] = None
+    # Parameters for a prefill computed from many records (e.g. a forecast horizon), instead of
+    # picking one record; implemented by prefill_from_data
+    prefill_params: ClassVar[type[BaseModel] | None] = None
 
     _required: ClassVar[tuple[str, ...]] = (
         "key",
@@ -159,6 +169,20 @@ class BaseAgent:
         `policy` is the agent's thresholds in force (e.g. expense limits per category).
         """
         raise NotImplementedError(f"{cls.__name__} can't be prefilled from a data source")
+
+    @classmethod
+    async def prefill_from_data(
+        cls, params: BaseModel, data: FinanceData, policy: PolicySettings | None = None
+    ) -> Prefill:
+        """Input values computed from the preparer's data for `prefill_params` (e.g. cash
+        position over a horizon). Sets only what the data supports."""
+        raise NotImplementedError(f"{cls.__name__} has no prefill from parameters")
+
+    @classmethod
+    async def prefill_options(cls, data: FinanceData) -> dict[str, list[str]]:
+        """Choices for prefill_params "choice" fields taken from the user's data (e.g. the
+        accounts and periods that have balances), by field name."""
+        return {}
 
     @classmethod
     def approval_amount(cls, data: BaseModel) -> Decimal | None:

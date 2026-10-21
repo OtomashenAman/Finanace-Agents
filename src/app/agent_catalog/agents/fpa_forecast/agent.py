@@ -9,18 +9,30 @@ from src.app.agent_catalog.agents.base import (
     BaseAgent,
     Calculation,
     Finding,
+    Prefill,
 )
 from src.app.agent_catalog.agents.checks import (
+    ZERO,
     evidence_check,
     has_severity,
     money,
     percent,
     ratio_pct,
 )
+from src.app.agent_catalog.agents.fields import PolicySettings
 from src.app.agent_catalog.agents.fpa_forecast import prompt
 from src.app.agent_catalog.agents.fpa_forecast.models import FpaForecastRun
-from src.app.agent_catalog.agents.fpa_forecast.schemas import FpaForecastInput, FpaForecastPolicy
+from src.app.agent_catalog.agents.fpa_forecast.schemas import (
+    METRICS,
+    WHOLE_COMPANY,
+    FpaForecastInput,
+    FpaForecastPolicy,
+    FpaPrefillParams,
+)
+from src.app.agent_catalog.agents.periods import months_of, period_options
 from src.app.agent_catalog.runs.models import FlagSeverity
+from src.app.data_sources.access import FinanceData
+from src.app.data_sources.records import PeriodResult, RecordType
 
 CENT = Decimal("0.01")
 
@@ -52,6 +64,77 @@ class FpaForecastAgent(BaseAgent):
     prompt_version = prompt.PROMPT_VERSION
     policy_schema = FpaForecastPolicy
     approval_amount_label = "Absolute variance"
+    prefill_params = FpaPrefillParams
+
+    @classmethod
+    async def prefill_options(cls, data: FinanceData) -> dict[str, list[str]]:
+        actuals = [
+            r
+            for r in await data.records(PeriodResult, RecordType.PERIOD_RESULT)
+            if r.basis == "actual"
+        ]
+        units = sorted({r.business_unit for r in actuals if r.business_unit}, key=str.lower)
+        return {
+            "business_unit": [WHOLE_COMPANY, *units],
+            "forecast_period": period_options({r.period for r in actuals}),
+        }
+
+    @classmethod
+    async def prefill_from_data(
+        cls, params: BaseModel, data: FinanceData, policy: PolicySettings | None = None
+    ) -> Prefill:
+        wanted = cast(FpaPrefillParams, params)
+        unit = None if wanted.business_unit == WHOLE_COMPANY else wanted.business_unit
+        field = METRICS[wanted.metric]
+        months = months_of(wanted.forecast_period) or []
+        results = [
+            r
+            for r in await data.records(PeriodResult, RecordType.PERIOD_RESULT)
+            if r.business_unit == unit and r.period in months
+        ]
+
+        def total(basis: str) -> tuple[Decimal | None, list[PeriodResult]]:
+            rows = [r for r in results if r.basis == basis]
+            if not months or {r.period for r in rows} != set(months):
+                return None, rows
+            return sum((getattr(r, field) or ZERO for r in rows), ZERO), rows
+
+        actual, actual_rows = total("actual")
+        budget, budget_rows = total("budget")
+        values: dict[str, object] = {
+            "business_unit": wanted.business_unit,
+            "forecast_period": wanted.forecast_period,
+            "actual_value": actual,
+            "budget_value": budget,
+        }
+        summary: dict[str, object] = {"metric": wanted.metric, "months": len(months)}
+        if actual is None:
+            summary["actual"] = f"Not every month of {wanted.forecast_period} is in the data"
+        if budget is None:
+            summary["budget"] = "No complete budget for this unit and period in the data"
+        return Prefill(
+            {k: v for k, v in values.items() if v is not None},
+            reference=f"{wanted.metric} · {wanted.business_unit} · {wanted.forecast_period}",
+            summary=summary,
+            lines={"actual_months": actual_rows, "budget_months": budget_rows},
+        )
+
+    @staticmethod
+    async def _budget_checks(ctx: AnalysisContext) -> list[Finding]:
+        """The preparer's data has actuals but no budget at all: the budget was typed in."""
+        if not await ctx.data.has(RecordType.PERIOD_RESULT):
+            return []
+        results = await ctx.data.records(PeriodResult, RecordType.PERIOD_RESULT)
+        if any(r.basis == "budget" for r in results):
+            return []
+        return [
+            Finding(
+                "BUDGET_NOT_IN_DATA",
+                FlagSeverity.WARNING,
+                "Your data source has no budget: confirm where the budget value comes from",
+                "budget_value",
+            )
+        ]
 
     @classmethod
     def approval_amount(cls, data: BaseModel) -> Decimal | None:
@@ -138,6 +221,7 @@ class FpaForecastAgent(BaseAgent):
                     "planning_assumptions",
                 )
             )
+        findings.extend(await cls._budget_checks(ctx))
         evidence = evidence_check(ctx, "actuals report or approved budget")
         if evidence is not None:
             findings.append(evidence)

@@ -78,6 +78,7 @@ _SYNONYMS: dict[str, tuple[str, ...]] = {
     "po_date": ("date", "podate", "orderdate", "txndate"),
     "number": ("number", "accountnumber", "accountno", "acctnum", "code", "glcode"),
     "account_type": ("type", "accounttype", "category"),
+    "current_balance": ("currentbalance", "closingbalance", "bankbalance", "balance"),
     # customers, invoices, payments
     "customer_name": ("customer", "customername", "client", "clientname", "billto"),
     "balance": ("balance", "openbalance", "balancedue", "amountdue", "outstanding", "openamount"),
@@ -104,6 +105,18 @@ _SYNONYMS: dict[str, tuple[str, ...]] = {
     "payment_type": ("paymenttype", "paymentmethod", "method"),
     "employee": ("employee", "employeename", "cardholder", "spender"),
     "has_receipt": ("receipt", "hasreceipt", "receiptattached", "receiptprovided"),
+    # month-end account balances (trial balance) and subledger totals
+    "account_name": ("account", "accountname", "glaccount", "name"),
+    "account_number": ("accountnumber", "accountno", "acctnum", "number", "code", "glcode"),
+    "period": ("period", "month", "closeperiod", "yearmonth", "periodend", "date"),
+    "ledger": ("ledger", "subledger"),
+    # profit and loss by month
+    "business_unit": ("businessunit", "unit", "class", "department", "segment", "bu"),
+    "basis": ("basis", "scenario", "version", "actualbudget"),
+    "revenue": ("revenue", "income", "sales", "totalincome", "netsales"),
+    "cogs": ("cogs", "costofsales", "costofgoodssold"),
+    "operating_expenses": ("operatingexpenses", "opex", "expenses", "totalexpenses"),
+    "operating_profit": ("operatingprofit", "operatingincome", "ebit", "netoperatingincome"),
 }
 
 _DATE_FORMATS = ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d-%b-%Y", "%d %b %Y", "%Y/%m/%d")

@@ -18,6 +18,27 @@ export function StatusPill({ source }: { source: DataSource }) {
   return <span className={cn("rounded px-2 py-0.5 text-xs font-medium whitespace-nowrap", tone)}>{label}</span>
 }
 
+/** Month-end trial balances and aging totals: fetched in the background after a sync */
+function HistoryLine({ source }: { source: DataSource }) {
+  if (source.history_status === "pending") {
+    return (
+      <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+        <LoaderCircle className="size-3 animate-spin" aria-hidden />
+        Fetching month-end balances (24 months)…
+      </p>
+    )
+  }
+  if (source.history_status === "error") {
+    return <p className="mt-1 text-xs text-destructive">{source.history_error}</p>
+  }
+  return (
+    <p className="mt-1 text-xs text-muted-foreground">
+      Month-end balances: {source.history_synced_at ? formatDateTime(source.history_synced_at) : "—"}
+      {source.books_closed_through && ` · books closed through ${source.books_closed_through}`}
+    </p>
+  )
+}
+
 function RenameForm({ source, onDone }: { source: DataSource; onDone: () => void }) {
   const rename = useRenameSource()
   const [name, setName] = useState(source.name)
@@ -129,6 +150,7 @@ export function SourceCard({ source }: { source: DataSource }) {
       <p className="mt-3 text-xs text-muted-foreground">
         {isQuickBooks ? "Last synced" : "Imported"}: {source.last_synced_at ? formatDateTime(source.last_synced_at) : "never"}
       </p>
+      {isQuickBooks && source.history_status && <HistoryLine source={source} />}
 
       <div className="mt-auto flex flex-wrap gap-2 pt-4">
         {isQuickBooks && !needsAuth && (

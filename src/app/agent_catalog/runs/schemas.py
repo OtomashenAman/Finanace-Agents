@@ -37,6 +37,9 @@ class FormSpec(BaseModel):
     agent_key: str
     fields: list[FormField]
     controls: list[str]
+    # Parameters of a prefill computed from the preparer's data (e.g. a forecast horizon);
+    # empty when the agent prefills from one picked record, or not at all
+    prefill_fields: list[FormField] = []
 
 
 class RunInputUpdate(BaseModel):
@@ -130,6 +133,13 @@ class SourceLink(BaseModel):
 
     source_id: uuid.UUID
     record_id: str = Field(min_length=1, max_length=100, description="The record's external_id")
+
+
+class DataPrefill(BaseModel):
+    """Prefill the run from your data source for these parameters (agent's prefill_fields)."""
+
+    source_id: uuid.UUID
+    params: dict[str, Any] = Field(default_factory=dict)
 
 
 class WriteBackRequest(BaseModel):

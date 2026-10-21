@@ -16,7 +16,12 @@ export const dataSourceKeys = {
 const invalidates = [DATA_SOURCES_TAG] as const
 
 export function useDataSources() {
-  return useQuery({ queryKey: dataSourceKeys.list(), queryFn: dataSourcesApi.list })
+  return useQuery({
+    queryKey: dataSourceKeys.list(),
+    queryFn: dataSourcesApi.list,
+    // Month-end history syncs in the background: check back until it's done
+    refetchInterval: (query) => (query.state.data?.some((s) => s.history_status === "pending") ? 5000 : false),
+  })
 }
 
 export function useRecordTypes() {

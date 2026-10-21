@@ -32,6 +32,14 @@ class SourceStatus(StrEnum):
     READY = "ready"  # upload imported
 
 
+class HistoryStatus(StrEnum):
+    """Month-end history (trial balances, aging totals): fetched in the background."""
+
+    PENDING = "pending"
+    READY = "ready"
+    ERROR = "error"
+
+
 class IntegrationEnvironment(StrEnum):
     SANDBOX = "sandbox"
     PRODUCTION = "production"
@@ -50,6 +58,7 @@ class DataSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         enum_check("kind", SourceKind),
         enum_check("status", SourceStatus),
         enum_check("environment", IntegrationEnvironment),
+        enum_check("history_status", HistoryStatus),
     )
     __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012 - SQLAlchemy class config
 
@@ -76,6 +85,11 @@ class DataSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # Uploads: what was imported (the file itself is never stored)
     filename: Mapped[str | None] = mapped_column(String(255))
     sha256: Mapped[str | None] = mapped_column(String(64))
+    # QuickBooks: month-end history, synced by a background job after each sync
+    history_status: Mapped[HistoryStatus | None] = mapped_column(string_enum(HistoryStatus, 16))
+    history_synced_at: Mapped[datetime | None]
+    history_error: Mapped[str | None] = mapped_column(String(500))
+    books_closed_through: Mapped[date | None]  # the company's books closing date
 
 
 class FinanceRecord(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):

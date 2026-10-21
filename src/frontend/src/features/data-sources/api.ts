@@ -11,6 +11,9 @@ export type RecordType =
   | "invoice"
   | "payment"
   | "expense"
+  | "account_balance"
+  | "subledger_total"
+  | "period_result"
 export type IntegrationEnvironment = "sandbox" | "production"
 
 export interface DataSource {
@@ -26,6 +29,12 @@ export interface DataSource {
   last_error: string | null
   record_counts: Partial<Record<RecordType, number>>
   filename: string | null
+  /** QuickBooks month-end history (trial balances, aging totals), fetched in the background */
+  history_status: "pending" | "ready" | "error" | null
+  history_synced_at: string | null
+  history_error: string | null
+  /** The company's books closing date */
+  books_closed_through: string | null
   created_at: string
   updated_at: string
 }

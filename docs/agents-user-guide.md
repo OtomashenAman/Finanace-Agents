@@ -91,6 +91,25 @@ approval* and the input is locked.
 Every step is recorded in the **Audit Trail**. On approval the app saves a fingerprint
 (hash) of exactly what was approved. **Evidence pack** downloads the whole run as a ZIP.
 
+## Where the data comes from
+
+A data source is your QuickBooks company (Data Sources → Connect QuickBooks) or files you
+upload. A QuickBooks sync brings two kinds of data:
+
+| Kind | What | When |
+|---|---|---|
+| **Records** | vendors, bills, purchase orders, accounts (with bank balances), customers, invoices, payments, expenses | right away, when you sync |
+| **Month-end history** | for each of the last **24 complete months**: the trial balance, the AR and AP aging totals, and the profit and loss (by class), plus budgets and the books closing date | in the background after each sync (about 100 QuickBooks reports); the source card shows *Fetching month-end balances…* until it's done |
+
+Two ways to prefill a run:
+- **Pick one record** (AP Invoice: a bill; Expense Audit: an expense; Cash Application: a
+  payment; AR Collections: a customer)
+- **Enter parameters** and let the agent add up many records (Treasury: a horizon; Financial
+  Close: an account and month; Board Reporting: a period; FP&A: a unit, period and metric)
+
+Either way, the run keeps a **snapshot** of what was used (records, totals, the records behind
+each total), so the reviewer sees exactly that, even if the data changes later.
+
 ## How an agent processes your data
 
 What happens when you click **Validate & Analyze**, in order:
@@ -119,8 +138,8 @@ What happens when you click **Validate & Analyze**, in order:
    Some checks also read context: how many documents are attached (missing evidence), your
    earlier runs (duplicate checks look only at **your own** runs that were analyzed, ignoring
    drafts and failed ones, and compare text without case), and for the agents that read your
-   data source (AP Invoice, Expense Audit, Cash Application, AR Collections) the matching
-   records in it.
+   data source (AP Invoice, Expense Audit, Cash Application, AR Collections, Treasury,
+   Financial Close, Board Reporting, FP&A) the matching records in it.
 4. **Save.** Findings, calculations and the typed results are stored (each agent has its own
    table), the run becomes *Needs human review*, and an audit event is recorded.
 5. **AI explanation (background worker).** Claude receives only: the validated input, the
@@ -367,6 +386,17 @@ Reconciles a GL account to its subledger at month end.
 | Known reconciling items | Differences already identified (e.g. in transit) | Money, optional, can be negative |
 | Proposed adjustment rationale | Why the difference exists and how to fix it | Long text, optional |
 
+**Prefill from your data:** choose a **GL account** and a **close period** (both lists come
+from your month-end history). Then:
+- **GL balance** = the account's trial balance at that month end. Accounts Payable is shown
+  **credit-positive** (the trial balance has it as a negative debit) so it compares with the
+  AP aging total; the snapshot says which sign is used.
+- **Subledger balance** = the AR aging total (Accounts Receivable) or the AP aging total
+  (Accounts Payable) at that month end. Other accounts have no subledger in QuickBooks: you
+  enter it.
+
+Materiality, reconciling items and rationale stay for you.
+
 **How it works:** variance = GL − subledger; unexplained difference = variance − known
 reconciling items (empty counts as 0). Then, in order:
 
@@ -375,8 +405,9 @@ reconciling items (empty counts as 0). Then, in order:
 | 1 | Duplicate | Earlier run with the same GL account **and** close period | 🔴 `DUPLICATE_RECONCILIATION` / ✅ `DUPLICATE_CHECK_CLEAR` |
 | 2 | Balance | Unexplained difference = 0 (fully agrees, or the reconciling items explain it) | ✅ `BALANCE_MATCH` |
 | | | Otherwise | ⚠️ `BALANCE_MISMATCH`, then 🔴 `MATERIAL_VARIANCE` if \|unexplained\| > materiality, else ✅ `WITHIN_MATERIALITY`; ⚠️ `MISSING_RATIONALE` if no rationale |
-| 3 | Evidence | No document attached | ⚠️ `MISSING_EVIDENCE` |
-| 4 | Separation | Always: a different controller must approve | ℹ️ `PREPARER_REVIEWER_SEPARATION` |
+| 3 | Period | Only when QuickBooks has a books closing date: the period ends after it / on or before it | ⚠️ `PERIOD_NOT_CLOSED` / ✅ `PERIOD_CLOSED` |
+| 4 | Evidence | No document attached | ⚠️ `MISSING_EVIDENCE` |
+| 5 | Separation | Always: a different controller must approve | ℹ️ `PREPARER_REVIEWER_SEPARATION` |
 
 **Calculations:** GL, subledger, GL − subledger, reconciling items, unexplained difference,
 materiality.
@@ -440,6 +471,18 @@ Compares actual against budget and runs a simple what-if scenario.
 | Scenario cost change (%) | Increase in cost, as % of the actual | Percent, −100 to 1000 |
 | Planning assumptions | Why these scenario numbers | Long text, optional |
 
+**Prefill from your data:** choose a **business unit** (*Whole company* or a QuickBooks class),
+a **forecast period** (month, quarter or year) and a **metric** (*Revenue*, *Operating
+profit* or *Operating expenses*). Then:
+- **Actual value** = the metric from the monthly profit and loss of that unit, added up over
+  the period's months
+- **Budget value** = the same metric from the QuickBooks budget (income, cost of goods sold
+  and expense accounts; inactive budgets ignored)
+
+Business unit and period are filled in too. Budgets exist only in QuickBooks Plus and
+Advanced; without one, the budget stays for you to enter. Scenario % and assumptions stay for
+you.
+
 **How it works:**
 
 1. **Variance** = actual − budget; **variance %** = variance ÷ \|budget\| (empty when the
@@ -460,6 +503,7 @@ Compares actual against budget and runs a simple what-if scenario.
    | Materiality | Budget 0 / \|variance %\| > materiality % / otherwise | ⚠️ `NO_BUDGET` / 🔴 `VARIANCE_MATERIAL` / ✅ `VARIANCE_WITHIN_THRESHOLD` |
    | Scenario drivers | Each driver with \|%\| > the scenario review limit | ⚠️ `UNUSUAL_SCENARIO` (one per driver) |
    | Assumptions | Filled in / empty | ℹ️ `ASSUMPTION_APPROVAL` / ⚠️ `MISSING_ASSUMPTIONS` |
+   | Budget data | Your data source has P&L figures but no budget at all | ⚠️ `BUDGET_NOT_IN_DATA` |
    | Evidence | No document attached | ⚠️ `MISSING_EVIDENCE` |
    | Version | Always: the drivers are recorded with the run | ℹ️ `SCENARIO_VERSION` |
 
@@ -487,6 +531,21 @@ Projects cash at the end of a period and spots a shortfall before any money move
 
 The entity is the run's legal entity, so it isn't a form field.
 
+**Prefill from your data:** instead of picking one record, enter a **forecast horizon** (days,
+default 30) and click *Prefill*. From your data source (QuickBooks or uploads), as of today:
+
+| Field | Comes from |
+|---|---|
+| Opening cash | the current balance of every **Bank** account |
+| Expected inflows | open customer invoices due between today and the end of the horizon (and those with no due date) |
+| Expected outflows | open bills due by the end of the horizon, **including overdue ones** (they still have to be paid) |
+| Forecast horizon | the value you entered |
+
+Invoices that are **already overdue are not counted** as inflows: collection is uncertain.
+Their total is in the snapshot and raised as a warning. The snapshot keeps the parameters, a
+summary, and the bank accounts, invoices and bills behind each total (up to 50 of each), so
+the reviewer sees exactly what was counted. Currency, buffer and funding options stay for you.
+
 **How it works:** closing cash = opening + inflows − outflows; funding gap = buffer − closing
 cash (0 when the buffer holds). Then, in order:
 
@@ -496,8 +555,9 @@ cash (0 when the buffer holds). Then, in order:
 | 2 | Buffer | Funding gap > 0 | 🔴 `LIQUIDITY_BUFFER` / ✅ `LIQUIDITY_BUFFER_MET` (with headroom) |
 | | | With a gap: gap > dual authorization amount | ⚠️ `DUAL_AUTHORIZATION` |
 | | | With a gap: no funding options entered | ⚠️ `NO_FUNDING_OPTIONS` |
-| 3 | Large outflows | Outflows > large outflow limit (off by default) | ⚠️ `LARGE_OUTFLOWS` |
-| 4 | Evidence | No document attached | ⚠️ `MISSING_EVIDENCE` |
+| 3 | Overdue receivables | Only with invoices in your data source: open invoices already past due | ⚠️ `OVERDUE_RECEIVABLES` (not counted in prefilled inflows) |
+| 4 | Large outflows | Outflows > large outflow limit (off by default) | ⚠️ `LARGE_OUTFLOWS` |
+| 5 | Evidence | No document attached | ⚠️ `MISSING_EVIDENCE` |
 
 **Calculations:** opening cash, inflows, outflows, projected closing cash, buffer, funding gap,
 horizon.
@@ -561,6 +621,17 @@ Checks the headline figures for a board pack and drafts a factual summary.
 | Source dataset / approval ID | Where the approved figures come from | Text, optional, but a **high** flag if empty |
 | Known disclosures | Disclosures and reporting notes | Long text, optional |
 
+**Prefill from your data:** choose a **reporting period**: a month (`2026-07`), a quarter
+(`2026-Q2`) or a year (`2026`). Only periods whose every month is in the data are offered.
+From the company's monthly profit and loss:
+- **Reported revenue** and **operating profit** = the period's months added up
+- **Prior period revenue** = the **same period last year** (2026-Q2 → 2025-Q2), only if all
+  its months are in the data
+- **Source dataset / approval ID** = where it came from, e.g. *QuickBooks Acme Ltd: P&L
+  2026-Q2, data as of 2026-10-21 08:43 UTC*
+
+A figure is left empty rather than added up from part of a period; the snapshot says why.
+
 **How it works:** revenue change = reported − prior; growth % = change ÷ prior (empty if prior
 is 0); operating margin % = profit ÷ revenue (empty if revenue is 0). Then, in order:
 
@@ -571,9 +642,10 @@ is 0); operating margin % = profit ÷ revenue (empty if revenue is 0). Then, in 
 | | | Prior period revenue = 0 | ⚠️ `NO_PRIOR_PERIOD` |
 | | | \|growth %\| > revenue change review % | ⚠️ `UNUSUAL_REVENUE_CHANGE` |
 | | | None of the above | ✅ `NUMBERS_CONSISTENT` |
-| 3 | Disclosures | None recorded | ⚠️ `NO_DISCLOSURES_RECORDED` |
-| 4 | Evidence | No document attached | ⚠️ `MISSING_EVIDENCE` |
-| 5 | Sign-off | Always | ℹ️ `CFO_SIGN_OFF` |
+| 3 | Period | Only when QuickBooks has a books closing date and the period is a month, quarter or year: it ends after the closing date / on or before it | ⚠️ `PERIOD_NOT_CLOSED` / ✅ `PERIOD_CLOSED` |
+| 4 | Disclosures | None recorded | ⚠️ `NO_DISCLOSURES_RECORDED` |
+| 5 | Evidence | No document attached | ⚠️ `MISSING_EVIDENCE` |
+| 6 | Sign-off | Always | ℹ️ `CFO_SIGN_OFF` |
 
 **Calculations:** reported revenue, prior revenue, "Revenue increased / decreased by", growth
 %, operating profit, operating margin %.

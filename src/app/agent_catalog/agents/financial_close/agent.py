@@ -9,6 +9,7 @@ from src.app.agent_catalog.agents.base import (
     BaseAgent,
     Calculation,
     Finding,
+    Prefill,
 )
 from src.app.agent_catalog.agents.checks import (
     ZERO,
@@ -18,10 +19,25 @@ from src.app.agent_catalog.agents.checks import (
     missing,
     money,
 )
+from src.app.agent_catalog.agents.fields import PolicySettings
 from src.app.agent_catalog.agents.financial_close import prompt
 from src.app.agent_catalog.agents.financial_close.models import FinancialCloseRun
-from src.app.agent_catalog.agents.financial_close.schemas import FinancialCloseInput
+from src.app.agent_catalog.agents.financial_close.schemas import (
+    FinancialCloseInput,
+    FinancialClosePrefillParams,
+)
 from src.app.agent_catalog.runs.models import FlagSeverity
+from src.app.data_sources.access import FinanceData
+from src.app.data_sources.records import (
+    AccountBalance,
+    Record,
+    RecordType,
+    SubledgerTotal,
+    month_end,
+)
+
+# Control accounts whose subledger total is in the data (AR / AP aging), by account type
+LEDGERS = {"accounts receivable": "AR", "accounts payable": "AP"}
 
 
 class FinancialCloseAgent(BaseAgent):
@@ -46,6 +62,89 @@ class FinancialCloseAgent(BaseAgent):
     narrative_guidance = prompt.GUIDANCE
     prompt_version = prompt.PROMPT_VERSION
     approval_amount_label = "Absolute variance"
+    prefill_params = FinancialClosePrefillParams
+
+    @classmethod
+    async def prefill_options(cls, data: FinanceData) -> dict[str, list[str]]:
+        balances = await data.records(AccountBalance, RecordType.ACCOUNT_BALANCE)
+        return {
+            "gl_account": sorted({b.account_name for b in balances}, key=str.lower),
+            "close_period": sorted({b.period for b in balances}, reverse=True),
+        }
+
+    @classmethod
+    async def prefill_from_data(
+        cls, params: BaseModel, data: FinanceData, policy: PolicySettings | None = None
+    ) -> Prefill:
+        wanted = cast(FinancialClosePrefillParams, params)
+        balances = await data.records(AccountBalance, RecordType.ACCOUNT_BALANCE)
+        found = next(
+            (
+                b
+                for b in balances
+                if b.period == wanted.close_period and b.matches(wanted.gl_account)
+            ),
+            None,
+        )
+        values: dict[str, object] = {
+            "gl_account": found.account_name if found else wanted.gl_account,
+            "close_period": wanted.close_period,
+        }
+        summary: dict[str, object] = {"books_closed_through": await data.books_closed_through()}
+        related: dict[str, Record] = {}
+        if found is None:
+            summary["gl_balance"] = "No month-end balance for this account and period"
+            return Prefill(values, related, f"{wanted.gl_account} · {wanted.close_period}", summary)
+
+        ledger = LEDGERS.get((found.account_type or "").lower())
+        # The trial balance is debit - credit; a payables control account is shown credit-positive
+        # so it compares with the AP aging total
+        credit_positive = ledger == "AP"
+        values["gl_balance"] = -found.balance if credit_positive else found.balance
+        related["account_balance"] = found
+        summary["account_type"] = found.account_type
+        summary["gl_balance_sign"] = (
+            "credit balance shown positive" if credit_positive else "debit balance shown positive"
+        )
+        if ledger is None:
+            summary["subledger"] = "Not in the data for this account type: enter it"
+        else:
+            totals = await data.records(SubledgerTotal, RecordType.SUBLEDGER_TOTAL)
+            sub = next(
+                (t for t in totals if t.ledger == ledger and t.period == wanted.close_period), None
+            )
+            if sub is not None:
+                values["subledger_balance"] = sub.total
+                related["subledger_total"] = sub
+                summary["subledger"] = f"{ledger} aging total at {month_end(sub.period)}"
+            else:
+                summary["subledger"] = f"No {ledger} aging total for {wanted.close_period}"
+        return Prefill(values, related, f"{found.account_name} · {wanted.close_period}", summary)
+
+    @staticmethod
+    async def _period_checks(close: FinancialCloseInput, ctx: AnalysisContext) -> list[Finding]:
+        """Against the books closing date of the preparer's QuickBooks, when known."""
+        closed = await ctx.data.books_closed_through()
+        if closed is None:
+            return []
+        if month_end(close.close_period) > closed:
+            return [
+                Finding(
+                    "PERIOD_NOT_CLOSED",
+                    FlagSeverity.WARNING,
+                    f"Books are closed through {closed:%d %b %Y}: {close.close_period} is still "
+                    "open, so balances can still change",
+                    "close_period",
+                )
+            ]
+        return [
+            Finding(
+                "PERIOD_CLOSED",
+                FlagSeverity.PASS,
+                f"{close.close_period} is closed in the books (closed through {closed:%d %b %Y})",
+                "close_period",
+            )
+        ]
 
     @classmethod
     def approval_amount(cls, data: BaseModel) -> Decimal | None:
@@ -123,6 +222,7 @@ class FinancialCloseAgent(BaseAgent):
             if rationale is not None:
                 findings.append(rationale)
 
+        findings.extend(await cls._period_checks(close, ctx))
         evidence = evidence_check(ctx, "GL detail, subledger report or reconciliation")
         if evidence is not None:
             findings.append(evidence)

@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Header, Response, UploadFile, status
 from src.app.agent_catalog.runs import service
 from src.app.agent_catalog.runs.exceptions import DocumentTooLargeError
 from src.app.agent_catalog.runs.schemas import (
+    DataPrefill,
     DocumentText,
     FormSpec,
     ReviewCreate,
@@ -37,6 +38,14 @@ _ERRORS: dict[int | str, dict[str, Any]] = {
 async def get_form(key: str, session: SessionDep, user: CurrentUser) -> FormSpec:
     """Fields of the agent's input form (drives the generated frontend form)."""
     return await service.get_form(session, user, key)
+
+
+@router.get("/prefill-options", response_model=dict[str, list[str]], responses=_ERRORS)
+async def get_prefill_options(
+    key: str, source_id: uuid.UUID, session: SessionDep, user: CurrentUser
+) -> dict[str, list[str]]:
+    """Choices for the prefill parameters, from one of your data sources (e.g. its accounts)."""
+    return await service.get_prefill_options(session, user, key, source_id)
 
 
 @router.get("/runs", response_model=list[RunSummary], responses=_ERRORS)
@@ -188,6 +197,20 @@ async def link_source(
 ) -> RunDetail:
     """Prefill the input from a record of one of your data sources (preparer only)."""
     return await service.link_source(session, user, key, run_id, body, ctx)
+
+
+@router.post("/runs/{run_id}/prefill", response_model=RunDetail, responses=_ERRORS)
+async def prefill_from_data(
+    key: str,
+    run_id: uuid.UUID,
+    body: DataPrefill,
+    session: SessionDep,
+    user: CurrentUser,
+    ctx: RequestContextDep,
+) -> RunDetail:
+    """Prefill the input from figures computed over one of your data sources for the agent's
+    parameters, e.g. a forecast horizon (preparer only)."""
+    return await service.prefill_from_data(session, user, key, run_id, body, ctx)
 
 
 @router.delete("/runs/{run_id}/source", response_model=RunDetail, responses=_ERRORS)

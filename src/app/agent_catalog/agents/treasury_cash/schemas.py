@@ -1,5 +1,7 @@
 from decimal import Decimal
 
+from pydantic import Field
+
 from src.app.agent_catalog.agents.fields import (
     AgentInput,
     PolicySettings,
@@ -23,6 +25,19 @@ class TreasuryCashInput(AgentInput):
     permitted_funding_options: str | None = textarea_field(
         "Permitted funding options",
         help="e.g. revolver draw, intercompany loan: what may cover a shortfall",
+    )
+
+
+class TreasuryPrefillParams(AgentInput):
+    """What to compute from the preparer's data: cash position over the coming days."""
+
+    forecast_horizon_days: int = Field(
+        30,
+        ge=1,
+        le=730,
+        title="Forecast horizon (days)",
+        description="Open invoices and bills due within this many days from today are counted",
+        json_schema_extra={"ui": "number"},
     )
 
 

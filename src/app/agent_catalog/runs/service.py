@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 from sqlalchemy import Select, case, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
@@ -54,6 +54,7 @@ from src.app.agent_catalog.runs.models import (
 from src.app.agent_catalog.runs.schemas import (
     BillPreview,
     CalculationOut,
+    DataPrefill,
     DocumentOut,
     DocumentText,
     FieldError,
@@ -213,11 +214,24 @@ async def _reset_analysis(session: AsyncSession, run: AgentRun) -> None:
 
 async def get_form(session: AsyncSession, user: User, key: str) -> FormSpec:
     access = await _access(session, user, key)
+    params = access.definition.prefill_params
     return FormSpec(
         agent_key=key,
         fields=form_fields(access.input_schema),
         controls=list(access.definition.controls),
+        prefill_fields=form_fields(params) if params else [],
     )
+
+
+async def get_prefill_options(
+    session: AsyncSession, user: User, key: str, source_id: uuid.UUID
+) -> dict[str, list[str]]:
+    """Choices for the agent's prefill parameters from one of the user's sources."""
+    access = await _access(session, user, key)
+    if access.definition.prefill_params is None:
+        return {}
+    source = await data_sources.owned_source(session, user, source_id)
+    return await access.definition.prefill_options(FinanceData(session, user.id, source.id))
 
 
 async def _people(session: AsyncSession, ids: set[uuid.UUID]) -> dict[uuid.UUID, Person]:
@@ -828,32 +842,13 @@ async def link_source(
         FinanceData(session, user.id, source.id),
         policy.values if access.definition.policy_schema else None,
     )
-    values = {**_input_values(access, detail), **prefill.values}
-    try:
-        draft = draft_schema(access.input_schema).model_validate(values)
-    except ValidationError as exc:
-        raise RequestValidationError(
-            [{**e, "loc": ("body", "values", *e["loc"])} for e in exc.errors(include_url=False)]
-        ) from exc
-    for name, value in draft.model_dump().items():
-        setattr(detail, name, value)
+    await _apply_prefill(access, detail, prefill.values)
 
     records = {
         record_type.value: record.model_dump(mode="json"),
         **{name: r.model_dump(mode="json") for name, r in prefill.related.items()},
     }
-    snapshot = await session.get(RunSourceSnapshot, run.id)
-    if snapshot is None:
-        snapshot = RunSourceSnapshot(run_id=run.id)
-        session.add(snapshot)
-    snapshot.source_id = source.id
-    snapshot.source_kind = source.kind.value
-    snapshot.source_name = source.name
-    snapshot.record_type = record_type.value
-    snapshot.record_reference = record.reference
-    snapshot.records = records
-    snapshot.source_synced_at = source.last_synced_at
-    snapshot.created_at = utcnow()
+    await _save_snapshot(session, run, source, record_type.value, record.reference, records)
 
     if run.status != RunStatus.DRAFT:
         await _reset_analysis(session, run)
@@ -865,6 +860,112 @@ async def link_source(
         run=run.reference,
         source_id=str(source.id),
         record=f"{record_type.value}:{record.external_id}",
+    )
+    await session.commit()
+    return await _detail(session, access, run, detail)
+
+
+async def _apply_prefill(
+    access: AgentAccess, detail: AgentRunDetail, values: dict[str, Any]
+) -> None:
+    """Merge prefilled values into the input (draft rules: the rest may stay empty)."""
+    merged = {**_input_values(access, detail), **values}
+    try:
+        draft = draft_schema(access.input_schema).model_validate(merged)
+    except ValidationError as exc:
+        raise RequestValidationError(
+            [{**e, "loc": ("body", "values", *e["loc"])} for e in exc.errors(include_url=False)]
+        ) from exc
+    for name, value in draft.model_dump().items():
+        setattr(detail, name, value)
+
+
+async def _save_snapshot(
+    session: AsyncSession,
+    run: AgentRun,
+    source: DataSource,
+    record_type: str,
+    reference: str,
+    records: dict[str, Any],
+) -> None:
+    snapshot = await session.get(RunSourceSnapshot, run.id)
+    if snapshot is None:
+        snapshot = RunSourceSnapshot(run_id=run.id)
+        session.add(snapshot)
+    snapshot.source_id = source.id
+    snapshot.source_kind = source.kind.value
+    snapshot.source_name = source.name
+    snapshot.record_type = record_type
+    snapshot.record_reference = reference[:200]
+    snapshot.records = records
+    snapshot.source_synced_at = source.last_synced_at
+    snapshot.created_at = utcnow()
+
+
+# How many records behind each total the snapshot keeps (the totals use all of them)
+MAX_SNAPSHOT_LINES = 50
+_JSON = TypeAdapter(dict[str, Any])
+
+
+async def prefill_from_data(
+    session: AsyncSession,
+    user: User,
+    key: str,
+    run_id: uuid.UUID,
+    body: DataPrefill,
+    ctx: RequestContext,
+) -> RunDetail:
+    """Prefill the input from figures computed over the preparer's data source for the agent's
+    parameters (e.g. cash position over a horizon), and freeze them, with the records behind
+    each total, in a snapshot for the reviewer."""
+    access = await _access(session, user, key)
+    run, detail = await _load(session, access, run_id, lock=True)
+    _require_owner(run, user)
+    ensure_allowed(run.status, RunAction.EDIT)
+    params_schema = access.definition.prefill_params
+    if params_schema is None:
+        raise WorkspaceUnavailableError("This agent can't be prefilled from parameters.")
+    try:
+        params = params_schema.model_validate(body.params)
+    except ValidationError as exc:
+        raise RequestValidationError(
+            [{**e, "loc": ("body", "params", *e["loc"])} for e in exc.errors(include_url=False)]
+        ) from exc
+
+    source = await data_sources.owned_source(session, user, body.source_id)
+    policy = await governance.policy_in_force(session, access.definition)
+    prefill = await access.definition.prefill_from_data(
+        params,
+        FinanceData(session, user.id, source.id),
+        policy.values if access.definition.policy_schema else None,
+    )
+    await _apply_prefill(access, detail, prefill.values)
+
+    summary = dict(prefill.summary)
+    lines: dict[str, Any] = {}
+    for name, records in prefill.lines.items():
+        lines[name] = [r.model_dump(mode="json") for r in records[:MAX_SNAPSHOT_LINES]]
+        if len(records) > MAX_SNAPSHOT_LINES:
+            summary[f"{name}_listed"] = f"first {MAX_SNAPSHOT_LINES} of {len(records)}"
+    snapshot_records = {
+        "parameters": params.model_dump(mode="json"),
+        "summary": _JSON.dump_python(summary, mode="json"),
+        **{name: r.model_dump(mode="json") for name, r in prefill.related.items()},
+        **lines,
+    }
+    reference = prefill.reference or "From your data"
+    await _save_snapshot(session, run, source, "data", reference, snapshot_records)
+
+    if run.status != RunStatus.DRAFT:
+        await _reset_analysis(session, run)
+    record_event(
+        session,
+        "run.source_prefilled",
+        ctx,
+        actor_id=user.id,
+        run=run.reference,
+        source_id=str(source.id),
+        params=params.model_dump(mode="json"),
     )
     await session.commit()
     return await _detail(session, access, run, detail)

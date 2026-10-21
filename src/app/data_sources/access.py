@@ -1,6 +1,7 @@
 """Read-only finance data for agents, always scoped to one user's own sources."""
 
 import uuid
+from datetime import date
 from typing import TypeVar, cast
 
 from sqlalchemy import Select, case, func, select
@@ -79,3 +80,20 @@ class FinanceData:
         records = [to_record(row) for row in rows]
         assert all(isinstance(r, model) for r in records)  # noqa: S101 - record_type selects it
         return cast(list[R], records)
+
+    async def books_closed_through(self) -> date | None:
+        """The books closing date of the preferred source (QuickBooks only; uploads have none)."""
+        preferred = case((DataSource.id == self.primary_source_id, 0), else_=1)
+        closed: date | None = await self._session.scalar(
+            select(DataSource.books_closed_through)
+            .where(DataSource.owner_id == self.owner_id)
+            .order_by(preferred, DataSource.last_synced_at.desc().nulls_last())
+            .limit(1)
+        )
+        return closed
+
+    async def primary_source(self) -> DataSource | None:
+        """The source the run is being prefilled from, if any."""
+        if self.primary_source_id is None:
+            return None
+        return await self._session.get(DataSource, self.primary_source_id)

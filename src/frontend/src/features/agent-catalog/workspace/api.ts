@@ -10,7 +10,15 @@ export type RunStatus =
   | "approved"
   | "rejected"
 
-export type FieldKind = "text" | "textarea" | "money" | "number" | "percent" | "boolean" | "money_map"
+export type FieldKind =
+  | "text"
+  | "textarea"
+  | "money"
+  | "number"
+  | "percent"
+  | "boolean"
+  | "money_map"
+  | "choice"
 export type FieldValue = string | number | boolean | null
 export type ReviewDecision = "approved" | "rejected" | "changes_requested"
 export type FlagSeverity = "pass" | "info" | "warning" | "high"
@@ -22,12 +30,18 @@ export interface FormField {
   required: boolean
   help: string | null
   max_length: number | null
+  /** The value an empty optional field starts with (e.g. a 30-day horizon) */
+  default?: FieldValue
+  /** Fixed choices of a "choice" field; without them they come from your data (prefillOptions) */
+  options?: string[] | null
 }
 
 export interface FormSpec {
   agent_key: string
   fields: FormField[]
   controls: string[]
+  /** Parameters of a prefill computed from your data (e.g. a forecast horizon); empty if none */
+  prefill_fields: FormField[]
 }
 
 export interface Person {
@@ -124,7 +138,9 @@ export interface RunSource {
   source_name: string
   record_type: string
   record_reference: string
-  records: Record<string, Record<string, unknown>>
+  /** Picked record(s) as objects; for a prefill from parameters also "parameters", "summary"
+   *  and lists of the records behind each total */
+  records: Record<string, Record<string, unknown> | Record<string, unknown>[]>
   source_synced_at: string | null
   captured_at: string
 }
@@ -241,6 +257,10 @@ export const runsApi = {
       json: { source_id: sourceId, record_id: recordId },
     }),
   unlinkSource: (key: string, id: string) => apiRequest<RunDetail>(`${run(key, id)}/source`, { method: "DELETE" }),
+  prefillOptions: (key: string, sourceId: string) =>
+    apiRequest<Record<string, string[]>>(`${base(key)}/prefill-options?source_id=${encodeURIComponent(sourceId)}`),
+  prefillFromData: (key: string, id: string, sourceId: string, params: Record<string, FieldValue>) =>
+    apiRequest<RunDetail>(`${run(key, id)}/prefill`, { method: "POST", json: { source_id: sourceId, params } }),
   writeBack: (key: string, id: string, target?: WriteBackTarget) =>
     apiRequest<RunDetail>(`${run(key, id)}/write-back`, { method: "POST", json: target }),
   evidencePack: (key: string, id: string) => apiDownload(`${run(key, id)}/evidence-pack`, "evidence.zip"),

@@ -9,7 +9,7 @@ import hashlib
 import secrets
 import uuid
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import PurePath
 from typing import Any
@@ -25,6 +25,7 @@ from src.app.common.clock import utcnow
 from src.app.common.context import RequestContext
 from src.app.common.text_extraction.base import ExtractionError
 from src.app.core.config import get_settings
+from src.app.core.llm.factory import get_llm_provider
 from src.app.data_sources import crypto
 from src.app.data_sources import uploads as upload_parser
 from src.app.data_sources.access import to_record
@@ -39,6 +40,7 @@ from src.app.data_sources.exceptions import (
 from src.app.data_sources.models import (
     DataSource,
     FinanceRecord,
+    HistoryStatus,
     IntegrationEnvironment,
     SourceKind,
     SourceStatus,
@@ -59,6 +61,8 @@ from src.app.data_sources.schemas import (
     UploadPreview,
     UploadResult,
 )
+from src.app.jobs import queue as jobs
+from src.app.jobs.queue import JobContext
 
 STATE_PURPOSE = "quickbooks_oauth"
 STATE_TTL = timedelta(minutes=15)
@@ -174,7 +178,12 @@ async def delete_source(
 async def _replace_records(
     session: AsyncSession, source: DataSource, records: dict[RecordType, list[Record]]
 ) -> None:
-    await session.execute(delete(FinanceRecord).where(FinanceRecord.source_id == source.id))
+    """Replace the source's records of the given types (other types are kept)."""
+    await session.execute(
+        delete(FinanceRecord).where(
+            FinanceRecord.source_id == source.id, FinanceRecord.record_type.in_(list(records))
+        )
+    )
     for record_type, items in records.items():
         session.add_all(
             FinanceRecord(
@@ -189,8 +198,10 @@ async def _replace_records(
             )
             for r in items
         )
-    source.record_counts = {t.value: len(items) for t, items in records.items()}
-    source.last_synced_at = utcnow()
+    source.record_counts = {
+        **source.record_counts,
+        **{t.value: len(items) for t, items in records.items()},
+    }
 
 
 # --- QuickBooks OAuth -------------------------------------------------------------------
@@ -450,6 +461,7 @@ async def _sync(
         raise SyncFailedError(str(exc)) from exc
 
     await _replace_records(session, source, snapshot.records)
+    source.last_synced_at = utcnow()
     source.name = snapshot.company_name or f"QuickBooks company {source.external_id}"
     source.status = SourceStatus.CONNECTED
     source.last_error = (
@@ -466,7 +478,51 @@ async def _sync(
         counts=source.record_counts,
         skipped=snapshot.skipped,
     )
+    # Month-end history takes dozens of report calls: fetched in the background
+    source.history_status = HistoryStatus.PENDING
+    job = await jobs.enqueue(
+        session,
+        HISTORY_JOB,
+        {"source_id": str(source.id)},
+        dedupe_key=f"{HISTORY_JOB}:{source.id}:{source.last_synced_at.isoformat()}",
+    )
     await session.commit()
+    await jobs.dispatch(session, job, get_llm_provider())
+
+
+HISTORY_JOB = "data_source.history"
+
+
+@jobs.handler(HISTORY_JOB)
+async def sync_history(session: AsyncSession, payload: dict[str, Any], ctx: JobContext) -> None:
+    """Month-end trial balances, AR/AP aging totals and the books closing date."""
+    source = await session.get(DataSource, uuid.UUID(payload["source_id"]), with_for_update=True)
+    if source is None or source.kind != SourceKind.QUICKBOOKS:
+        return  # deleted meanwhile, or not QuickBooks
+    try:
+        app = _app_for(source)
+        tokens = await _access_tokens(session, source, app)
+        # A refreshed (rotated) token must survive a failure below: keep it now
+        await session.commit()
+        assert source.external_id is not None  # noqa: S101 - set when authorized
+        async with qb.client() as http:
+            api = qb.Api(http, app, source.external_id, tokens.access_token)
+            history = await qb.fetch_history(api, utcnow().date())
+    except (qb.QuickBooksError, AppCredentialsError) as exc:
+        if isinstance(exc, qb.ReauthorizationRequired):
+            source.status = SourceStatus.NEEDS_REAUTH
+        elif not ctx.final_attempt:
+            raise jobs.RetryLater(str(exc)) from exc
+        source.history_status = HistoryStatus.ERROR
+        source.history_error = f"Month-end history couldn't be fetched: {exc}"[:500]
+        return
+    await _replace_records(session, source, history.records)
+    source.books_closed_through = (
+        date.fromisoformat(history.books_closed_through) if history.books_closed_through else None
+    )
+    source.history_status = HistoryStatus.READY
+    source.history_synced_at = utcnow()
+    source.history_error = None
 
 
 async def sync_source(
@@ -592,6 +648,7 @@ async def import_upload(
     session.add(source)
     await session.flush()
     await _replace_records(session, source, {record_type: result.records})
+    source.last_synced_at = utcnow()
     record_event(
         session,
         "data_source.uploaded",
@@ -650,6 +707,11 @@ async def list_records(
         )
     )
     return [_record_out(r) for r in rows]
+
+
+async def owned_source(session: AsyncSession, user: User, source_id: uuid.UUID) -> DataSource:
+    """One of the user's own sources (for prefilling a run from its data)."""
+    return await _owned(session, user, source_id)
 
 
 async def owned_record(
