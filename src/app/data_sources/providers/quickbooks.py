@@ -16,6 +16,10 @@ from src.app.data_sources.models import IntegrationEnvironment
 from src.app.data_sources.records import (
     Account,
     Bill,
+    Customer,
+    Expense,
+    Invoice,
+    Payment,
     PurchaseOrder,
     Record,
     RecordType,
@@ -344,6 +348,90 @@ def _account(row: dict[str, Any]) -> Account:
     )
 
 
+def _customer(row: dict[str, Any]) -> Customer:
+    return Customer(
+        external_id=str(row["Id"]),
+        name=row.get("DisplayName") or row.get("CompanyName") or f"Customer {row['Id']}",
+        email=(row.get("PrimaryEmailAddr") or {}).get("Address"),
+        active=bool(row.get("Active", True)),
+        balance=row.get("Balance"),
+    )
+
+
+def _linked_invoices(payment: dict[str, Any]) -> list[tuple[str, Any]]:
+    """(invoice id, amount applied) for each invoice a payment was applied to, in order."""
+    return [
+        (str(t["TxnId"]), line.get("Amount"))
+        for line in payment.get("Line", [])
+        for t in line.get("LinkedTxn", [])
+        if t.get("TxnType") == "Invoice"
+    ]
+
+
+def _invoice(row: dict[str, Any], paid_on: dict[str, str]) -> Invoice:
+    balance = row.get("Balance")
+    return Invoice(
+        external_id=str(row["Id"]),
+        doc_number=row.get("DocNumber") or f"Invoice {row['Id']}",
+        customer_name=_ref_name(row, "CustomerRef") or "Unknown customer",
+        total=row.get("TotalAmt", 0),
+        balance=balance,
+        invoice_date=row.get("TxnDate"),
+        due_date=row.get("DueDate"),
+        # Fully paid: the date of the last payment applied to it
+        paid_date=paid_on.get(str(row["Id"])) if balance == 0 else None,
+    )
+
+
+def _payment(row: dict[str, Any], invoice_numbers: dict[str, str]) -> Payment:
+    linked = _linked_invoices(row)
+    first = linked[0] if linked else None
+    return Payment(
+        external_id=str(row["Id"]),
+        reference_number=row.get("PaymentRefNum") or f"Payment {row['Id']}",
+        customer_name=_ref_name(row, "CustomerRef") or "Unknown customer",
+        total=row.get("TotalAmt", 0),
+        payment_date=row.get("TxnDate"),
+        invoice_number=invoice_numbers.get(first[0]) if first else None,
+        applied_amount=first[1] if first else None,
+        unapplied_amount=row.get("UnappliedAmt"),
+        memo=row.get("PrivateNote"),
+    )
+
+
+def _expense(row: dict[str, Any], with_receipt: set[str]) -> Expense:
+    payee = row.get("EntityRef") or {}
+    category = next(
+        (
+            _ref_name(line.get("AccountBasedExpenseLineDetail", {}), "AccountRef")
+            for line in row.get("Line", [])
+            if line.get("AccountBasedExpenseLineDetail")
+        ),
+        None,
+    )
+    return Expense(
+        external_id=str(row["Id"]),
+        transaction_id=row.get("DocNumber") or str(row["Id"]),
+        vendor_name=payee.get("name") or "Unknown payee",
+        total=row.get("TotalAmt", 0),
+        expense_date=row.get("TxnDate"),
+        payment_type=row.get("PaymentType"),
+        account=category,
+        employee=payee.get("name") if payee.get("type") == "Employee" else None,
+        has_receipt=str(row["Id"]) in with_receipt,
+    )
+
+
+def _receipts(attachables: list[dict[str, Any]]) -> set[str]:
+    """Ids of the purchases that have a file (receipt) attached."""
+    return {
+        str(ref["EntityRef"]["value"])
+        for a in attachables
+        for ref in a.get("AttachableRef", [])
+        if (ref.get("EntityRef") or {}).get("type") == "Purchase"
+    }
+
+
 @dataclass
 class Snapshot:
     company_name: str | None
@@ -355,14 +443,37 @@ async def fetch_all(qbo: Api, realm_id: str) -> Snapshot:
     """Everything the agents use, as canonical records."""
     raw = {
         entity: await qbo.query_all(entity)
-        for entity in ("Vendor", "PurchaseOrder", "Bill", "Account")
+        for entity in (
+            "Vendor",
+            "PurchaseOrder",
+            "Bill",
+            "Account",
+            "Customer",
+            "Invoice",
+            "Payment",
+            "Purchase",
+            "Attachable",
+        )
     }
     po_numbers = {str(r["Id"]): r.get("DocNumber") or f"PO {r['Id']}" for r in raw["PurchaseOrder"]}
+    invoice_numbers = {
+        str(r["Id"]): r.get("DocNumber") or f"Invoice {r['Id']}" for r in raw["Invoice"]
+    }
+    paid_on: dict[str, str] = {}
+    for payment in raw["Payment"]:
+        for invoice_id, _ in _linked_invoices(payment):
+            if payment.get("TxnDate") and payment["TxnDate"] > paid_on.get(invoice_id, ""):
+                paid_on[invoice_id] = payment["TxnDate"]
+    with_receipt = _receipts(raw["Attachable"])
     mappers: dict[RecordType, tuple[str, Any]] = {
         RecordType.VENDOR: ("Vendor", _vendor),
         RecordType.PURCHASE_ORDER: ("PurchaseOrder", _purchase_order),
         RecordType.BILL: ("Bill", lambda row: _bill(row, po_numbers)),
         RecordType.ACCOUNT: ("Account", _account),
+        RecordType.CUSTOMER: ("Customer", _customer),
+        RecordType.INVOICE: ("Invoice", lambda row: _invoice(row, paid_on)),
+        RecordType.PAYMENT: ("Payment", lambda row: _payment(row, invoice_numbers)),
+        RecordType.EXPENSE: ("Purchase", lambda row: _expense(row, with_receipt)),
     }
     records: dict[RecordType, list[Record]] = {}
     skipped = 0

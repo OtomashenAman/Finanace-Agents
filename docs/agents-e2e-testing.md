@@ -14,9 +14,18 @@ Use **one** data source per user while testing:
 Don't connect QuickBooks and upload files for the same user at once. If you switch,
 remove the old source first.
 
-Only **AP Invoice** reads the data source (prefill from a bill, PO match, vendor master,
-write-back). The other 9 agents are manual input only, so they test the same with either
-source, or with none.
+Four agents read the data source:
+
+| Agent | Pick a… | Also checks against the data |
+|---|---|---|
+| AP Invoice | bill | PO, vendor master; write-back to QuickBooks |
+| Expense Audit | expense (card / cash / check) | the card charge itself, double charges |
+| Cash Application | customer payment | the candidate invoice exists and is that customer's |
+| AR Collections | customer | (prefill only: balance, aging, late history from invoices) |
+
+The other 6 agents are manual input only, so they test the same with either source, or with
+none. After a sync, the source card on Data Sources shows how many records of each type came
+in (vendors, bills, purchase orders, accounts, customers, invoices, payments, expenses).
 
 > Note: the app itself currently allows several sources per user and merges them for
 > lookups (`src/app/data_sources/access.py`). "One at a time" is a testing rule for now,
@@ -129,7 +138,30 @@ QuickBooks: the run shows "Connect QuickBooks on Data Sources to create this bil
 
 ## Expense Audit
 
-**Data source:** not used (manual input). Business reference = employee.
+**Data source:** expenses (QuickBooks *Purchase*: card, cash and check). Business reference =
+employee.
+
+**With QuickBooks:**
+1. Admin: Governance → Expense Audit → *Policy limits by expense category* → add e.g.
+   `Lodging` = `200` (the category is the expense account name in QuickBooks), and optionally a
+   *Default policy limit*. Save.
+2. User: New analysis → *Prefill from your data* → pick an expense. Check: merchant, amount,
+   card transaction ID, *receipt provided* (ticked only if a file is attached to that purchase
+   in QuickBooks) and the policy limit for its category.
+3. Fill the employee if empty and the receipt total → Validate & Analyze.
+4. Check the data findings: two purchases with the same merchant, amount and date →
+   `DUPLICATE_CHARGE` (high); change the claim amount → `CLAIM_DIFFERS_FROM_CHARGE`.
+
+**With an upload** (no QuickBooks), type *Expenses*:
+```csv
+Transaction ID,Date,Merchant,Amount,Category,Employee,Receipt
+TX-501,2026-10-02,Northbridge Hotel,285.00,Lodging,Jordan Smith,yes
+TX-502,2026-10-02,Northbridge Hotel,285.00,Lodging,Jordan Smith,no
+```
+Prefill from `TX-501` → policy limit from the Lodging limit, receipt provided ✔; analyze →
+`DUPLICATE_CHARGE` (TX-502).
+
+**Manual cases:**
 
 | Case | Input | Expected |
 |---|---|---|
@@ -143,7 +175,33 @@ QuickBooks: the run shows "Connect QuickBooks on Data Sources to create this bil
 
 ## AR Collections
 
-**Data source:** not used (manual input). Business reference = customer.
+**Data source:** customers + their invoices (QuickBooks *Customer*, *Invoice*, *Payment*).
+Business reference = customer.
+
+**With QuickBooks:** New analysis → *Prefill from your data* → pick a customer. Check:
+- open balance = sum of the customer's open invoices
+- days overdue = today − due date of the oldest open invoice
+- previous late payments = invoices paid after their due date (QuickBooks: the last payment
+  applied to the invoice is later than its due date)
+- the source snapshot shows the oldest open invoice
+
+Set dispute / strategic / promise yourself, then analyze. The draft reminder names the
+customer.
+
+**With an upload**, type *Customer invoices* (and *Customers* so there is a customer to pick):
+```csv
+Invoice No,Customer,Total,Balance,Invoice Date,Due Date,Paid Date
+INV-8021,Harbor Distribution,1000.00,1000.00,2026-09-01,2026-09-30,
+INV-8000,Harbor Distribution,500.00,0,2026-07-16,2026-08-15,2026-08-20
+```
+```csv
+Name,Email
+Harbor Distribution,ap@harbor.example
+```
+Prefill from Harbor Distribution → open balance 1,000.00, late payments 1, days overdue from
+30 Sep 2026.
+
+**Manual cases:**
 
 | Case | Input | Expected |
 |---|---|---|
@@ -157,7 +215,31 @@ QuickBooks: the run shows "Connect QuickBooks on Data Sources to create this bil
 
 ## Cash Application
 
-**Data source:** not used (manual input). Business reference = payment reference.
+**Data source:** customer payments + invoices (QuickBooks *Payment*, *Invoice*). Business
+reference = payment reference.
+
+**With QuickBooks:** New analysis → *Prefill from your data* → pick a payment. Check the
+candidate invoice:
+- a payment already applied to an invoice in QuickBooks → that invoice, *reference verified*
+  ✔, open amount = its balance + what this payment applied
+- an unapplied payment whose reference or memo names an open invoice of the customer → that
+  invoice, verified ✔
+- an unapplied payment matching exactly one open invoice's amount → proposed, verified ☐
+- otherwise the invoice stays empty
+
+Analyze → `INVOICE_IN_LEDGER` (pass). Change the customer to another one →
+`INVOICE_CUSTOMER_MISMATCH` (high); type an invoice number that doesn't exist →
+`INVOICE_NOT_FOUND`.
+
+**With an upload**, types *Customer payments* and *Customer invoices*:
+```csv
+Date,Customer,Reference,Amount,Invoice No,Remittance
+15/10/2026,Harbor Distribution,WIRE-2901,900.00,,Short paid INV-8021: damaged pallet
+```
+(invoices file as in AR Collections). Prefill from `WIRE-2901` → candidate INV-8021 (named in
+the remittance), open 1,000.00 → **Short payment**, `DEDUCTION_REVIEW`.
+
+**Manual cases:**
 
 | Case | Input | Expected |
 |---|---|---|
@@ -274,4 +356,7 @@ uv run pytest tests/agent_catalog -q
 - `test_agents_api.py`: every agent except AP Invoice through the API (draft → validation
   failed → analyze → submit → approve), including the drafts
 - `test_runs_api.py`, `tests/data_sources/`: AP Invoice, including QuickBooks prefill and
-  write-back (with a fake QuickBooks)
+  write-back (with a fake QuickBooks), and the sync of customers, invoices, payments and
+  expenses
+- `test_data_source_prefill.py`: Cash Application, Expense Audit and AR Collections prefilled
+  from the fake QuickBooks, the candidate invoice rules, category limits and aging

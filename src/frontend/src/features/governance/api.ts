@@ -9,7 +9,8 @@ export interface OrgSettings {
 export interface PolicyVersion {
   version_label: string
   is_default: boolean
-  values: Record<string, string | null>
+  /** Amounts as strings; a money map (e.g. limits per category) as name -> amount */
+  values: Record<string, string | Record<string, string> | null>
   note: string | null
   created_at: string | null
   created_by: string | null
@@ -69,7 +70,7 @@ export const governanceApi = {
     apiRequest<OrgSettings>(`${GOV}/settings`, { method: "PUT", json: { allow_admin_self_approval: allow } }),
   policies: () => apiRequest<Policy[]>(`${GOV}/policies`),
   history: (key: string) => apiRequest<PolicyVersion[]>(`${GOV}/policies/${encodeURIComponent(key)}/versions`),
-  savePolicy: ({ key, values, note }: { key: string; values: Record<string, string | null>; note?: string }) =>
+  savePolicy: ({ key, values, note }: { key: string; values: Record<string, unknown>; note?: string }) =>
     apiRequest<Policy>(`${GOV}/policies/${encodeURIComponent(key)}`, { method: "PUT", json: { values, note } }),
   matrices: () => apiRequest<ApprovalMatrix[]>(`${GOV}/approval-matrix`),
   delegations: () => apiRequest<Delegation[]>(`${GOV}/delegations`),

@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 from typing import cast
 
@@ -16,9 +17,15 @@ from src.app.agent_catalog.agents.base import (
     BaseAgent,
     Calculation,
     Finding,
+    Prefill,
 )
-from src.app.agent_catalog.agents.checks import evidence_check, money
+from src.app.agent_catalog.agents.checks import ZERO, evidence_check, money
+from src.app.agent_catalog.agents.fields import PolicySettings
 from src.app.agent_catalog.runs.models import FlagSeverity
+from src.app.common.clock import utcnow
+from src.app.data_sources.access import FinanceData
+from src.app.data_sources.models import DataSource
+from src.app.data_sources.records import Customer, Invoice, Record, RecordType
 
 # Priority score points (0-100): aging bucket, plus exposure, plus late payment history
 AGING_POINTS = (
@@ -66,6 +73,30 @@ def priority(data: ArCollectionsInput, policy: ArCollectionsPolicy) -> Priority:
     return Priority(bucket, score, action)
 
 
+@dataclass(frozen=True)
+class Exposure:
+    """A customer's receivables position, from their invoices in a data source."""
+
+    open_balance: Decimal
+    days_overdue: int
+    late_payments: int
+    oldest_open: Invoice | None  # the open invoice due first
+
+
+def exposure(invoices: list[Invoice], today: date) -> Exposure:
+    open_invoices = [i for i in invoices if i.open_amount > ZERO]
+    due = sorted((i for i in open_invoices if i.due_date), key=lambda i: i.due_date or today)
+    oldest = due[0] if due else (open_invoices[0] if open_invoices else None)
+    days = (today - oldest.due_date).days if oldest and oldest.due_date else 0
+    late = sum(1 for i in invoices if i.paid_date and i.due_date and i.paid_date > i.due_date)
+    return Exposure(
+        open_balance=sum((i.open_amount for i in open_invoices), ZERO),
+        days_overdue=min(max(days, 0), 3650),
+        late_payments=min(late, 1000),
+        oldest_open=oldest,
+    )
+
+
 class ArCollectionsAgent(BaseAgent):
     key = "ar_collections"
     code = "03"
@@ -90,8 +121,34 @@ class ArCollectionsAgent(BaseAgent):
     draft_message = (
         "Payment reminder email to the customer, or an internal note if there is an open dispute"
     )
+    source_record_type = RecordType.CUSTOMER
     policy_schema = ArCollectionsPolicy
     approval_amount_label = "Open balance"
+
+    @classmethod
+    async def prefill(
+        cls,
+        record: Record,
+        source: DataSource,
+        data: FinanceData,
+        policy: PolicySettings | None = None,
+    ) -> Prefill:
+        customer = cast(Customer, record)
+        invoices = await data.records(Invoice, RecordType.INVOICE, counterparty=customer.name)
+        values: dict[str, object] = {"customer": customer.name}
+        related: dict[str, Record] = {}
+        if invoices:
+            position = exposure(invoices, utcnow().date())
+            values["open_balance"] = position.open_balance if position.open_balance else None
+            values["days_overdue"] = position.days_overdue
+            values["previous_late_payments"] = position.late_payments
+            if position.oldest_open is not None:
+                related["oldest_open_invoice"] = position.oldest_open
+        elif customer.balance and customer.balance > ZERO:
+            # No invoices in the source: only the customer's balance is known
+            values["open_balance"] = customer.balance
+        # Dispute, strategic account and promise to pay aren't in the source: the preparer sets them
+        return Prefill({k: v for k, v in values.items() if v is not None}, related)
 
     @classmethod
     def approval_amount(cls, data: BaseModel) -> Decimal | None:

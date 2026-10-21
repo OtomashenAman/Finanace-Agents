@@ -1,3 +1,4 @@
+import re
 from decimal import Decimal
 from typing import cast
 
@@ -9,6 +10,7 @@ from src.app.agent_catalog.agents.base import (
     BaseAgent,
     Calculation,
     Finding,
+    Prefill,
 )
 from src.app.agent_catalog.agents.cash_application import prompt
 from src.app.agent_catalog.agents.cash_application.models import CashApplicationRun
@@ -24,7 +26,39 @@ from src.app.agent_catalog.agents.checks import (
     missing,
     money,
 )
+from src.app.agent_catalog.agents.fields import PolicySettings
 from src.app.agent_catalog.runs.models import FlagSeverity
+from src.app.data_sources.access import FinanceData
+from src.app.data_sources.models import DataSource
+from src.app.data_sources.records import Invoice, Payment, Record, RecordType
+
+
+def _mentions(text: str, number: str) -> bool:
+    """Whether `number` appears as a whole reference (INV-1 is not in INV-10)."""
+    return re.search(rf"(?<![\w-]){re.escape(number)}(?![\w-])", text, re.IGNORECASE) is not None
+
+
+async def candidate_invoice(payment: Payment, data: FinanceData) -> tuple[Invoice | None, bool]:
+    """The invoice this payment is most likely for, and whether that is verified.
+
+    In order: the invoice it is applied to in the source (verified); the one open invoice of
+    the customer its reference or memo names (verified); the one open invoice of the customer
+    for exactly this amount (not verified). Otherwise none: the preparer picks.
+    """
+    if payment.invoice_number:
+        linked = await data.find(Invoice, RecordType.INVOICE, payment.invoice_number)
+        if linked is not None:
+            return linked, True
+    invoices = await data.records(Invoice, RecordType.INVOICE, counterparty=payment.customer_name)
+    open_invoices = [i for i in invoices if i.open_amount > ZERO]
+    text = f"{payment.reference_number} {payment.memo or ''}"
+    named = [i for i in open_invoices if _mentions(text, i.doc_number)]
+    if len(named) == 1:
+        return named[0], True
+    same_amount = [i for i in open_invoices if i.open_amount == payment.total]
+    if len(same_amount) == 1:
+        return same_amount[0], False
+    return None, False
 
 
 class CashApplicationAgent(BaseAgent):
@@ -48,8 +82,74 @@ class CashApplicationAgent(BaseAgent):
     )
     narrative_guidance = prompt.GUIDANCE
     prompt_version = prompt.PROMPT_VERSION
+    source_record_type = RecordType.PAYMENT
     policy_schema = CashApplicationPolicy
     approval_amount_label = "Payment amount"
+
+    @classmethod
+    async def prefill(
+        cls,
+        record: Record,
+        source: DataSource,
+        data: FinanceData,
+        policy: PolicySettings | None = None,
+    ) -> Prefill:
+        payment = cast(Payment, record)
+        values: dict[str, object] = {
+            "customer": payment.customer_name,
+            "payment_reference": payment.reference_number,
+            "payment_amount": payment.total if payment.total > ZERO else None,
+            "remittance_advice": payment.memo,
+        }
+        invoice, verified = await candidate_invoice(payment, data)
+        related: dict[str, Record] = {}
+        if invoice is not None:
+            related["invoice"] = invoice
+            open_amount = invoice.open_amount
+            if invoice.doc_number == payment.invoice_number:
+                # Already applied in the source: its balance is net of this payment
+                open_amount += payment.applied_amount or ZERO
+            values["candidate_invoice_number"] = invoice.doc_number
+            values["invoice_open_amount"] = open_amount if open_amount > ZERO else None
+            values["reference_verified"] = verified
+        else:
+            values["candidate_invoice_number"] = payment.invoice_number
+        # Only what the source knows: the preparer completes the rest
+        return Prefill({k: v for k, v in values.items() if v is not None}, related)
+
+    @staticmethod
+    async def _ledger_checks(cash: CashApplicationInput, ctx: AnalysisContext) -> list[Finding]:
+        """Against the preparer's customer invoices (QuickBooks or an upload), if they have them."""
+        if not await ctx.data.has(RecordType.INVOICE):
+            return []
+        number = cash.candidate_invoice_number
+        invoice = await ctx.data.find(Invoice, RecordType.INVOICE, number)
+        if invoice is None:
+            return [
+                Finding(
+                    "INVOICE_NOT_FOUND",
+                    FlagSeverity.WARNING,
+                    f"Invoice {number} isn't in your data source",
+                    "candidate_invoice_number",
+                )
+            ]
+        if invoice.customer_name.lower() != cash.customer.lower():
+            return [
+                Finding(
+                    "INVOICE_CUSTOMER_MISMATCH",
+                    FlagSeverity.HIGH,
+                    f"Invoice {number} belongs to {invoice.customer_name}, not {cash.customer}",
+                    "candidate_invoice_number",
+                )
+            ]
+        return [
+            Finding(
+                "INVOICE_IN_LEDGER",
+                FlagSeverity.PASS,
+                f"Invoice {number} is in your data source for {invoice.customer_name}",
+                "candidate_invoice_number",
+            )
+        ]
 
     @classmethod
     def approval_amount(cls, data: BaseModel) -> Decimal | None:
@@ -92,6 +192,8 @@ class CashApplicationAgent(BaseAgent):
                     "reference_verified",
                 )
             )
+
+        findings.extend(await cls._ledger_checks(cash, ctx))
 
         if short == ZERO:
             findings.append(

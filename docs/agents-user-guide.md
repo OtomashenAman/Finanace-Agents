@@ -1,8 +1,8 @@
 # Agents: user guide
 
 How a run works in the 10 agents that have a workspace: the 3 steps every run goes through,
-then each agent's input fields, what they mean and what you can enter. (Revenue Recognition
-and Lease Accounting don't have a workspace yet.)
+how an agent processes your data, then for each agent its input fields and the exact rules it
+applies. (Revenue Recognition and Lease Accounting don't have a workspace yet.)
 
 For test values and expected results, see [agents-e2e-testing.md](agents-e2e-testing.md).
 
@@ -91,6 +91,60 @@ approval* and the input is locked.
 Every step is recorded in the **Audit Trail**. On approval the app saves a fingerprint
 (hash) of exactly what was approved. **Evidence pack** downloads the whole run as a ZIP.
 
+## How an agent processes your data
+
+What happens when you click **Validate & Analyze**, in order:
+
+```
+ your input ─▶ 1 validate ─▶ 2 load policy ─▶ 3 rules engine ─▶ 4 save result ─▶ 5 AI explanation
+                  │ fail                         (Python)                         (background)
+                  ▼
+           Validation failed
+```
+
+1. **Validate.** The input is checked against the agent's field rules (required, type, range,
+   format). Any error → status *Validation failed*, each error shown on its field, nothing
+   else runs.
+2. **Load the policy.** The admin's current thresholds for the agent (Governance) are loaded.
+   Their version and values are saved on the run, so a later threshold change never changes
+   an old result.
+3. **Rules engine (Python, no AI).** The agent's `analyze()` runs its checks in a fixed order
+   and returns:
+   - **calculations**: every figure, using exact decimal arithmetic, rounded to cents where
+     it's money
+   - **findings**: one per check, each with a code, severity and message
+   - **headline** and **proposed decision**: chosen by fixed rules from the findings
+   - **priority**: High if any finding is 🔴 high, otherwise Normal
+
+   Some checks also read context: how many documents are attached (missing evidence), your
+   earlier runs (duplicate checks look only at **your own** runs that were analyzed, ignoring
+   drafts and failed ones, and compare text without case), and for the agents that read your
+   data source (AP Invoice, Expense Audit, Cash Application, AR Collections) the matching
+   records in it.
+4. **Save.** Findings, calculations and the typed results are stored (each agent has its own
+   table), the run becomes *Needs human review*, and an audit event is recorded.
+5. **AI explanation (background worker).** Claude receives only: the validated input, the
+   calculations, the findings, the headline and proposed decision, the legal entity, and the
+   text of the attached documents (up to 15,000 characters each, 40,000 in total). It returns
+   structured output (summary, key points, cited fields and documents, missing evidence,
+   ambiguities, and a draft for agents that have one). It can only cite fields and documents
+   that exist. Guard checks then flag any figure in its text that isn't in the data.
+
+On **Submit for approval**, the app fingerprints (hashes) the input, policy, calculations,
+findings, documents and AI explanation together: that is exactly what the reviewer approves.
+
+### Common checks
+
+Several agents share these building blocks:
+
+| Check | Rule | Finding |
+|---|---|---|
+| Tolerance match | difference = 0 → match; \|difference\| ≤ tolerance → match ("within tolerance"); otherwise → mismatch | ✅ match / 🔴 mismatch |
+| Over a limit | value > limit (an empty limit means the check is off) | usually ⚠️ |
+| Missing input | an optional field that matters was left empty | ⚠️ |
+| Missing evidence | no document attached | ⚠️ `MISSING_EVIDENCE` |
+| Duplicate run | an earlier analyzed run of yours with the same key values | 🔴, naming that run |
+
 ---
 
 ## AP Invoice Intake, Coding & Approval
@@ -109,15 +163,33 @@ Checks a supplier invoice against its purchase order and what was received befor
 
 All fields are required unless marked optional.
 
-**Prefill:** with QuickBooks connected (or a bills file uploaded), *Prefill from your data*
-fills the form from a bill.
+**Prefill from your data:** pick a bill (QuickBooks or an uploaded bills file). Supplier, invoice number, total, tax and GL account come from the bill. If the bill has
+a PO number and that PO is in your data, the PO amount and received amount come from the PO.
+You complete the rest.
 
-**Result:**
-- The 3-way match: invoice vs PO, invoice vs received
-- Duplicate check: same supplier and invoice number in an earlier run
-- Vendor master check: is the supplier an active vendor
-- Tax not above the total
-- Missing GL account or evidence
+**How it works** (checks in order):
+
+| # | Check | Rule | Finding |
+|---|---|---|---|
+| 1 | Duplicate | Earlier run with the same supplier **and** invoice number | 🔴 `DUPLICATE_INVOICE` / ✅ `DUPLICATE_CHECK_CLEAR` |
+| 2 | Vendor master | Only if your data source has vendors: supplier not found / inactive / active | ⚠️ `VENDOR_NOT_IN_MASTER` / 🔴 `VENDOR_INACTIVE` / ✅ `VENDOR_IN_MASTER` |
+| 3 | PO match | Invoice total − PO amount, against the PO tolerance | ✅ `PO_MATCH` / 🔴 `PO_MISMATCH` |
+| 4 | Receipt match | Invoice total − received amount, against the receipt tolerance | ✅ `RECEIPT_MATCH` / 🔴 `RECEIPT_MISMATCH` |
+| 5 | High value | Invoice total > high-value limit (off by default) | ⚠️ `HIGH_VALUE_INVOICE` |
+| 6 | Tax | Tax total > invoice total | 🔴 `TAX_EXCEEDS_TOTAL` |
+| 7 | Coding | No proposed GL account | ⚠️ `MISSING_GL` |
+| 8 | Evidence | No document attached | ⚠️ `MISSING_EVIDENCE` |
+
+**Calculations:** invoice total, PO amount, received amount, tax (if given), invoice − PO,
+invoice − received.
+
+**Headline:** duplicate → *Duplicate invoice suspected*; any 🔴 → *Invoice discrepancy*; any ⚠️
+→ *Invoice needs completion*; else *Invoice matches PO and receipt*.
+**Proposed decision:** any 🔴 → *Resolve exceptions before approval*; else *AP reviewer
+approval required*. **Approval matrix** routes on the invoice total.
+
+**After approval:** a run prefilled from a QuickBooks bill can stamp the approval on that bill;
+a run typed by hand can create the bill in QuickBooks.
 
 **Reviewer checks:** the invoice, the PO, the proof of receipt and the GL coding.
 
@@ -136,11 +208,32 @@ Checks an employee's expense or card claim against the policy limit and the rece
 | Card transaction ID | Corporate card transaction for this claim | Text, optional |
 | Prior card transaction IDs | Transactions already claimed | Long text, optional: separate with commas or new lines |
 
-**Result:**
-- Amount over the policy limit; claim − receipt total
-- Flags: no receipt, over the limit, claim doesn't match the receipt, card transaction already
-  claimed (in the prior IDs or in an earlier run)
-- **Draft for review:** a clarification request to the employee
+**Prefill from your data:** pick an expense (QuickBooks card, cash or check purchase, or an
+uploaded expenses file). Merchant, amount, card transaction ID and *receipt provided* (a file
+is attached in QuickBooks) come from it, plus the employee when QuickBooks records one. The
+**policy limit** comes from the admin's limits per expense category (the expense's account),
+else the default limit. You enter the receipt total.
+
+**How it works** (checks in order):
+
+| # | Check | Rule | Finding |
+|---|---|---|---|
+| 1 | Duplicate card | Only with a card transaction ID: is it in the prior IDs list? If not, was it in an earlier run? | 🔴 `DUPLICATE_CARD_TRANSACTION` / ✅ `DUPLICATE_CHECK_CLEAR` |
+| 1a | Card data | Only with a card transaction ID **and** expenses in your data source: not found / claim ≠ the charge's amount / another charge with the same merchant, amount and date | ⚠️ `CARD_TRANSACTION_NOT_FOUND` / ⚠️ `CLAIM_DIFFERS_FROM_CHARGE` / 🔴 `DUPLICATE_CHARGE` |
+| 2 | Receipt | Receipt provided ticked? | ✅ `RECEIPT_PROVIDED` / 🔴 `MISSING_RECEIPT` |
+| 3 | Policy limit | Claim − policy limit > 0 | 🔴 `POLICY_LIMIT_EXCEEDED` (by how much) / ✅ `WITHIN_POLICY_LIMIT` |
+| 4 | Reconciliation | With a receipt total: claim − receipt total, against the receipt tolerance. Receipt ticked but no total: can't reconcile | ✅ `AMOUNT_RECONCILED` / 🔴 `AMOUNT_MISMATCH` / ⚠️ `MISSING_RECEIPT_TOTAL` |
+| 5 | Evidence | No document attached | ⚠️ `MISSING_EVIDENCE` |
+
+**Calculations:** claim, policy limit, amount over the limit (0 if within), and with a
+receipt total: receipt total, claim − receipt.
+
+**Headline:** duplicate (either kind) → *Duplicate card transaction*; over the limit → *Policy exception*;
+other 🔴 → *Expense exception*; any ⚠️ → *Expense needs completion*; else *Expense within
+policy*. **Proposed decision:** any 🔴 → *Request explanation or reject*; else *Finance audit
+approval required*. **Approval matrix** routes on the claim amount.
+
+**Draft for review:** a clarification request to the employee about the issues found.
 
 **Reviewer checks:** the receipt (merchant, date, amount) and that the limit fits the category.
 
@@ -159,21 +252,51 @@ Scores an overdue customer balance and proposes the next collection action.
 | Promise to pay date / details | What the customer promised | Text, optional |
 | Collection notes | Notes from earlier contact | Long text, optional |
 
-**Priority score (0–100)**, calculated by fixed rules:
+**Prefill from your data:** pick a customer. From that customer's invoices (QuickBooks or an
+uploaded invoices file):
+- **open balance** = the sum of the open amounts of their invoices
+- **days overdue** = today − the due date of the oldest open invoice (0 if none is past due)
+- **previous late payments** = invoices that were paid after their due date
 
-| Part | Points |
-|---|---|
-| Days overdue: 0 / 1–30 / 31–60 / 61–90 / 90+ | 0 / 10 / 30 / 50 / 70 |
-| Open balance above the high exposure level (admin setting, default 50,000) | +10 |
-| Each previous late payment | +5 (at most +20) |
+The oldest open invoice is kept in the run's source snapshot for the reviewer. Dispute,
+strategic account and promise to pay aren't in QuickBooks: you set them.
 
-**Next action:** an open dispute always means **Hold – resolve dispute**. Otherwise a score of
-60+ is **Escalate**, 30–59 **Send reminder**, below 30 **Monitor** (the 30 and 60 are admin
-settings).
+**How it works:**
 
-**Result:** aging bucket, score, next action; flags for aging, high exposure, dispute block,
-strategic account and promise to pay. **Draft for review:** a payment reminder email, or an
-internal note when there is a dispute.
+1. **Priority score (0–100)** from fixed points:
+
+   | Part | Points |
+   |---|---|
+   | Days overdue: 0 / 1–30 / 31–60 / 61–90 / 90+ | 0 / 10 / 30 / 50 / 70 |
+   | Open balance above the high exposure level (default 50,000) | +10 |
+   | Each previous late payment | +5 (at most +20) |
+
+2. **Next-best action:** an open dispute always → **Hold – resolve dispute**. Otherwise score
+   ≥ escalate level (default 60) → **Escalate**; ≥ reminder level (default 30) → **Send
+   reminder**; below → **Monitor**.
+3. **Checks** (in order):
+
+   | Check | Rule | Finding |
+   |---|---|---|
+   | Aging | 0 days / 1–90 days / over 90 days | ✅ `NOT_OVERDUE` / ⚠️ `OVERDUE_AGING` / 🔴 `OVERDUE_AGING` |
+   | Exposure | Balance above the high exposure level | ⚠️ `HIGH_EXPOSURE` / ✅ `EXPOSURE_NORMAL` |
+   | Dispute | Open dispute ticked | 🔴 `DISPUTE_BLOCK` / ✅ `NO_DISPUTE` |
+   | Strategic | Strategic account ticked | ⚠️ `STRATEGIC_ACCOUNT` |
+   | Promise | Promise to pay filled in | ℹ️ `PROMISE_TO_PAY` |
+   | Evidence | No document attached | ⚠️ `MISSING_EVIDENCE` |
+
+**Calculations:** open balance, days overdue, aging bucket, late payments, priority score,
+next-best action.
+
+**Headline / proposed decision** follow the action: Hold → *Collections on hold: dispute* /
+*Resolve the dispute before any dunning*; Escalate → *Escalate collection* / *Approve
+escalation and the draft communication*; Reminder → *Collections priority* / *Draft reminder
+for human approval*; Monitor → *Monitor account* / *No dunning now: reviewer confirms*.
+The run's High/Normal priority is separate from the score: it is High only for a 90+ balance
+or an open dispute. **Approval matrix** routes on the open balance.
+
+**Draft for review:** a payment reminder email whose tone follows the action, or an internal
+note to resolve the dispute when there is one.
 
 **Reviewer checks:** the balance against the customer statement, and whether the dispute or
 promise is still current.
@@ -192,11 +315,40 @@ Matches a customer payment to an open invoice and spots short payments (deductio
 | Reference verified | The reference was checked against the invoice | Checkbox |
 | Remittance advice | What the customer said about the payment | Long text, optional |
 
-**Result:**
-- Invoice open − payment: positive = short payment, negative = overpayment
-- Flags: reference not verified, short payment, deduction above the review threshold (must
-  be classified), overpayment, no remittance advice for a difference, payment reference
-  already used in an earlier run
+**Prefill from your data:** pick a customer payment (QuickBooks or an uploaded payments file).
+Customer, reference, amount and memo (as remittance advice) come from it. The **candidate
+invoice** is found in this order:
+
+1. the invoice the payment is applied to in QuickBooks → *reference verified*; the open
+   amount is the invoice's balance **plus** what this payment applied (its balance is already
+   net of it)
+2. otherwise, the one open invoice of that customer whose number appears in the reference or
+   memo → *reference verified*
+3. otherwise, the one open invoice of that customer for exactly the payment amount → proposed,
+   *not* verified
+4. otherwise none: you enter it
+
+**How it works:** short payment = invoice open amount − payment (positive = paid too little,
+negative = paid too much). Then, in order:
+
+| # | Check | Rule | Finding |
+|---|---|---|---|
+| 1 | Duplicate | Earlier run with the same payment reference | 🔴 `DUPLICATE_PAYMENT` / ✅ `DUPLICATE_CHECK_CLEAR` |
+| 2 | Reference | Reference verified ticked? | ✅ `INVOICE_REFERENCE_MATCH` / ⚠️ `REFERENCE_NOT_VERIFIED` |
+| 2a | Invoice data | Only with invoices in your data source: invoice not found / belongs to another customer / found for this customer | ⚠️ `INVOICE_NOT_FOUND` / 🔴 `INVOICE_CUSTOMER_MISMATCH` / ✅ `INVOICE_IN_LEDGER` |
+| 3 | Amount | Difference 0 or within the match tolerance | ✅ `AMOUNT_MATCH` |
+| | | Short beyond tolerance | ⚠️ `SHORT_PAYMENT`, plus 🔴 `DEDUCTION_REVIEW` if above the deduction review threshold, else ℹ️ `DEDUCTION_BELOW_THRESHOLD` |
+| | | Overpaid beyond tolerance | ⚠️ `OVERPAYMENT` |
+| 4 | Remittance | A difference beyond tolerance and no remittance advice | ⚠️ `AMBIGUOUS_REMITTANCE` |
+| 5 | Evidence | No document attached | ⚠️ `MISSING_EVIDENCE` |
+
+**Calculations:** payment amount, invoice open amount, invoice open − payment.
+
+**Headline:** duplicate → *Payment already applied*; short → *Short payment*; overpaid →
+*Overpayment*; any ⚠️ → *Cash match candidate*; else *Payment matches invoice*.
+**Proposed decision:** deduction to review → *Deduction requires classification*; other 🔴 →
+*Resolve exceptions before applying cash*; else *Cash application reviewer approval
+required*. **Approval matrix** routes on the payment amount.
 
 **Reviewer checks:** the bank receipt, that the invoice is open for that customer, and
 support for any deduction.
@@ -215,11 +367,25 @@ Reconciles a GL account to its subledger at month end.
 | Known reconciling items | Differences already identified (e.g. in transit) | Money, optional, can be negative |
 | Proposed adjustment rationale | Why the difference exists and how to fix it | Long text, optional |
 
-**Result:**
-- Variance = GL balance − subledger balance
-- Unexplained difference = variance − known reconciling items
-- High flag if the unexplained difference is above materiality
-- Duplicate check: same account and period
+**How it works:** variance = GL − subledger; unexplained difference = variance − known
+reconciling items (empty counts as 0). Then, in order:
+
+| # | Check | Rule | Finding |
+|---|---|---|---|
+| 1 | Duplicate | Earlier run with the same GL account **and** close period | 🔴 `DUPLICATE_RECONCILIATION` / ✅ `DUPLICATE_CHECK_CLEAR` |
+| 2 | Balance | Unexplained difference = 0 (fully agrees, or the reconciling items explain it) | ✅ `BALANCE_MATCH` |
+| | | Otherwise | ⚠️ `BALANCE_MISMATCH`, then 🔴 `MATERIAL_VARIANCE` if \|unexplained\| > materiality, else ✅ `WITHIN_MATERIALITY`; ⚠️ `MISSING_RATIONALE` if no rationale |
+| 3 | Evidence | No document attached | ⚠️ `MISSING_EVIDENCE` |
+| 4 | Separation | Always: a different controller must approve | ℹ️ `PREPARER_REVIEWER_SEPARATION` |
+
+**Calculations:** GL, subledger, GL − subledger, reconciling items, unexplained difference,
+materiality.
+
+**Headline:** duplicate → *Reconciliation already prepared*; any 🔴 → *Material close
+variance*; unexplained ≠ 0 → *Immaterial close variance*; any ⚠️ → *Reconciliation needs
+evidence*; else *Account reconciled*. **Proposed decision:** any 🔴 → *Reconciliation review
+required*; else *Controller sign-off required*. **Approval matrix** routes on the absolute
+variance.
 
 **Reviewer checks:** both reports for the period and the proof for each reconciling item.
 
@@ -238,11 +404,24 @@ Compares what one group company says another owes it with what the other says it
 | Matching tolerance | Largest difference still treated as a match | Money, 0 or more |
 | Transfer-pricing/policy notes | Basis of the intercompany charges | Long text, optional |
 
-**Result:**
-- Translated AP = counterparty AP × rate; difference = AR − translated AP
-- Amount available to net = the smaller of the two
-- Flags: mismatch above tolerance, FX rate to confirm (rate ≠ 1), no transfer-pricing notes,
-  same entity on both sides; settlement always needs authorization
+**How it works:** translated AP = counterparty AP × rate (rounded to cents); difference = AR −
+translated AP; amount available to net = the smaller of AR and translated AP. Then, in order:
+
+| # | Check | Rule | Finding |
+|---|---|---|---|
+| 1 | Entities | Sending = receiving (ignoring case) | 🔴 `SAME_ENTITY` |
+| 2 | Match | Difference against the matching tolerance | ✅ `IC_MATCH` / 🔴 `IC_MISMATCH` |
+| 3 | FX | Rate = 1 / any other rate | ✅ `NO_TRANSLATION` / ⚠️ `FX_ASSUMPTION` (confirm source and date) |
+| 4 | Transfer pricing | No notes | ⚠️ `TRANSFER_PRICING_REVIEW` |
+| 5 | Evidence | No document attached | ⚠️ `MISSING_EVIDENCE` |
+| 6 | Settlement | Always | ℹ️ `SETTLEMENT_AUTHORIZATION` |
+
+**Calculations:** AR, AP, rate, translated AP, difference, tolerance, amount available to net.
+
+**Headline:** mismatch → *Intercompany mismatch*; other 🔴 → *Intercompany exception*; any ⚠️ →
+*Intercompany match needs review*; else *Intercompany balances match*. **Proposed decision:**
+any 🔴 → *Resolve before settlement*; else *Netting proposal for authorization*. **Approval
+matrix** routes on the intercompany AR.
 
 **Reviewer checks:** both ledgers, the rate's source and date, and the transfer-pricing basis.
 
@@ -261,18 +440,33 @@ Compares actual against budget and runs a simple what-if scenario.
 | Scenario cost change (%) | Increase in cost, as % of the actual | Percent, −100 to 1000 |
 | Planning assumptions | Why these scenario numbers | Long text, optional |
 
-**Scenario bridge** (each impact shown separately):
+**How it works:**
 
-| Step | Formula | Example (120,000; 5% / 2% / 3%) |
-|---|---|---|
-| Volume impact | actual × volume % | +6,000 |
-| Price impact | (actual + volume impact) × price % | +2,520 |
-| Cost impact | − actual × cost % | −3,600 |
-| Scenario value | actual + the three impacts | 124,920 |
+1. **Variance** = actual − budget; **variance %** = variance ÷ \|budget\| (empty when the
+   budget is 0).
+2. **Scenario bridge**, each impact rounded to cents and shown separately:
 
-**Result:** variance and variance %; flags when the variance is above the materiality %
-(admin setting, default 10%), a scenario driver is unusually large (default 25%), or no
-assumptions were given.
+   | Step | Formula | Example (120,000; 5% / 2% / 3%) |
+   |---|---|---|
+   | Volume impact | actual × volume % | +6,000 |
+   | Price impact | (actual + volume impact) × price % | +2,520 |
+   | Cost impact | − actual × cost % | −3,600 |
+   | Scenario value | actual + the three impacts | 124,920 |
+
+3. **Checks** (in order):
+
+   | Check | Rule | Finding |
+   |---|---|---|
+   | Materiality | Budget 0 / \|variance %\| > materiality % / otherwise | ⚠️ `NO_BUDGET` / 🔴 `VARIANCE_MATERIAL` / ✅ `VARIANCE_WITHIN_THRESHOLD` |
+   | Scenario drivers | Each driver with \|%\| > the scenario review limit | ⚠️ `UNUSUAL_SCENARIO` (one per driver) |
+   | Assumptions | Filled in / empty | ℹ️ `ASSUMPTION_APPROVAL` / ⚠️ `MISSING_ASSUMPTIONS` |
+   | Evidence | No document attached | ⚠️ `MISSING_EVIDENCE` |
+   | Version | Always: the drivers are recorded with the run | ℹ️ `SCENARIO_VERSION` |
+
+**Headline:** any 🔴 → *Budget variance*; any ⚠️ → *Forecast needs review*; else *Within
+budget tolerance*. **Proposed decision:** any 🔴 → *Explain the variance and approve the
+scenario assumptions*; else *Scenario assumptions for approval*. **Approval matrix** routes on
+the absolute variance.
 
 **Reviewer checks:** actual and budget are the approved versions, and the drivers are
 documented.
@@ -293,10 +487,25 @@ Projects cash at the end of a period and spots a shortfall before any money move
 
 The entity is the run's legal entity, so it isn't a form field.
 
-**Result:**
-- Closing cash = opening cash + inflows − outflows
-- Funding gap = how far closing cash falls below the buffer
-- Flags: negative cash, buffer breached, dual authorization needed, no funding options
+**How it works:** closing cash = opening + inflows − outflows; funding gap = buffer − closing
+cash (0 when the buffer holds). Then, in order:
+
+| # | Check | Rule | Finding |
+|---|---|---|---|
+| 1 | Negative cash | Closing cash < 0 | 🔴 `NEGATIVE_PROJECTED_CASH` / ✅ `PROJECTED_CASH_POSITIVE` |
+| 2 | Buffer | Funding gap > 0 | 🔴 `LIQUIDITY_BUFFER` / ✅ `LIQUIDITY_BUFFER_MET` (with headroom) |
+| | | With a gap: gap > dual authorization amount | ⚠️ `DUAL_AUTHORIZATION` |
+| | | With a gap: no funding options entered | ⚠️ `NO_FUNDING_OPTIONS` |
+| 3 | Large outflows | Outflows > large outflow limit (off by default) | ⚠️ `LARGE_OUTFLOWS` |
+| 4 | Evidence | No document attached | ⚠️ `MISSING_EVIDENCE` |
+
+**Calculations:** opening cash, inflows, outflows, projected closing cash, buffer, funding gap,
+horizon.
+
+**Headline:** closing < 0 → *Negative cash projected*; gap → *Liquidity shortfall*; any ⚠️ →
+*Liquidity projection needs review*; else *Liquidity within buffer*. **Proposed decision:**
+any 🔴 → *Check buffer limits before action*; else *Treasury approver sign-off required*.
+**Approval matrix** routes on the funding gap.
 
 **Reviewer checks:** bank balances and the timing of the largest flows.
 
@@ -314,11 +523,26 @@ Records the result of testing one control and produces a traceable workpaper.
 | Evidence references / URLs | Where the evidence is kept | Long text, optional |
 | Test procedure / expected control | How it was tested, what the control should do | Long text, optional |
 
-**Result:**
-- Exception rate = exceptions ÷ items tested
-- Coverage = items tested ÷ population
-- Flags: sample larger than the population, sample too small, more exceptions than
-  tolerable, evidence missing
+**How it works:** exception rate = exceptions ÷ items tested; coverage = items tested ÷
+population (both as %, 2 decimals). Then, in order:
+
+| # | Check | Rule | Finding |
+|---|---|---|---|
+| 1 | Sample bounds | Tested > population | 🔴 `SAMPLE_EXCEEDS_POPULATION` |
+| | | Exceptions > tested | 🔴 `EXCEPTIONS_EXCEED_SAMPLE` |
+| | | Otherwise: tested < minimum sample (or the whole population, if smaller) | ⚠️ `SAMPLE_TOO_SMALL` |
+| | | None of the above | ✅ `SAMPLE_WITHIN_BOUNDS` |
+| 2 | Exceptions | 0 / above tolerable / within tolerable | ✅ `NO_EXCEPTIONS` / 🔴 `EXCEPTIONS_ABOVE_TOLERABLE` / ⚠️ `EXCEPTIONS_TOLERABLE` |
+| 3 | Evidence lineage | Evidence references or a document | ✅ `EVIDENCE_LINEAGE` / ⚠️ `MISSING_EVIDENCE_LINEAGE` |
+| 4 | Procedure | No test procedure | ⚠️ `MISSING_TEST_PROCEDURE` |
+| 5 | Sign-off | Always: the reviewer concludes | ℹ️ `AUDITOR_SIGN_OFF` |
+
+**Calculations:** population, items tested, exceptions, exception rate, coverage.
+
+**Headline:** exceptions above tolerable → *Control exceptions found*; other 🔴 → *Sample bounds
+invalid*; any ⚠️ → *Control test needs completion*; else *Control operating effectively*.
+**Proposed decision:** any 🔴 → *Auditor validates impact*; else *SOX reviewer sign-off
+required*. No approval amount: always the lowest approval tier.
 
 **Reviewer checks:** the sample was drawn from the full population, and the evidence for
 each exception. The reviewer, not the system, decides whether it is a deficiency.
@@ -337,10 +561,27 @@ Checks the headline figures for a board pack and drafts a factual summary.
 | Source dataset / approval ID | Where the approved figures come from | Text, optional, but a **high** flag if empty |
 | Known disclosures | Disclosures and reporting notes | Long text, optional |
 
-**Result:**
-- Revenue change, growth % and operating margin %
-- Flags: missing source, profit above revenue, unusually large revenue change (threshold set
-  by the admin)
+**How it works:** revenue change = reported − prior; growth % = change ÷ prior (empty if prior
+is 0); operating margin % = profit ÷ revenue (empty if revenue is 0). Then, in order:
+
+| # | Check | Rule | Finding |
+|---|---|---|---|
+| 1 | Source | Source dataset / approval ID filled in | ✅ `SOURCE_REFERENCED` / 🔴 `MISSING_SOURCE_REFERENCE` |
+| 2 | Consistency | Operating profit > revenue | 🔴 `PROFIT_EXCEEDS_REVENUE` |
+| | | Prior period revenue = 0 | ⚠️ `NO_PRIOR_PERIOD` |
+| | | \|growth %\| > revenue change review % | ⚠️ `UNUSUAL_REVENUE_CHANGE` |
+| | | None of the above | ✅ `NUMBERS_CONSISTENT` |
+| 3 | Disclosures | None recorded | ⚠️ `NO_DISCLOSURES_RECORDED` |
+| 4 | Evidence | No document attached | ⚠️ `MISSING_EVIDENCE` |
+| 5 | Sign-off | Always | ℹ️ `CFO_SIGN_OFF` |
+
+**Calculations:** reported revenue, prior revenue, "Revenue increased / decreased by", growth
+%, operating profit, operating margin %.
+
+**Headline:** no source → *Source references missing*; other 🔴 → *Board figures inconsistent*;
+any ⚠️ → *Board pack needs review*; else *Board figures consistent*. **Proposed decision:** any
+🔴 → *Resolve source and consistency issues before sign-off*; else *Approve all source claims
+and disclosures*. No approval amount: always the lowest approval tier.
 
 **Reviewer checks:** every figure traces to the approved source; the disclosures are complete.
 
@@ -349,16 +590,27 @@ Checks the headline figures for a board pack and drafts a factual summary.
 ## Thresholds the admin can change
 
 Admin Settings → Governance. Each change creates a new version; new analyses use it, older
-runs keep the version they were analyzed with.
+runs keep the version they were analyzed with. An empty value turns that check off (where
+the setting allows it).
 
-| Agent | Thresholds |
-|---|---|
-| AP Invoice | PO match tolerance, receipt match tolerance, high-value invoice limit |
-| Expense Audit | Receipt match tolerance |
-| AR Collections | High exposure above, reminder from score, escalate from score |
-| Cash Application | Match tolerance, deduction review threshold |
-| FP&A | Variance materiality (%), scenario change review limit (%) |
-| Treasury | Dual authorization above, large outflow review limit |
-| Board Reporting | Revenue change review threshold (%) |
-| SOX Controls | Minimum sample size, tolerable exceptions |
-| Financial Close, Intercompany | None (materiality / tolerance is entered on each run) |
+| Agent | Setting | Default |
+|---|---|---|
+| AP Invoice | PO match tolerance | 0.00 |
+| | Receipt match tolerance | 0.00 |
+| | High-value invoice limit | off |
+| Expense Audit | Receipt match tolerance | 0.00 |
+| | Policy limits by expense category (e.g. Lodging 200.00) | none |
+| | Default policy limit (categories without their own) | off |
+| AR Collections | High exposure above | 50,000.00 |
+| | Reminder from score | 30 |
+| | Escalate from score | 60 |
+| Cash Application | Match tolerance | 0.00 |
+| | Deduction review threshold | 0.00 (every short payment is reviewed) |
+| FP&A | Variance materiality | 10% |
+| | Scenario change review limit | 25% |
+| Treasury | Dual authorization above | 0.00 (every funding gap) |
+| | Large outflow review limit | off |
+| SOX Controls | Minimum sample size | 25 |
+| | Tolerable exceptions | 0 |
+| Board Reporting | Revenue change review threshold | 25% |
+| Financial Close, Intercompany | none: materiality / tolerance is entered on each run | |

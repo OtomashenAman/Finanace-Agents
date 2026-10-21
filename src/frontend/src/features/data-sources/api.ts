@@ -2,7 +2,15 @@ import { apiRequest } from "@/lib/api"
 
 export type SourceKind = "quickbooks" | "upload"
 export type SourceStatus = "pending_auth" | "connected" | "needs_reauth" | "error" | "ready"
-export type RecordType = "vendor" | "bill" | "purchase_order" | "account"
+export type RecordType =
+  | "vendor"
+  | "bill"
+  | "purchase_order"
+  | "account"
+  | "customer"
+  | "invoice"
+  | "payment"
+  | "expense"
 export type IntegrationEnvironment = "sandbox" | "production"
 
 export interface DataSource {

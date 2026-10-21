@@ -26,6 +26,48 @@ REALM = "9130350000000001"
 pytestmark = pytest.mark.usefixtures("synced_agents")
 
 
+HARBOR = {"value": "81", "name": "Harbor Distribution"}
+HOTEL = {"value": "90", "name": "Northbridge Hotel", "type": "Vendor"}
+LODGING = [{"AccountBasedExpenseLineDetail": {"AccountRef": {"value": "9", "name": "Lodging"}}}]
+
+# Customers, invoices, payments and card purchases, as QuickBooks returns them
+RECEIVABLES_AND_EXPENSES: dict[str, list[dict[str, Any]]] = {
+    "Customer": [
+        {"Id": "81", "DisplayName": "Harbor Distribution", "Active": True, "Balance": 1000.0},
+        {"Id": "82", "DisplayName": "Quiet Customer", "Active": True, "Balance": 0},
+    ],
+    "Invoice": [
+        # Open and overdue
+        {"Id": "601", "DocNumber": "INV-8021", "CustomerRef": HARBOR, "TotalAmt": 1000.0,
+         "Balance": 1000.0, "TxnDate": "2026-09-01", "DueDate": "2026-09-30"},
+        # Paid five days late (due 08-15, paid 08-20 by payment 401)
+        {"Id": "600", "DocNumber": "INV-8000", "CustomerRef": HARBOR, "TotalAmt": 500.0,
+         "Balance": 0, "TxnDate": "2026-07-16", "DueDate": "2026-08-15"},
+    ],
+    "Payment": [
+        # Applied to INV-8000 in QuickBooks
+        {"Id": "401", "PaymentRefNum": "CHK-100", "CustomerRef": HARBOR, "TotalAmt": 500.0,
+         "TxnDate": "2026-08-20", "UnappliedAmt": 0,
+         "Line": [{"Amount": 500.0, "LinkedTxn": [{"TxnId": "600", "TxnType": "Invoice"}]}]},
+        # Not applied yet; the memo names the invoice
+        {"Id": "402", "PaymentRefNum": "WIRE-2901", "CustomerRef": HARBOR, "TotalAmt": 900.0,
+         "TxnDate": "2026-10-15", "UnappliedAmt": 900.0,
+         "PrivateNote": "Short paid INV-8021: damaged pallet", "Line": []},
+    ],
+    "Purchase": [
+        {"Id": "501", "EntityRef": HOTEL, "TotalAmt": 285.0, "TxnDate": "2026-10-02",
+         "PaymentType": "CreditCard", "Line": LODGING},
+        # Same merchant, amount and date: a possible double charge
+        {"Id": "502", "EntityRef": HOTEL, "TotalAmt": 285.0, "TxnDate": "2026-10-02",
+         "PaymentType": "CreditCard", "Line": LODGING},
+    ],
+    # A receipt is attached to purchase 501 only
+    "Attachable": [
+        {"Id": "700", "AttachableRef": [{"EntityRef": {"type": "Purchase", "value": "501"}}]},
+    ],
+}  # fmt: skip
+
+
 class FakeIntuit:
     """Intuit's OAuth and accounting API, as far as the app uses them."""
 
@@ -162,6 +204,7 @@ class FakeIntuit:
                         "AccountType": "Expense",
                     }
                 ],
+                **RECEIVABLES_AND_EXPENSES,
             }[entity]
             return httpx.Response(200, json={"QueryResponse": {entity: rows}})
         return httpx.Response(404)
@@ -305,12 +348,38 @@ async def test_user_connects_own_quickbooks_and_it_syncs(
     assert source["id"] == result["source"][0]
     assert source["status"] == "connected"
     assert source["name"] == "Acme Holdings Ltd"
-    assert source["record_counts"] == {"vendor": 2, "purchase_order": 1, "bill": 1, "account": 1}
+    assert source["record_counts"] == {
+        "vendor": 2,
+        "purchase_order": 1,
+        "bill": 1,
+        "account": 1,
+        "customer": 2,
+        "invoice": 2,
+        "payment": 2,
+        "expense": 2,
+    }
     assert "credentials" not in json.dumps(source)
 
     bills = (await me.get(f"{SOURCES}/{source['id']}/records", params={"type": "bill"})).json()
     assert bills[0]["data"]["po_number"] == "PO-77"  # linked PO resolved to its number
     assert bills[0]["data"]["account"] == "6100 Cloud Hosting"
+
+    def records(record_type: str) -> Any:
+        return me.get(f"{SOURCES}/{source['id']}/records", params={"type": record_type})
+
+    invoices = {r["reference"]: r["data"] for r in (await records("invoice")).json()}
+    assert invoices["INV-8000"]["paid_date"] == "2026-08-20"  # its payment's date
+    assert invoices["INV-8021"]["paid_date"] is None
+    assert invoices["INV-8021"]["balance"] == "1000.00"
+    payments = {r["reference"]: r["data"] for r in (await records("payment")).json()}
+    assert payments["CHK-100"]["invoice_number"] == "INV-8000"  # linked invoice id resolved
+    assert payments["CHK-100"]["applied_amount"] == "500.00"
+    assert payments["WIRE-2901"]["invoice_number"] is None
+    assert payments["WIRE-2901"]["memo"] == "Short paid INV-8021: damaged pallet"
+    expenses = {r["reference"]: r["data"] for r in (await records("expense")).json()}
+    assert expenses["501"]["has_receipt"] is True and expenses["502"]["has_receipt"] is False
+    assert expenses["501"]["account"] == "Lodging"
+    assert expenses["501"]["vendor_name"] == "Northbridge Hotel"
 
     row = await db.get(DataSource, source["id"])
     assert row is not None and row.credentials_enc is not None
@@ -465,6 +534,26 @@ async def test_upload_preview_suggests_a_mapping(me: AsyncClient) -> None:
     }
     assert (body["row_count"], body["valid_count"], body["error_count"]) == (3, 2, 1)
     assert body["errors"][0].startswith("Row 4: total: 'abc' is not an amount")
+
+
+async def test_upload_maps_a_bank_payments_file(me: AsyncClient) -> None:
+    payments = (
+        b"Date,Customer,Reference,Amount,Invoice No,Remittance\n"
+        b"15/10/2026,Harbor Distribution,WIRE-2901,900.00,,Short paid INV-8021\n"
+    )
+    body = (await upload(me, "/preview", payments, record_type="payment")).json()
+    assert body["mapping"] == {
+        "external_id": None,
+        "reference_number": "Reference",
+        "customer_name": "Customer",
+        "total": "Amount",
+        "payment_date": "Date",
+        "invoice_number": "Invoice No",
+        "applied_amount": None,
+        "unapplied_amount": None,
+        "memo": "Remittance",
+    }
+    assert (body["valid_count"], body["error_count"]) == (1, 0)
 
 
 async def test_upload_rejects_bad_rows_unless_skipped(me: AsyncClient) -> None:

@@ -10,6 +10,7 @@ from src.app.agent_catalog.agents.base import (
     BaseAgent,
     Calculation,
     Finding,
+    Prefill,
 )
 from src.app.agent_catalog.agents.checks import (
     ZERO,
@@ -25,7 +26,11 @@ from src.app.agent_catalog.agents.expense_audit.schemas import (
     ExpenseAuditInput,
     ExpenseAuditPolicy,
 )
+from src.app.agent_catalog.agents.fields import PolicySettings
 from src.app.agent_catalog.runs.models import FlagSeverity
+from src.app.data_sources.access import FinanceData
+from src.app.data_sources.models import DataSource
+from src.app.data_sources.records import Expense, Record, RecordType
 
 _ID_SEPARATORS = re.compile(r"[\s,;]+")
 
@@ -56,8 +61,77 @@ class ExpenseAuditAgent(BaseAgent):
     narrative_guidance = prompt.GUIDANCE
     prompt_version = prompt.PROMPT_VERSION
     draft_message = "Clarification request to the employee about this expense claim"
+    source_record_type = RecordType.EXPENSE
     policy_schema = ExpenseAuditPolicy
     approval_amount_label = "Claim amount"
+
+    @classmethod
+    async def prefill(
+        cls,
+        record: Record,
+        source: DataSource,
+        data: FinanceData,
+        policy: PolicySettings | None = None,
+    ) -> Prefill:
+        expense = cast(Expense, record)
+        limits = cast(ExpenseAuditPolicy, policy) if policy else ExpenseAuditPolicy()
+        values = {
+            "employee": expense.employee,
+            "merchant": expense.vendor_name,
+            "claim_amount": expense.total if expense.total > ZERO else None,
+            "policy_limit": limits.limit_for(expense.account),
+            "receipt_provided": expense.has_receipt,
+            "card_transaction_id": expense.transaction_id,
+        }
+        # Only what the source knows: the preparer completes the rest (e.g. the receipt total)
+        return Prefill({k: v for k, v in values.items() if v is not None})
+
+    @staticmethod
+    async def _card_checks(claim: ExpenseAuditInput, ctx: AnalysisContext) -> list[Finding]:
+        """Against the preparer's card transactions (QuickBooks or an upload), if they have them."""
+        if not claim.card_transaction_id or not await ctx.data.has(RecordType.EXPENSE):
+            return []
+        charge = await ctx.data.find(Expense, RecordType.EXPENSE, claim.card_transaction_id)
+        if charge is None:
+            return [
+                Finding(
+                    "CARD_TRANSACTION_NOT_FOUND",
+                    FlagSeverity.WARNING,
+                    f"Card transaction {claim.card_transaction_id} isn't in your data source",
+                    "card_transaction_id",
+                )
+            ]
+        findings = []
+        if charge.total != claim.claim_amount:
+            findings.append(
+                Finding(
+                    "CLAIM_DIFFERS_FROM_CHARGE",
+                    FlagSeverity.WARNING,
+                    f"Claim {money(claim.claim_amount)} differs from the card transaction amount "
+                    f"{money(charge.total)}",
+                    "claim_amount",
+                )
+            )
+        same_merchant = await ctx.data.records(
+            Expense, RecordType.EXPENSE, counterparty=charge.vendor_name
+        )
+        twins = [
+            e.transaction_id
+            for e in same_merchant
+            if e.transaction_id != charge.transaction_id
+            and e.total == charge.total
+            and e.expense_date == charge.expense_date
+        ]
+        if twins:
+            findings.append(
+                Finding(
+                    "DUPLICATE_CHARGE",
+                    FlagSeverity.HIGH,
+                    f"Same merchant, amount and date as card transaction {', '.join(twins)}",
+                    "card_transaction_id",
+                )
+            )
+        return findings
 
     @classmethod
     def approval_amount(cls, data: BaseModel) -> Decimal | None:
@@ -95,6 +169,9 @@ class ExpenseAuditAgent(BaseAgent):
                 )
                 duplicate = earlier is not None
                 findings.append(finding)
+        card_findings = await cls._card_checks(claim, ctx)
+        duplicate = duplicate or any(f.code == "DUPLICATE_CHARGE" for f in card_findings)
+        findings.extend(card_findings)
 
         if claim.receipt_provided:
             findings.append(

@@ -6,16 +6,50 @@ validates the API, drives the generated frontend form, and is sent to the LLM.
 
 from copy import copy
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from annotated_types import MaxLen
-from pydantic import BaseModel, ConfigDict, Field, create_model
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    create_model,
+    model_validator,
+)
 
-FieldKind = Literal["text", "textarea", "money", "number", "percent", "boolean"]
+FieldKind = Literal["text", "textarea", "money", "number", "percent", "boolean", "money_map"]
+
+# A name -> amount table in a policy, e.g. expense limits per category
+MoneyMap = dict[
+    Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)],
+    Annotated[
+        Decimal,
+        Field(ge=Decimal(0), max_digits=18, decimal_places=2),
+        AfterValidator(lambda v: v.quantize(Decimal("0.01"))),
+    ],
+]
 
 
 class AgentInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _empty_means_default(cls, data: Any) -> Any:
+        """A field with a default (a checkbox: False) that arrives empty takes its default.
+
+        Saved runs store unanswered checkboxes as NULL; without this they'd fail validation.
+        """
+        if not isinstance(data, dict):
+            return data
+        empty = {
+            name: info.default
+            for name, info in cls.model_fields.items()
+            if data.get(name, ...) is None and not info.is_required() and info.default is not None
+        }
+        return {**data, **empty} if empty else data
 
 
 def text_field(
@@ -156,6 +190,13 @@ def percent_setting(label: str, default: Decimal | None, *, help: str | None = N
         max_digits=9,
         decimal_places=4,
         json_schema_extra={"ui": "percent"},
+    )
+
+
+def money_map_setting(label: str, *, help: str | None = None) -> Any:
+    """Amounts by name, e.g. {"Meals": 75.00, "Lodging": 200.00} (empty: none set)."""
+    return Field(
+        default_factory=dict, title=label, description=help, json_schema_extra={"ui": "money_map"}
     )
 
 

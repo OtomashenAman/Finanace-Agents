@@ -1,7 +1,7 @@
 """Read-only finance data for agents, always scoped to one user's own sources."""
 
 import uuid
-from typing import TypeVar
+from typing import TypeVar, cast
 
 from sqlalchemy import Select, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -56,3 +56,26 @@ class FinanceData:
         record = to_record(row)
         assert isinstance(record, model)  # noqa: S101 - record_type selects the model
         return record
+
+    async def records(
+        self, model: type[R], record_type: RecordType, counterparty: str | None = None
+    ) -> list[R]:
+        """Every record of this type from one source (the preferred one that has any),
+        optionally only one counterparty's (case-insensitive), oldest first. One source
+        only, so the same invoice in two sources is never counted twice."""
+        first = await self._session.scalar(self._query(record_type).limit(1))
+        if first is None:
+            return []
+        query = select(FinanceRecord).where(
+            FinanceRecord.source_id == first.source_id, FinanceRecord.record_type == record_type
+        )
+        if counterparty is not None:
+            query = query.where(
+                func.lower(FinanceRecord.counterparty) == counterparty.strip().lower()
+            )
+        rows = await self._session.scalars(
+            query.order_by(FinanceRecord.txn_date.nulls_last(), FinanceRecord.reference)
+        )
+        records = [to_record(row) for row in rows]
+        assert all(isinstance(r, model) for r in records)  # noqa: S101 - record_type selects it
+        return cast(list[R], records)

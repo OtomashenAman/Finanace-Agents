@@ -10,7 +10,7 @@ export type RunStatus =
   | "approved"
   | "rejected"
 
-export type FieldKind = "text" | "textarea" | "money" | "number" | "percent" | "boolean"
+export type FieldKind = "text" | "textarea" | "money" | "number" | "percent" | "boolean" | "money_map"
 export type FieldValue = string | number | boolean | null
 export type ReviewDecision = "approved" | "rejected" | "changes_requested"
 export type FlagSeverity = "pass" | "info" | "warning" | "high"

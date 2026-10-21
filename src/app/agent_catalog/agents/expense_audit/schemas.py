@@ -2,9 +2,11 @@ from decimal import Decimal
 
 from src.app.agent_catalog.agents.fields import (
     AgentInput,
+    MoneyMap,
     PolicySettings,
     bool_field,
     money_field,
+    money_map_setting,
     money_setting,
     text_field,
     textarea_field,
@@ -36,3 +38,22 @@ class ExpenseAuditPolicy(PolicySettings):
         Decimal("0.00"),
         help="Largest claim vs receipt difference still treated as a match",
     )
+    category_limits: MoneyMap = money_map_setting(
+        "Policy limits by expense category",
+        help="Fills the policy limit when a run is prefilled from your data, by the expense's "
+        "category (GL account name)",
+    )
+    default_limit: Decimal | None = money_setting(
+        "Default policy limit",
+        None,
+        help="Used for categories without their own limit. Empty: the preparer enters it",
+    )
+
+    def limit_for(self, category: str | None) -> Decimal | None:
+        """The category's limit (case-insensitive), else the default limit."""
+        if category:
+            wanted = category.strip().lower()
+            for name, limit in self.category_limits.items():
+                if name.lower() == wanted:
+                    return limit
+        return self.default_limit

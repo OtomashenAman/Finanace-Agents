@@ -147,8 +147,17 @@ class BaseAgent:
         return cls.input_schema is not None
 
     @classmethod
-    async def prefill(cls, record: Record, source: DataSource, data: FinanceData) -> Prefill:
-        """Map a `source_record_type` record to input values (only the fields it knows)."""
+    async def prefill(
+        cls,
+        record: Record,
+        source: DataSource,
+        data: FinanceData,
+        policy: PolicySettings | None = None,
+    ) -> Prefill:
+        """Map a `source_record_type` record to input values (only the fields it knows).
+
+        `policy` is the agent's thresholds in force (e.g. expense limits per category).
+        """
         raise NotImplementedError(f"{cls.__name__} can't be prefilled from a data source")
 
     @classmethod

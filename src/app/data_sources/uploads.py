@@ -36,6 +36,9 @@ _SYNONYMS: dict[str, tuple[str, ...]] = {
         "suppliername",
         "accountname",
         "displayname",
+        "customer",
+        "customername",
+        "client",
     ),
     "email": ("email", "emailaddress", "vendoremail"),
     "tax_id": ("taxid", "vat", "vatnumber", "gstin", "ein", "tin"),
@@ -49,7 +52,7 @@ _SYNONYMS: dict[str, tuple[str, ...]] = {
         "billno",
         "reference",
     ),
-    "vendor_name": ("vendor", "vendorname", "supplier", "suppliername", "payee"),
+    "vendor_name": ("vendor", "vendorname", "supplier", "suppliername", "payee", "merchant"),
     "total": (
         "total",
         "amount",
@@ -63,7 +66,7 @@ _SYNONYMS: dict[str, tuple[str, ...]] = {
     "bill_date": ("date", "billdate", "invoicedate", "txndate"),
     "due_date": ("duedate", "paymentdue"),
     "po_number": ("po", "ponumber", "pono", "purchaseorder", "purchaseordernumber"),
-    "account": ("account", "glaccount", "gl", "expenseaccount", "glcode"),
+    "account": ("account", "glaccount", "gl", "expenseaccount", "glcode", "category"),
     "received_amount": (
         "received",
         "receivedamount",
@@ -75,6 +78,32 @@ _SYNONYMS: dict[str, tuple[str, ...]] = {
     "po_date": ("date", "podate", "orderdate", "txndate"),
     "number": ("number", "accountnumber", "accountno", "acctnum", "code", "glcode"),
     "account_type": ("type", "accounttype", "category"),
+    # customers, invoices, payments
+    "customer_name": ("customer", "customername", "client", "clientname", "billto"),
+    "balance": ("balance", "openbalance", "balancedue", "amountdue", "outstanding", "openamount"),
+    "invoice_date": ("date", "invoicedate", "issuedate", "txndate"),
+    "paid_date": ("paiddate", "datepaid", "paymentdate"),
+    "reference_number": (
+        "reference",
+        "referenceno",
+        "referencenumber",
+        "paymentreference",
+        "paymentref",
+        "ref",
+        "checkno",
+        "wirereference",
+    ),
+    "payment_date": ("date", "paymentdate", "receiveddate", "valuedate", "txndate"),
+    "invoice_number": ("invoice", "invoicenumber", "invoiceno", "appliedto"),
+    "applied_amount": ("applied", "appliedamount", "amountapplied"),
+    "unapplied_amount": ("unapplied", "unappliedamount"),
+    "memo": ("memo", "note", "notes", "remittance", "remittanceadvice", "description"),
+    # expenses (card, cash, check)
+    "transaction_id": ("transactionid", "txnid", "cardtransactionid", "transaction"),
+    "expense_date": ("date", "expensedate", "transactiondate", "postingdate", "txndate"),
+    "payment_type": ("paymenttype", "paymentmethod", "method"),
+    "employee": ("employee", "employeename", "cardholder", "spender"),
+    "has_receipt": ("receipt", "hasreceipt", "receiptattached", "receiptprovided"),
 }
 
 _DATE_FORMATS = ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d-%b-%Y", "%d %b %Y", "%Y/%m/%d")

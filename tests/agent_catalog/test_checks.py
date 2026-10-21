@@ -71,6 +71,12 @@ def test_field_helpers_validate_input() -> None:
                 {"days_overdue": "1", "discount_rate": "1", "gl_balance": "0", **bad}
             )
 
+    # A checkbox saved empty (NULL) counts as unticked
+    empty_box = SampleInput.model_validate(
+        {"days_overdue": "1", "discount_rate": "1", "gl_balance": "0", "open_dispute": None}
+    )
+    assert empty_box.open_dispute is False
+
     # A half-filled draft still saves; a checkbox left out stays False (not empty), so the
     # saved draft validates against the full schema once the rest is filled in
     draft = draft_schema(SampleInput).model_validate({}).model_dump()

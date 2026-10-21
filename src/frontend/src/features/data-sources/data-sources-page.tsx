@@ -94,8 +94,8 @@ export function DataSourcesPage() {
             <Database className="size-8 text-muted-foreground" aria-hidden />
             <p className="font-semibold">No data sources yet</p>
             <p className="max-w-md text-sm text-muted-foreground">
-              Connect QuickBooks to bring in vendors, bills, purchase orders and your chart of accounts, or upload
-              the same data as CSV/XLSX.
+              Connect QuickBooks to bring in vendors, bills, purchase orders, your chart of accounts, customers,
+              invoices, payments and expenses, or upload the same data as CSV/XLSX.
             </p>
           </div>
         )}

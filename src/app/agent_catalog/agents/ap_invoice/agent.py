@@ -24,6 +24,7 @@ from src.app.agent_catalog.agents.checks import (
     over_limit,
     tolerance_check,
 )
+from src.app.agent_catalog.agents.fields import PolicySettings
 from src.app.agent_catalog.runs.models import FlagSeverity
 from src.app.data_sources.access import FinanceData
 from src.app.data_sources.models import DataSource
@@ -65,7 +66,13 @@ class ApInvoiceAgent(BaseAgent):
         return cast(ApInvoiceInput, data).invoice_total
 
     @classmethod
-    async def prefill(cls, record: Record, source: DataSource, data: FinanceData) -> Prefill:
+    async def prefill(
+        cls,
+        record: Record,
+        source: DataSource,
+        data: FinanceData,
+        policy: PolicySettings | None = None,
+    ) -> Prefill:
         bill = cast(Bill, record)
         values: dict[str, Any] = {
             "supplier": bill.vendor_name,

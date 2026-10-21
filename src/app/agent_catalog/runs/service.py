@@ -821,8 +821,12 @@ async def link_source(
     source, record = await data_sources.owned_record(
         session, user, body.source_id, record_type, body.record_id
     )
+    policy = await governance.policy_in_force(session, access.definition)
     prefill = await access.definition.prefill(
-        record, source, FinanceData(session, user.id, source.id)
+        record,
+        source,
+        FinanceData(session, user.id, source.id),
+        policy.values if access.definition.policy_schema else None,
     )
     values = {**_input_values(access, detail), **prefill.values}
     try:
