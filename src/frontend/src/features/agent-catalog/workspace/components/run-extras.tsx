@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label"
 import { useDataSources, useSourceRecords } from "@/features/data-sources/hooks"
 import { errorMessage } from "@/lib/api"
 
-import type { RunDetail, RunExternalAction } from "../api"
+import type { BillPreview, RunDetail, RunExternalAction } from "../api"
 import { formatDateTime } from "../format"
 import { useEvidencePack, useWriteBack } from "../hooks"
 
@@ -57,14 +57,14 @@ function Receipt({ action }: { action: RunExternalAction }) {
   )
 }
 
-/** For an invoice entered by hand: pick the company and expense account, confirm, create. */
-function CreateBillForm({ agentKey, run }: { agentKey: string; run: RunDetail }) {
+/** For a bill entered by hand: pick the company and expense account, confirm, create. */
+function CreateBillForm({ agentKey, run, bill }: { agentKey: string; run: RunDetail; bill: BillPreview }) {
   const writeBack = useWriteBack(agentKey, run.id)
   const sources = useDataSources()
   const companies = (sources.data ?? []).filter((s) => s.kind === "quickbooks" && s.status === "connected")
   const [sourceId, setSourceId] = useState<string | null>(null)
   const source = sourceId ?? companies[0]?.id ?? null
-  const [search, setSearch] = useState(String(run.input.proposed_gl_account ?? ""))
+  const [search, setSearch] = useState(bill.account_hint ?? "")
   const accounts = useSourceRecords(source, "account", search.trim())
   const [accountId, setAccountId] = useState("")
   const [confirming, setConfirming] = useState(false)
@@ -84,8 +84,7 @@ function CreateBillForm({ agentKey, run }: { agentKey: string; run: RunDetail })
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        Creates a bill for {String(run.input.supplier)}, number {String(run.input.invoice_number)}, total{" "}
-        {String(run.input.invoice_total)}, in your QuickBooks. The vendor must exist there. If the vendor already has a
+        Creates a bill for {bill.vendor}, number {bill.doc_number}, total {bill.amount}, in your QuickBooks. The vendor must exist there. If the vendor already has a
         bill with this number, nothing new is created.
       </p>
       {companies.length > 1 && (
@@ -181,7 +180,9 @@ export function WriteBackPanel({ agentKey, run }: { agentKey: string; run: RunDe
         </p>
       )}
       {blocked && action?.status !== "succeeded" && <p className="text-xs text-muted-foreground">{blocked}</p>}
-      {can && mode === "create_bill" && <CreateBillForm agentKey={agentKey} run={run} />}
+      {can && mode === "create_bill" && run.permissions.bill && (
+        <CreateBillForm agentKey={agentKey} run={run} bill={run.permissions.bill} />
+      )}
       {can && mode === "note" && (
         <>
           <p className="text-xs text-muted-foreground">

@@ -1,13 +1,11 @@
-import uuid
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.agent_catalog.agents.ap_invoice import ApInvoiceAgent
-from src.app.agent_catalog.agents.ap_invoice.schemas import ApInvoiceInput
-from src.app.agent_catalog.agents.base import Analysis, AnalysisContext
-from src.app.agent_catalog.runs.models import AgentRun, RunPriority
-from src.app.data_sources.access import FinanceData
+from src.app.agent_catalog.agents.base import Analysis
+from src.app.agent_catalog.runs.models import RunPriority
+from tests.agent_catalog.engine import codes, run_analysis
 
 # Values from the requirement deck's AP Invoice example
 PDF_EXAMPLE = {
@@ -19,17 +17,12 @@ PDF_EXAMPLE = {
 }
 
 
-async def analyze(db: AsyncSession, documents: int = 0, **overrides: object) -> Analysis:
-    data = ApInvoiceInput.model_validate({**PDF_EXAMPLE, **overrides})
-    run = AgentRun(id=uuid.uuid4(), run_number=1)
-    no_sources = FinanceData(db, uuid.uuid4(), None)  # a preparer without data sources
-    return await ApInvoiceAgent.analyze(
-        data, AnalysisContext(session=db, run=run, document_count=documents, data=no_sources)
+async def analyze(
+    db: AsyncSession, documents: int = 0, policy: dict[str, str] | None = None, **overrides: object
+) -> Analysis:
+    return await run_analysis(
+        db, ApInvoiceAgent, {**PDF_EXAMPLE, **overrides}, documents=documents, policy=policy
     )
-
-
-def codes(analysis: Analysis) -> dict[str, str]:
-    return {f.code: f.severity.value for f in analysis.findings}
 
 
 async def test_pdf_example_flags_receipt_mismatch(db: AsyncSession) -> None:
@@ -94,3 +87,21 @@ async def test_missing_gl_alone_is_a_warning_not_an_exception(db: AsyncSession) 
 
     assert analysis.headline == "Invoice needs completion"
     assert analysis.priority == RunPriority.NORMAL
+
+
+async def test_policy_tolerance_and_high_value_limit(db: AsyncSession) -> None:
+    analysis = await analyze(
+        db,
+        documents=1,
+        policy={"receipt_tolerance": "50", "high_value_amount": "10000"},
+        received_amount="12460.00",
+        proposed_gl_account="6100",
+    )
+
+    found = codes(analysis)
+    assert found["RECEIPT_MATCH"] == "pass"
+    assert found["HIGH_VALUE_INVOICE"] == "warning"
+    receipt = next(f for f in analysis.findings if f.code == "RECEIPT_MATCH")
+    assert receipt.message == (
+        "Invoice total is within the 50.00 receipt tolerance (difference 40.00)"
+    )

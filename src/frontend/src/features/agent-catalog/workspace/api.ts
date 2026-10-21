@@ -182,7 +182,18 @@ export interface RunDetail extends RunSummary {
     /** note: stamp the approval on the QuickBooks bill it came from; create_bill: create it */
     write_back: "note" | "create_bill" | null
     write_back_blocked_reason: string | null
+    /** For create_bill: the bill that would be created */
+    bill: BillPreview | null
   }
+}
+
+/** For create_bill: the bill an approved run would create in QuickBooks */
+export interface BillPreview {
+  vendor: string
+  doc_number: string
+  amount: string
+  /** The proposed expense account, to prefill the account search */
+  account_hint: string | null
 }
 
 /** For create_bill: which of your QuickBooks companies, and the expense account */

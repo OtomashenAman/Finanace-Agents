@@ -52,6 +52,7 @@ from src.app.agent_catalog.runs.models import (
     RunStatus,
 )
 from src.app.agent_catalog.runs.schemas import (
+    BillPreview,
     CalculationOut,
     DocumentOut,
     DocumentText,
@@ -373,6 +374,19 @@ class WriteBackOption:
     blocked: str | None  # why it can't be asked for now
 
 
+def _bill_preview(definition: type[BaseAgent], detail: AgentRunDetail) -> BillPreview | None:
+    if definition.bill_fields is None:
+        return None
+    vendor_field, number_field, amount_field = definition.bill_fields
+    hint = getattr(detail, definition.bill_account_field) if definition.bill_account_field else None
+    return BillPreview(
+        vendor=str(getattr(detail, vendor_field)),
+        doc_number=str(getattr(detail, number_field)),
+        amount=str(getattr(detail, amount_field)),
+        account_hint=str(hint) if hint else None,
+    )
+
+
 async def _write_back_option(
     session: AsyncSession, access: AgentAccess, run: AgentRun, actions: list[ExternalAction]
 ) -> WriteBackOption:
@@ -568,6 +582,9 @@ async def _detail(
         can_write_back=write_back.kind is not None and write_back.blocked is None,
         write_back=WRITE_BACK_MODES.get(write_back.kind or ""),
         write_back_blocked_reason=write_back.blocked,
+        bill=_bill_preview(access.definition, detail)
+        if write_back.kind == run_jobs.BILL_CREATE
+        else None,
     )
     approval = None
     if run.submitted_at is not None:

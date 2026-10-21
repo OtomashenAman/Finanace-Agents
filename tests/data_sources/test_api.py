@@ -700,6 +700,12 @@ async def test_an_invoice_entered_by_hand_becomes_a_quickbooks_bill_once(
     mine = (await me.get(f"{RUNS}/{run['id']}")).json()["permissions"]
     assert mine["can_write_back"] is False and mine["write_back"] == "create_bill"
     assert "Connect QuickBooks" in mine["write_back_blocked_reason"]
+    assert mine["bill"] == {
+        "vendor": run["input"]["supplier"],
+        "doc_number": "INV-3001",
+        "amount": "980.50",
+        "account_hint": None,
+    }
 
     source_id = (await connect(me))["source"][0]
     mine = (await me.get(f"{RUNS}/{run['id']}")).json()["permissions"]

@@ -31,6 +31,20 @@ def text_field(
     )
 
 
+def textarea_field(
+    label: str, *, required: bool = False, max_length: int = 4000, help: str | None = None
+) -> Any:
+    """Free text (notes, clauses, assumptions): optional by default."""
+    return Field(
+        ... if required else None,
+        title=label,
+        description=help,
+        min_length=1 if required else None,
+        max_length=max_length,
+        json_schema_extra={"ui": "textarea"},
+    )
+
+
 def money_field(
     label: str, *, required: bool = True, gt: Decimal | None = None, help: str | None = None
 ) -> Any:
@@ -44,6 +58,63 @@ def money_field(
         decimal_places=2,
         json_schema_extra={"ui": "money"},
     )
+
+
+def signed_money_field(label: str, *, required: bool = True, help: str | None = None) -> Any:
+    """An amount that may be negative (e.g. a balance or a variance)."""
+    return Field(
+        ... if required else None,
+        title=label,
+        description=help,
+        max_digits=18,
+        decimal_places=2,
+        json_schema_extra={"ui": "money"},
+    )
+
+
+def number_field(
+    label: str,
+    *,
+    required: bool = True,
+    ge: Decimal | int | None = 0,
+    le: Decimal | int | None = None,
+    help: str | None = None,
+) -> Any:
+    """A count or plain number. Annotate as int for whole numbers (days, months, items)."""
+    return Field(
+        ... if required else None,
+        title=label,
+        description=help,
+        ge=ge,
+        le=le,
+        json_schema_extra={"ui": "number"},
+    )
+
+
+def percent_field(
+    label: str,
+    *,
+    required: bool = True,
+    ge: Decimal | None = Decimal(-100),
+    le: Decimal | None = Decimal(1000),
+    help: str | None = None,
+) -> Any:
+    """A percentage as entered (6 means 6%), so it may be negative for a change."""
+    return Field(
+        ... if required else None,
+        title=label,
+        description=help,
+        ge=ge,
+        le=le,
+        max_digits=9,
+        decimal_places=4,
+        json_schema_extra={"ui": "percent"},
+    )
+
+
+def bool_field(label: str, *, default: bool = False, help: str | None = None) -> Any:
+    """A checkbox: always sent, so it has a default rather than being required."""
+    return Field(default, title=label, description=help, json_schema_extra={"ui": "boolean"})
 
 
 class PolicySettings(BaseModel):
@@ -63,6 +134,25 @@ def money_setting(label: str, default: Decimal | None, *, help: str | None = Non
         decimal_places=2,
         json_schema_extra={"ui": "money"},
     )
+
+
+def percent_setting(label: str, default: Decimal | None, *, help: str | None = None) -> Any:
+    """A threshold percentage, as entered (5 means 5%; None = the check is off)."""
+    return Field(
+        default,
+        title=label,
+        description=help,
+        ge=Decimal(0),
+        le=Decimal(1000),
+        max_digits=9,
+        decimal_places=4,
+        json_schema_extra={"ui": "percent"},
+    )
+
+
+def number_setting(label: str, default: int | None, *, help: str | None = None) -> Any:
+    """A threshold count, e.g. days or items (None = the check is off)."""
+    return Field(default, title=label, description=help, ge=0, json_schema_extra={"ui": "number"})
 
 
 class FormField(BaseModel):

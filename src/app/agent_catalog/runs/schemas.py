@@ -166,6 +166,15 @@ class RunActionOut(BaseModel):
     completed_at: datetime | None
 
 
+class BillPreview(BaseModel):
+    """For "create_bill": the bill an approved run would create (from the agent's bill_fields)."""
+
+    vendor: str
+    doc_number: str
+    amount: str
+    account_hint: str | None  # the proposed expense account, to prefill the account search
+
+
 class RunPermissions(BaseModel):
     can_edit: bool
     can_analyze: bool
@@ -180,6 +189,7 @@ class RunPermissions(BaseModel):
     write_back: Literal["note", "create_bill"] | None = None
     # Why an approved run can't be written back (e.g. no QuickBooks connected), if it can't
     write_back_blocked_reason: str | None = None
+    bill: BillPreview | None = None  # set for "create_bill"
 
 
 class RunSummary(BaseModel):

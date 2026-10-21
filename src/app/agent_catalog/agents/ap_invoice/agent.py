@@ -2,7 +2,6 @@ from decimal import Decimal
 from typing import Any, cast
 
 from pydantic import BaseModel
-from sqlalchemy import func, select
 
 from src.app.agent_catalog.agents.ap_invoice.models import ApInvoiceRun
 from src.app.agent_catalog.agents.ap_invoice.schemas import ApInvoiceInput, ApInvoicePolicy
@@ -14,16 +13,20 @@ from src.app.agent_catalog.agents.base import (
     Finding,
     Prefill,
 )
-from src.app.agent_catalog.runs.models import AgentRun, FlagSeverity, RunStatus
+from src.app.agent_catalog.agents.checks import (
+    ZERO,
+    duplicate_check,
+    evidence_check,
+    has_severity,
+    missing,
+    money,
+    over_limit,
+    tolerance_check,
+)
+from src.app.agent_catalog.runs.models import FlagSeverity
 from src.app.data_sources.access import FinanceData
 from src.app.data_sources.models import DataSource
 from src.app.data_sources.records import Bill, PurchaseOrder, Record, RecordType, Vendor
-
-ZERO = Decimal("0.00")
-
-
-def _money(value: Decimal) -> str:
-    return f"{value:,.2f}"
 
 
 class ApInvoiceAgent(BaseAgent):
@@ -42,6 +45,7 @@ class ApInvoiceAgent(BaseAgent):
     run_model = ApInvoiceRun
     reference_field = "invoice_number"
     bill_fields = ("supplier", "invoice_number", "invoice_total")
+    bill_account_field = "proposed_gl_account"
     policy_version = "ap_invoice/v1"
     controls = (
         "Duplicate supplier/invoice",
@@ -87,150 +91,82 @@ class ApInvoiceAgent(BaseAgent):
     async def analyze(cls, data: BaseModel, ctx: AnalysisContext) -> Analysis:
         invoice = cast(ApInvoiceInput, data)
         policy = cast(ApInvoicePolicy, ctx.policy) if ctx.policy else ApInvoicePolicy()
-        findings: list[Finding] = []
 
-        duplicate_of = await ctx.session.scalar(
-            select(AgentRun.run_number)
-            .join(ApInvoiceRun, ApInvoiceRun.run_id == AgentRun.id)
-            .where(
-                AgentRun.id != ctx.run.id,
-                # Each user's runs are isolated: only their own earlier invoices count
-                AgentRun.preparer_id == ctx.run.preparer_id,
-                AgentRun.status.not_in([RunStatus.DRAFT, RunStatus.VALIDATION_FAILED]),
-                func.lower(ApInvoiceRun.supplier) == invoice.supplier.lower(),
-                func.lower(ApInvoiceRun.invoice_number) == invoice.invoice_number.lower(),
-            )
-            .order_by(AgentRun.run_number)
-            .limit(1)
+        duplicate, duplicate_of = await duplicate_check(
+            ctx,
+            ApInvoiceRun,
+            what="supplier and invoice number",
+            duplicate_code="DUPLICATE_INVOICE",
+            clear_code="DUPLICATE_CHECK_CLEAR",
+            field="invoice_number",
+            supplier=invoice.supplier,
+            invoice_number=invoice.invoice_number,
         )
-        if duplicate_of is not None:
-            findings.append(
-                Finding(
-                    "DUPLICATE_INVOICE",
-                    FlagSeverity.HIGH,
-                    f"Same supplier and invoice number already analyzed in RUN-{duplicate_of:05d}",
-                    "invoice_number",
-                )
-            )
-        else:
-            findings.append(
-                Finding(
-                    "DUPLICATE_CHECK_CLEAR",
-                    FlagSeverity.PASS,
-                    "No earlier run with this supplier and invoice number",
-                    "invoice_number",
-                )
-            )
-
+        findings: list[Finding] = [duplicate]
         findings.extend(await cls._vendor_master_check(invoice.supplier, ctx))
 
         invoice_vs_po = invoice.invoice_total - invoice.po_authorized_amount
         invoice_vs_receipt = invoice.invoice_total - invoice.received_amount
-        if invoice_vs_po == ZERO:
-            findings.append(
-                Finding(
-                    "PO_MATCH",
-                    FlagSeverity.PASS,
-                    "Invoice total matches the PO authorized amount",
-                    "po_authorized_amount",
-                )
+        findings.append(
+            tolerance_check(
+                invoice_vs_po,
+                policy.po_tolerance,
+                subject="Invoice total",
+                other="the PO authorized amount",
+                tolerance_name="PO",
+                match_code="PO_MATCH",
+                mismatch_code="PO_MISMATCH",
+                field="po_authorized_amount",
             )
-        elif abs(invoice_vs_po) <= policy.po_tolerance:
-            findings.append(
-                Finding(
-                    "PO_MATCH",
-                    FlagSeverity.PASS,
-                    f"Invoice total is within the {_money(policy.po_tolerance)} PO tolerance "
-                    f"(difference {_money(invoice_vs_po)})",
-                    "po_authorized_amount",
-                )
+        )
+        findings.append(
+            tolerance_check(
+                invoice_vs_receipt,
+                policy.receipt_tolerance,
+                subject="Invoice total",
+                other="the received amount",
+                tolerance_name="receipt",
+                match_code="RECEIPT_MATCH",
+                mismatch_code="RECEIPT_MISMATCH",
+                field="received_amount",
             )
-        else:
-            findings.append(
-                Finding(
-                    "PO_MISMATCH",
-                    FlagSeverity.HIGH,
-                    f"Invoice total differs from the PO authorized amount by "
-                    f"{_money(invoice_vs_po)}",
-                    "po_authorized_amount",
-                )
-            )
-        if invoice_vs_receipt == ZERO:
-            findings.append(
-                Finding(
-                    "RECEIPT_MATCH",
-                    FlagSeverity.PASS,
-                    "Invoice total matches the received amount",
-                    "received_amount",
-                )
-            )
-        elif abs(invoice_vs_receipt) <= policy.receipt_tolerance:
-            findings.append(
-                Finding(
-                    "RECEIPT_MATCH",
-                    FlagSeverity.PASS,
-                    f"Invoice total is within the {_money(policy.receipt_tolerance)} receipt "
-                    f"tolerance (difference {_money(invoice_vs_receipt)})",
-                    "received_amount",
-                )
-            )
-        else:
-            findings.append(
-                Finding(
-                    "RECEIPT_MISMATCH",
-                    FlagSeverity.HIGH,
-                    f"Invoice total differs from the received amount by "
-                    f"{_money(invoice_vs_receipt)}",
-                    "received_amount",
-                )
-            )
+        )
 
-        if (
-            policy.high_value_amount is not None
-            and invoice.invoice_total > policy.high_value_amount
-        ):
-            findings.append(
-                Finding(
-                    "HIGH_VALUE_INVOICE",
-                    FlagSeverity.WARNING,
-                    f"Invoice total exceeds the {_money(policy.high_value_amount)} high-value "
-                    "limit: review with extra care",
-                    "invoice_total",
-                )
-            )
-        if invoice.tax_total is not None and invoice.tax_total > invoice.invoice_total:
-            findings.append(
-                Finding(
-                    "TAX_EXCEEDS_TOTAL",
-                    FlagSeverity.HIGH,
-                    "Tax total is greater than the invoice total",
-                    "tax_total",
-                )
-            )
-        if not invoice.proposed_gl_account:
-            findings.append(
-                Finding(
-                    "MISSING_GL",
-                    FlagSeverity.WARNING,
-                    "No proposed GL account: coding is required before approval",
-                    "proposed_gl_account",
-                )
-            )
-        if ctx.document_count == 0:
-            findings.append(
-                Finding(
-                    "MISSING_EVIDENCE",
-                    FlagSeverity.WARNING,
-                    "No supporting documents attached (invoice, PO or receipt)",
-                )
-            )
+        optional_checks = [
+            over_limit(
+                invoice.invoice_total,
+                policy.high_value_amount,
+                code="HIGH_VALUE_INVOICE",
+                message=(
+                    f"Invoice total exceeds the {money(policy.high_value_amount or ZERO)} "
+                    "high-value limit: review with extra care"
+                ),
+                field="invoice_total",
+            ),
+            over_limit(
+                invoice.tax_total,
+                invoice.invoice_total,
+                code="TAX_EXCEEDS_TOTAL",
+                message="Tax total is greater than the invoice total",
+                field="tax_total",
+                severity=FlagSeverity.HIGH,
+            ),
+            missing(
+                invoice.proposed_gl_account,
+                code="MISSING_GL",
+                message="No proposed GL account: coding is required before approval",
+                field="proposed_gl_account",
+            ),
+            evidence_check(ctx, "invoice, PO or receipt"),
+        ]
+        findings.extend(f for f in optional_checks if f is not None)
 
-        exceptions = any(f.severity == FlagSeverity.HIGH for f in findings)
+        exceptions = has_severity(findings, FlagSeverity.HIGH)
         if duplicate_of is not None:
             headline = "Duplicate invoice suspected"
         elif exceptions:
             headline = "Invoice discrepancy"
-        elif any(f.severity == FlagSeverity.WARNING for f in findings):
+        elif has_severity(findings, FlagSeverity.WARNING):
             headline = "Invoice needs completion"
         else:
             headline = "Invoice matches PO and receipt"

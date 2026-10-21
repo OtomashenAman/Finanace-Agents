@@ -100,6 +100,8 @@ class BaseAgent:
     # Input fields (vendor, bill number, amount) to create a QuickBooks bill from an approved
     # run entered by hand (None: the agent's results aren't bills)
     bill_fields: ClassVar[tuple[str, str, str] | None] = None
+    # Input field with the proposed expense account: prefills the account search for that bill
+    bill_account_field: ClassVar[str | None] = None
 
     _required: ClassVar[tuple[str, ...]] = (
         "key",
