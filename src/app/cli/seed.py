@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.agent_catalog.models import Agent, AgentAssignment, AgentCapacity
+from src.app.agent_catalog.registry import AGENTS
 from src.app.agent_catalog.service import sync_registry
 from src.app.auth.models import User, UserRole
 from src.app.auth.security import hash_password
@@ -29,9 +30,7 @@ from src.app.entities.models import EntityAssignment, LegalEntity
 # email, full name, role, (agent key, capacity) assignments
 DEMO_TEAM: list[tuple[str, str, UserRole, list[tuple[str, AgentCapacity]]]] = [
     ("demo.user@example.com", "Demo User", UserRole.USER,
-     [(key, AgentCapacity.PREPARER)
-      for key in ("ap_invoice", "financial_close", "treasury_cash", "sox_controls",
-                  "board_reporting")]),
+     [(a.key, AgentCapacity.PREPARER) for a in AGENTS if a.has_workspace()]),
 ]  # fmt: skip
 
 

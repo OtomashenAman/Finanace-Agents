@@ -60,7 +60,7 @@ from src.app.agent_catalog.runs.schemas import (
     FlagOut,
     FormSpec,
     NarrativeOut,
-    NarrativeOutput,
+    NarrativeResult,
     Person,
     ReviewCreate,
     ReviewOut,
@@ -653,7 +653,7 @@ async def _detail(
                 provider=narrative.provider,
                 model=narrative.model,
                 prompt_version=narrative.prompt_version,
-                output=NarrativeOutput(**narrative.output) if narrative.output else None,
+                output=NarrativeResult(**narrative.output) if narrative.output else None,
                 guard_warnings=narrative.guard_warnings,
                 error=narrative.error,
                 input_tokens=narrative.input_tokens,
@@ -1112,7 +1112,8 @@ def _result_hash(run: AgentRun, detail: RunDetail) -> str:
         "flags": [f.model_dump(mode="json") for f in detail.flags],
         "documents": sorted(d.sha256 for d in detail.documents),
         "source": detail.source.records if detail.source else None,
-        "narrative": detail.narrative.output.model_dump()
+        # exclude_none: a narrative without a draft hashes as it did before drafts existed
+        "narrative": detail.narrative.output.model_dump(exclude_none=True)
         if detail.narrative and detail.narrative.output
         else None,
     }

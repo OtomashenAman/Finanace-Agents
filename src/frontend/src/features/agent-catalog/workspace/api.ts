@@ -88,6 +88,8 @@ export interface NarrativeOutput {
   cited_documents: string[]
   missing_evidence: string[]
   ambiguities: string[]
+  /** For agents that draft a message (e.g. a payment reminder): for review, never sent */
+  draft_message?: string | null
 }
 
 export interface Narrative {

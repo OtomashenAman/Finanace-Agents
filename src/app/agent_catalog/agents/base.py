@@ -93,6 +93,9 @@ class BaseAgent:
     # LLM instructions, kept in the agent's prompt.py: appended to the shared system prompt
     narrative_guidance: ClassVar[str] = ""
     prompt_version: ClassVar[str] = ""  # e.g. "treasury_cash/v1": bump when guidance changes
+    # What the LLM also drafts for the reviewer, e.g. "Payment reminder email to the customer"
+    # (None: no draft). Shown as a draft for review; the app never sends it.
+    draft_message: ClassVar[str | None] = None
     # Which data source records a user can pick to prefill a run (None: manual input only)
     source_record_type: ClassVar[RecordType | None] = None
     # Thresholds a Finance Admin can change (versioned); defaults are policy_version

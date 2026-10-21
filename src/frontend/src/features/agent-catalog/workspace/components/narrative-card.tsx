@@ -81,6 +81,16 @@ function NarrativeBody({ narrative, fields, documents }: NarrativeCardProps & { 
       <List title="Key points" items={output.key_points} />
       <List title="Missing evidence" items={output.missing_evidence} />
       <List title="Ambiguities" items={output.ambiguities} />
+      {output.draft_message && (
+        <div>
+          <h4 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+            Draft for review · not sent
+          </h4>
+          <p className="mt-1.5 rounded-md border bg-secondary/40 p-3 text-sm whitespace-pre-wrap">
+            {output.draft_message}
+          </p>
+        </div>
+      )}
       {(output.cited_fields.length > 0 || output.cited_documents.length > 0) && (
         <div className="flex flex-wrap gap-1.5">
           {output.cited_fields.map((f) => (

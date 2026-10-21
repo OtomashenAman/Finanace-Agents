@@ -71,8 +71,11 @@ def test_field_helpers_validate_input() -> None:
                 {"days_overdue": "1", "discount_rate": "1", "gl_balance": "0", **bad}
             )
 
-    # A half-filled draft still saves
-    assert draft_schema(SampleInput).model_validate({}).model_dump()["days_overdue"] is None
+    # A half-filled draft still saves; a checkbox left out stays False (not empty), so the
+    # saved draft validates against the full schema once the rest is filled in
+    draft = draft_schema(SampleInput).model_validate({}).model_dump()
+    assert draft["days_overdue"] is None
+    assert draft["open_dispute"] is False
 
 
 def test_tolerance_check_match_within_and_mismatch() -> None:

@@ -26,6 +26,13 @@ class NarrativeOutput(BaseModel):
     ambiguities: list[str] = Field(description="Conflicts or unclear points")
 
 
+class NarrativeResult(NarrativeOutput):
+    """A stored narrative: the output plus the draft, for agents that ask for one."""
+
+    # e.g. a payment reminder email; only for agents with BaseAgent.draft_message, never sent
+    draft_message: str | None = None
+
+
 class FormSpec(BaseModel):
     agent_key: str
     fields: list[FormField]
@@ -93,7 +100,7 @@ class NarrativeOut(BaseModel):
     provider: str
     model: str
     prompt_version: str
-    output: NarrativeOutput | None
+    output: NarrativeResult | None
     guard_warnings: list[str]
     error: str | None
     input_tokens: int | None

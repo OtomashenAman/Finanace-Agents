@@ -116,14 +116,14 @@ async def test_catalog_reports_which_agents_have_a_workspace(
     c = await signed_in_client(admin)
     agents = {a["key"]: a["has_workspace"] for a in (await c.get("/api/v1/agents")).json()}
     assert agents["ap_invoice"] is True
-    assert agents["expense_audit"] is False
+    assert agents["lease_accounting"] is False
 
 
 async def test_agent_without_workspace_cannot_start_runs(
     preparer: User, prep: AsyncClient, db: AsyncSession
 ) -> None:
-    await assign(db, preparer, AgentCapacity.PREPARER, key="expense_audit")
-    r = await prep.post("/api/v1/agents/expense_audit/runs")
+    await assign(db, preparer, AgentCapacity.PREPARER, key="lease_accounting")
+    r = await prep.post("/api/v1/agents/lease_accounting/runs")
     assert r.status_code == 409
     assert r.json()["detail"]["code"] == "workspace_unavailable"
 

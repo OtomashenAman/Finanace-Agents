@@ -84,15 +84,18 @@ def number_field(
     required: bool = True,
     ge: Decimal | int | None = 0,
     le: Decimal | int | None = None,
+    decimal_places: int | None = None,
     help: str | None = None,
 ) -> Any:
-    """A count or plain number. Annotate as int for whole numbers (days, months, items)."""
+    """A count or plain number. Annotate as int for whole numbers (days, months, items);
+    for a Decimal, decimal_places should match the column's scale."""
     return Field(
         ... if required else None,
         title=label,
         description=help,
         ge=ge,
         le=le,
+        decimal_places=decimal_places,
         json_schema_extra={"ui": "number"},
     )
 
@@ -190,11 +193,16 @@ def form_fields(schema: type[BaseModel]) -> list[FormField]:
 
 
 def draft_schema(schema: type[BaseModel]) -> type[BaseModel]:
-    """Same fields and constraints, all optional: lets users save a half-filled form."""
+    """Same fields and constraints, all optional: lets users save a half-filled form.
+
+    Fields that have a default keep it (a checkbox left out is False, not empty), so a saved
+    draft still validates against the full schema.
+    """
     fields: dict[str, Any] = {}
     for name, info in schema.model_fields.items():
         optional = copy(info)
-        optional.default = None
+        if info.is_required():
+            optional.default = None
         annotation: Any = info.annotation
         fields[name] = (annotation | None, optional)
     model: type[BaseModel] = create_model(f"{schema.__name__}Draft", __base__=AgentInput, **fields)

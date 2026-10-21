@@ -26,6 +26,8 @@ def _safe(name: str) -> str:
 
 
 def _summary(run: RunDetail, timeline: list[AuditEventOut]) -> str:
+    output = run.narrative.output if run.narrative else None
+    draft = output.draft_message if output else None
     lines = [
         f"Evidence pack · {run.reference} · {run.agent_name}",
         "",
@@ -46,9 +48,12 @@ def _summary(run: RunDetail, timeline: list[AuditEventOut]) -> str:
         *[f"  [{f.severity.value}] {f.message}" for f in run.flags],
         "",
         "AI explanation:",
-        f"  {run.narrative.output.summary}"
-        if run.narrative and run.narrative.output
-        else "  (none)",
+        f"  {output.summary}" if output else "  (none)",
+        *(
+            ["", "Draft for review (not sent):", *[f"  {line}" for line in draft.splitlines()]]
+            if draft
+            else []
+        ),
         "",
         "Decisions:",
         *[

@@ -1,7 +1,7 @@
 from typing import Any
 
-from src.app.agent_catalog.runs.narrative import check_output
-from src.app.agent_catalog.runs.schemas import NarrativeOutput
+from src.app.agent_catalog.runs.narrative import check_output, output_schema
+from src.app.agent_catalog.runs.schemas import NarrativeOutput, NarrativeResult
 
 PAYLOAD: dict[str, Any] = {
     "input": {"invoice_total": "12500.00", "received_amount": "1000.00"},
@@ -49,3 +49,32 @@ def test_unknown_citations_are_flagged() -> None:
         "Cited a document that wasn't provided: D9",
         "Cited a field that doesn't exist: bank_account",
     ]
+
+
+# --- drafts (agents with draft_message) ----------------------------------------------------
+
+
+def test_output_schema_asks_for_a_draft_only_when_the_agent_has_one() -> None:
+    assert "draft_message" not in output_schema(PAYLOAD).model_fields
+    with_draft = output_schema(PAYLOAD, "Payment reminder email to the customer")
+    field = with_draft.model_fields["draft_message"]
+    assert field.is_required()
+    assert field.description == (
+        "Payment reminder email to the customer: a draft for human review, never sent automatically"
+    )
+
+
+def test_invented_figure_in_the_draft_is_flagged() -> None:
+    schema = output_schema(PAYLOAD, "Reminder")
+    grounded = schema(
+        **output().model_dump(), draft_message="Your invoice of 12,500.00 is still open."
+    )
+    assert check_output(grounded, PAYLOAD) == []
+    invented = schema(**output().model_dump(), draft_message="Please pay 13,000.00 by Friday.")
+    assert check_output(invented, PAYLOAD) == ["Figure not found in the source data: 13,000.00"]
+
+
+def test_a_narrative_without_draft_dumps_as_before() -> None:
+    """The result hash covers the narrative: drafts must not change it for other agents."""
+    stored = output().model_dump()
+    assert NarrativeResult(**stored).model_dump(exclude_none=True) == stored

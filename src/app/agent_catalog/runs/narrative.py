@@ -88,9 +88,10 @@ def build_payload(
     return payload, doc_ids, notes
 
 
-def output_schema(payload: dict[str, Any]) -> type[NarrativeOutput]:
+def output_schema(payload: dict[str, Any], draft: str | None = None) -> type[NarrativeOutput]:
     """NarrativeOutput narrowed to this payload: the model can only cite keys and documents
-    that exist (strict structured output enforces the enums)."""
+    that exist (strict structured output enforces the enums). With `draft` (the agent's
+    draft_message), it must also write that draft."""
     keys = sorted(set(payload["input"]) | {c["key"] for c in payload["calculations"]})
     overrides: dict[str, Any] = {
         "cited_fields": (
@@ -103,6 +104,11 @@ def output_schema(payload: dict[str, Any]) -> type[NarrativeOutput]:
         overrides["cited_documents"] = (
             list[StrEnum("CitedDocument", [(d, d) for d in documents])],  # type: ignore[misc]
             Field(description="Document ids relied on"),
+        )
+    if draft:
+        overrides["draft_message"] = (
+            str,
+            Field(description=f"{draft}: a draft for human review, never sent automatically"),
         )
     schema: type[NarrativeOutput] = create_model(
         "NarrativeOutput", __base__=NarrativeOutput, **overrides
@@ -123,8 +129,9 @@ def check_output(output: NarrativeOutput, payload: dict[str, Any]) -> list[str]:
             warnings.append(f"Cited a document that wasn't provided: {doc}")
 
     source_numbers = _numbers(json.dumps(payload))
+    draft = getattr(output, "draft_message", None) or ""
     prose = " ".join(
-        [output.summary, *output.key_points, *output.missing_evidence, *output.ambiguities]
+        [output.summary, *output.key_points, *output.missing_evidence, *output.ambiguities, draft]
     )
     for raw in _NUMBER.findall(prose):
         try:
@@ -161,7 +168,7 @@ async def generate(
         result = await llm.generate_structured(
             system=system,
             user=json.dumps(payload, ensure_ascii=False),
-            schema=output_schema(payload),
+            schema=output_schema(payload, definition.draft_message),
         )
     except LLMNotConfiguredError as exc:
         narrative.status = NarrativeStatus.NOT_CONFIGURED
