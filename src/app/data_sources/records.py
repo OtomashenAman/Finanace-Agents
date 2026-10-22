@@ -188,6 +188,11 @@ class Invoice(Record):
     invoice_date: date | None = None
     due_date: date | None = None
     paid_date: date | None = None  # when it was fully paid (the last payment's date)
+    # What was sold, one "item: amount" per line (contracts: the performance obligations)
+    line_items: str | None = Field(default=None, max_length=4000)
+    # Earliest and latest service date on its lines (when the source has them)
+    service_start: date | None = None
+    service_end: date | None = None
 
     @property
     def reference(self) -> str:

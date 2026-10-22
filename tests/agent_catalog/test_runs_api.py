@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.agent_catalog.agents.ap_invoice.models import ApInvoiceRun
+from src.app.agent_catalog.agents.lease_accounting import LeaseAccountingAgent
 from src.app.agent_catalog.models import Agent, AgentAssignment, AgentCapacity
 from src.app.agent_catalog.runs.models import AgentRun
 from src.app.audit.models import AuditEvent
@@ -111,17 +112,22 @@ async def test_form_spec_describes_the_ap_invoice_fields(prep: AsyncClient) -> N
 
 
 async def test_catalog_reports_which_agents_have_a_workspace(
-    admin: User, signed_in_client: ClientFactory
+    admin: User, signed_in_client: ClientFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     c = await signed_in_client(admin)
     agents = {a["key"]: a["has_workspace"] for a in (await c.get("/api/v1/agents")).json()}
-    assert agents["ap_invoice"] is True
+    assert len(agents) == 12
+    assert all(agents.values())
+
+    monkeypatch.setattr(LeaseAccountingAgent, "input_schema", None)
+    agents = {a["key"]: a["has_workspace"] for a in (await c.get("/api/v1/agents")).json()}
     assert agents["lease_accounting"] is False
 
 
 async def test_agent_without_workspace_cannot_start_runs(
-    preparer: User, prep: AsyncClient, db: AsyncSession
+    preparer: User, prep: AsyncClient, db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(LeaseAccountingAgent, "input_schema", None)
     await assign(db, preparer, AgentCapacity.PREPARER, key="lease_accounting")
     r = await prep.post("/api/v1/agents/lease_accounting/runs")
     assert r.status_code == 409

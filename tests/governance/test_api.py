@@ -122,7 +122,8 @@ async def test_thresholds_are_versioned_and_applied(
         ("ap_invoice/v1", "Defaults defined with the agent"),
     ]
     assert (await me.get(f"{GOV}/policies")).status_code == 403
-    assert (await adm.get(f"{GOV}/policies/lease_accounting/versions")).status_code == 404
+    # Intercompany has no thresholds
+    assert (await adm.get(f"{GOV}/policies/intercompany/versions")).status_code == 404
 
 
 # --- approval matrix --------------------------------------------------------------------------

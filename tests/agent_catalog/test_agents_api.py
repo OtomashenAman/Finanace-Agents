@@ -13,6 +13,8 @@ from src.app.agent_catalog.agents.expense_audit.models import ExpenseAuditRun
 from src.app.agent_catalog.agents.financial_close.models import FinancialCloseRun
 from src.app.agent_catalog.agents.fpa_forecast.models import FpaForecastRun
 from src.app.agent_catalog.agents.intercompany.models import IntercompanyRun
+from src.app.agent_catalog.agents.lease_accounting.models import LeaseAccountingRun
+from src.app.agent_catalog.agents.revenue_recognition.models import RevenueRecognitionRun
 from src.app.agent_catalog.agents.sox_controls.models import SoxControlsRun
 from src.app.agent_catalog.agents.treasury_cash.models import TreasuryCashRun
 from src.app.agent_catalog.models import AgentCapacity
@@ -25,6 +27,8 @@ from tests.agent_catalog import test_expense_audit_engine as expense
 from tests.agent_catalog import test_financial_close_engine as close
 from tests.agent_catalog import test_fpa_forecast_engine as fpa
 from tests.agent_catalog import test_intercompany_engine as ic
+from tests.agent_catalog import test_lease_accounting_engine as lease
+from tests.agent_catalog import test_revenue_recognition_engine as revrec
 from tests.agent_catalog import test_sox_controls_engine as sox
 from tests.agent_catalog import test_treasury_cash_engine as treasury
 from tests.agent_catalog.test_runs_api import assign
@@ -49,6 +53,10 @@ CASES: list[tuple[str, dict[str, Any], str, str, str | None, type[AgentRunDetail
      FpaForecastRun, "scenario_value", Decimal("124920.00")),
     ("treasury_cash", treasury.PDF_EXAMPLE, "Liquidity shortfall", "high", None,
      TreasuryCashRun, "funding_gap", Decimal("25000.00")),
+    ("revenue_recognition", revrec.PDF_EXAMPLE, "Allocation across obligations needed", "high",
+     "CTR-2026-091", RevenueRecognitionRun, "monthly_revenue", Decimal("10000.00")),
+    ("lease_accounting", lease.PDF_EXAMPLE, "Lease schedule", "normal", "Headquarters space",
+     LeaseAccountingRun, "lease_liability", Decimal("112814.33")),
     ("sox_controls", sox.PDF_EXAMPLE, "Control exceptions found", "high", "SOX-AP-003",
      SoxControlsRun, "exception_rate_pct", Decimal("8.00")),
     ("board_reporting", board.PDF_EXAMPLE, "Source references missing", "high", "Q3 Board Pack",
@@ -144,6 +152,12 @@ async def test_agents_have_workspaces_and_policies(
         "escalate_score": "number",
     }
     assert set(policies["fpa_forecast"]) == {"variance_materiality_pct", "scenario_review_pct"}
+    assert policies["revenue_recognition"] == {"policy_review_amount": "money"}
+    assert policies["lease_accounting"] == {
+        "short_term_months": "number",
+        "minimum_discount_rate": "percent",
+        "maximum_discount_rate": "percent",
+    }
     # Thresholds are entered on each run for these
     assert "financial_close" not in policies
     assert "intercompany" not in policies

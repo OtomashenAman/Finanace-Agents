@@ -84,6 +84,9 @@ _SYNONYMS: dict[str, tuple[str, ...]] = {
     "balance": ("balance", "openbalance", "balancedue", "amountdue", "outstanding", "openamount"),
     "invoice_date": ("date", "invoicedate", "issuedate", "txndate"),
     "paid_date": ("paiddate", "datepaid", "paymentdate"),
+    "line_items": ("lineitems", "items", "products", "services", "performanceobligations"),
+    "service_start": ("servicestart", "servicestartdate", "startdate", "contractstart"),
+    "service_end": ("serviceend", "serviceenddate", "enddate", "contractend"),
     "reference_number": (
         "reference",
         "referenceno",

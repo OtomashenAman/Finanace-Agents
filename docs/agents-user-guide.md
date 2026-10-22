@@ -1,8 +1,7 @@
 # Agents: user guide
 
-How a run works in the 10 agents that have a workspace: the 3 steps every run goes through,
-how an agent processes your data, then for each agent its input fields and the exact rules it
-applies. (Revenue Recognition and Lease Accounting don't have a workspace yet.)
+How a run works in the 12 agents: the 3 steps every run goes through, how an agent processes
+your data, then for each agent its input fields and the exact rules it applies.
 
 For test values and expected results, see [agents-e2e-testing.md](agents-e2e-testing.md).
 
@@ -103,7 +102,8 @@ upload. A QuickBooks sync brings two kinds of data:
 
 Two ways to prefill a run:
 - **Pick one record** (AP Invoice: a bill; Expense Audit: an expense; Cash Application: a
-  payment; AR Collections: a customer)
+  payment; AR Collections: a customer; Revenue Recognition: a customer invoice; Lease
+  Accounting: a rent bill)
 - **Enter parameters** and let the agent add up many records (Treasury: a horizon; Financial
   Close: an account and month; Board Reporting: a period; FP&A: a unit, period and metric)
 
@@ -569,6 +569,111 @@ any 🔴 → *Check buffer limits before action*; else *Treasury approver sign-o
 
 **Reviewer checks:** bank balances and the timing of the largest flows.
 
+## Revenue Recognition & Contract Accounting
+
+Abstracts the contract facts (ASC 606 / IFRS 15) and shows a preliminary straight-line
+illustration for the revenue controller.
+
+| Field | Meaning | What you can enter |
+|---|---|---|
+| Customer | Who the contract is with | Text |
+| Contract ID | Contract or order number | Text, e.g. `CTR-2026-091` |
+| Contract total | Total contract value | Money, more than 0 |
+| Service term (months) | How long the service runs | Whole number, 1 to 600 |
+| Performance obligations | What the customer gets, one per line | Long text, e.g. `Hosting and support` |
+| Variable consideration / modifications | Discounts, rebates, usage fees, contract changes | Long text, optional |
+| Relevant contract clauses | Clause text the memo may cite | Long text, optional |
+
+**Prefill from your data:** pick a customer invoice (QuickBooks or an uploaded invoices file).
+QuickBooks has no contract object, so the invoice stands in for the contract:
+
+| Field | Comes from |
+|---|---|
+| Customer | the invoice's customer |
+| Contract ID | the invoice number |
+| Contract total | the invoice total (tax included) |
+| Performance obligations | the invoice's product/service lines, one `item: amount` per line |
+| Service term | months from the earliest to the latest **service date** on the lines (both included); empty when the lines have no service dates |
+
+Variable consideration and clauses come from the contract, so they stay for you. In an upload
+these invoice columns are optional: *Line items*, *Service start date*, *Service end date*.
+
+**How it works:** the performance obligations are counted by splitting the text on new lines,
+`;`, `, `, `and`, `&` and `+` (so `Hosting and support` is 2). Monthly revenue = contract total
+÷ term, rounded to the cent; the last month takes the rounding. Then, in order:
+
+| # | Check | Rule | Finding |
+|---|---|---|---|
+| 1 | Obligations | More than one listed | 🔴 `MULTIPLE_OBLIGATIONS` (allocate by standalone selling price) / ✅ `SINGLE_OBLIGATION` |
+| 2 | Variable consideration | Text entered | ⚠️ `VARIABLE_CONSIDERATION` / ✅ `FIXED_CONSIDERATION` |
+| | | Text mentions a change (modify, amend, change, renew, extend, terminate, upgrade, downgrade) | ⚠️ `CONTRACT_CHANGES` |
+| 3 | Earlier run | Earlier analyzed run with the same contract ID | ⚠️ `CONTRACT_ANALYZED_BEFORE` (a possible modification) |
+| 4 | Invoice data | Only with invoices in your data source and an invoice numbered like the contract ID: other customer / found | 🔴 `INVOICE_CUSTOMER_MISMATCH` / ✅ `CONTRACT_INVOICE_FOUND`, plus ℹ️ `INVOICED_DIFFERS_FROM_CONTRACT` if the totals differ |
+| 5 | Policy review | Contract total > revenue policy review limit | ⚠️ `POLICY_REVIEW` |
+| 6 | Clauses | No clauses entered | ⚠️ `MISSING_CONTRACT_CLAUSES` |
+| 7 | Evidence | No document attached | ⚠️ `MISSING_EVIDENCE` |
+| 8 | Illustration | Always | ℹ️ `PRELIMINARY_ILLUSTRATION` |
+
+**Calculations:** contract total, term, obligations listed, illustrative monthly revenue,
+final month.
+
+**Headline:** several obligations → *Allocation across obligations needed*; other 🔴 →
+*Contract data mismatch*; any ⚠️ → *Contract needs review*; else *Single-obligation contract*.
+**Proposed decision:** any 🔴 or ⚠️ → *Needs obligation and policy review*; else *Revenue
+controller sign-off required*. **Approval matrix** routes on the contract total.
+
+**Reviewer checks:** whether each obligation is distinct, the transaction price and any
+variable consideration, and whether a change is a modification. The draft memo never
+concludes on the accounting.
+
+## Lease Accounting & Contract Abstraction
+
+Abstracts the lease terms and gives an indicative lease liability and right-of-use asset.
+
+| Field | Meaning | What you can enter |
+|---|---|---|
+| Lessor | Who the asset is leased from | Text |
+| Leased asset | What is leased | Text, e.g. `Headquarters space` |
+| Monthly payment | Rent per month | Money, more than 0 |
+| Remaining term in months | Months left on the lease | Whole number, 1 to 600 |
+| Annual discount rate (%) | Rate implicit in the lease, or the borrowing rate | Percent, 0 to 100 (`6` = 6%) |
+| Initial direct costs | Costs of getting the lease | Money, optional |
+| Renewal / termination options | Options in the lease | Long text, optional |
+| Lease contract clauses | Clause text for the review checklist | Long text, optional |
+
+**Prefill from your data:** pick a **rent bill** (QuickBooks or an uploaded bills file).
+QuickBooks has no lease object, but the lessor bills the rent: the lessor is the bill's vendor
+and the monthly payment its total. Asset, term, rate and options come from the lease
+agreement, so they stay for you.
+
+**How it works:** monthly rate = annual rate ÷ 12. Lease liability = present value of the
+remaining payments, paid at the end of each month (0% rate: the payments added up).
+Right-of-use asset = liability + initial direct costs. Total interest = payments − liability.
+Then, in order:
+
+| # | Check | Rule | Finding |
+|---|---|---|---|
+| 1 | Classification | Term ≤ short-term limit | ℹ️ `SHORT_TERM_LEASE` (exemption may apply) / ℹ️ `LEASE_CLASSIFICATION` (the reviewer classifies) |
+| 2 | Discount rate | 0% | 🔴 `NO_DISCOUNT_RATE` |
+| | | Outside the expected range | ⚠️ `DISCOUNT_RATE_OUT_OF_RANGE` / ✅ `DISCOUNT_RATE_IN_RANGE` |
+| 3 | Options | Options entered / none | ⚠️ `RENEWAL_TERMINATION_OPTIONS` (term must include reasonably certain periods) / ⚠️ `NO_OPTIONS_RECORDED` |
+| 4 | Modifications | Earlier analyzed run for the same lessor and asset | ⚠️ `LEASE_MODIFICATION` / ✅ `NO_EARLIER_RUN` |
+| 5 | Bills | Only with bills in your data source: no bills from the lessor / latest bill ≠ monthly payment / matches | ⚠️ `NO_LESSOR_BILLS` / ⚠️ `PAYMENT_DIFFERS_FROM_BILLS` / ✅ `PAYMENT_MATCHES_BILLS` |
+| 6 | Clauses | No clauses entered | ⚠️ `MISSING_LEASE_CLAUSES` |
+| 7 | Evidence | No document attached | ⚠️ `MISSING_EVIDENCE` |
+
+**Calculations:** monthly payment, term, rate, total payments, lease liability, initial direct
+costs, right-of-use asset, total interest.
+
+**Headline:** any 🔴 → *Lease assumptions incomplete*; short term → *Short-term lease*; else
+*Lease schedule*. **Proposed decision:** any 🔴 or ⚠️ → *Classification and assumptions need
+review*; else *Lease accounting reviewer sign-off required*. **Approval matrix** routes on the
+lease liability.
+
+**Reviewer checks:** the classification against the signed lease, the source of the discount
+rate, and which options are reasonably certain. These are indicative figures, not a certified
+ASC 842 / IFRS 16 schedule.
+
 ## Audit Evidence, Controls Testing & SOX
 
 Records the result of testing one control and produces a traceable workpaper.
@@ -682,6 +787,10 @@ the setting allows it).
 | | Scenario change review limit | 25% |
 | Treasury | Dual authorization above | 0.00 (every funding gap) |
 | | Large outflow review limit | off |
+| Revenue Recognition | Revenue policy review above | 100,000.00 |
+| Lease Accounting | Short-term lease up to (months) | 12 |
+| | Lowest expected discount rate | 1% |
+| | Highest expected discount rate | 15% |
 | SOX Controls | Minimum sample size | 25 |
 | | Tolerable exceptions | 0 |
 | Board Reporting | Revenue change review threshold | 25% |

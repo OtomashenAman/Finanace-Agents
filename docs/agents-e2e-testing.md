@@ -1,6 +1,6 @@
 # Agents: end-to-end testing guide
 
-Manual end-to-end checks for the 10 agents that have a workspace. For what the steps and fields mean, see
+Manual end-to-end checks for the 12 agents. For what the steps and fields mean, see
 [agents-user-guide.md](agents-user-guide.md). Every expected result below comes from
 the engine tests in `tests/agent_catalog/` (same input gives the same result).
 
@@ -14,7 +14,7 @@ Use **one** data source per user while testing:
 Don't connect QuickBooks and upload files for the same user at once. If you switch,
 remove the old source first.
 
-Eight agents read the data source:
+Ten agents read the data source:
 
 | Agent | Pick a… | Also checks against the data |
 |---|---|---|
@@ -26,6 +26,8 @@ Eight agents read the data source:
 | Financial Close | *nothing*: choose account + month | books closing date |
 | Board Reporting | *nothing*: choose a period | books closing date |
 | FP&A | *nothing*: choose unit + period + metric | whether the data has a budget |
+| Revenue Recognition | customer invoice (the contract) | the invoice is that customer's |
+| Lease Accounting | rent bill | the monthly payment vs the lessor's latest bill |
 
 The other 2 agents (Intercompany, SOX Controls) are manual input only, so they test the same
 with either source, or with none. After a sync, the source card on Data Sources shows how many
@@ -422,6 +424,80 @@ amount label "Funding gap").
 
 ---
 
+## Revenue Recognition
+
+**Data source:** customer invoices (QuickBooks *Invoice*). QuickBooks has no contract object,
+so an invoice stands in for the contract. Business reference = contract ID.
+
+**With QuickBooks:** first **Sync now** (invoices synced before 22 Oct 2026 have no line items
+or service dates). New analysis → *Prefill from your data* → pick an invoice. Check:
+- customer, contract ID (= invoice number) and contract total (= invoice total, tax included)
+- performance obligations = the invoice's product/service lines, one `item: amount` per line
+- service term = months from the first to the last line **service date**; empty if the lines
+  have none (in QuickBooks: Settings → Account and settings → Sales → *Service date* on)
+
+Analyze → `CONTRACT_INVOICE_FOUND` (pass). Change the customer → `INVOICE_CUSTOMER_MISMATCH`
+(high). An invoice with two or more lines → `MULTIPLE_OBLIGATIONS` (high).
+
+**With an upload**, type *Customer invoices*:
+```csv
+Invoice No,Customer,Total,Line Items,Service Start,Service End
+CTR-2026-091,Futura Technologies,120000.00,Hosting: 90000.00; Support: 30000.00,2026-01-01,2026-12-01
+```
+Prefill → term 12, obligations `Hosting: 90000.00; Support: 30000.00` → **Allocation across
+obligations needed**.
+
+**Manual cases:**
+
+| Case | Input | Expected |
+|---|---|---|
+| PDF example | customer `Futura Technologies`, contract `CTR-2026-091`, total `120000`, term `12`, obligations `Hosting and support`, no file | **Allocation across obligations needed**, High. Monthly 10,000.00, 2 obligations. `MULTIPLE_OBLIGATIONS` (high), `FIXED_CONSIDERATION`, `POLICY_REVIEW`, `MISSING_CONTRACT_CLAUSES`, `MISSING_EVIDENCE`, `PRELIMINARY_ILLUSTRATION` (info). Decision "Needs obligation and policy review" |
+| Clean | total `60000`, obligations `Hosting`, clauses `12-month hosting`, 1 file | **Single-obligation contract**, Normal, pass + info only. Decision "Revenue controller sign-off required" |
+| Rounding | total `100000`, term `3` | Monthly 33,333.33, final month 33,333.34 |
+| Variable + change | variable consideration `Usage fees above 1 TB; amended in month 6` | `VARIABLE_CONSIDERATION` + `CONTRACT_CHANGES` (warnings) |
+| Same contract again | second analyzed run with contract `CTR-2026-091` | `CONTRACT_ANALYZED_BEFORE` (warning) |
+| Threshold | Governance: revenue policy review empty | No `POLICY_REVIEW` |
+
+Also check: the approval matrix routes on the **contract total**.
+
+---
+
+## Lease Accounting
+
+**Data source:** bills (QuickBooks *Bill*): pick a **rent bill**. QuickBooks has no lease
+object, but the lessor bills the rent. Business reference = leased asset.
+
+**With QuickBooks:** New analysis → *Prefill from your data* → pick the rent bill. Check:
+lessor = the bill's vendor, monthly payment = the bill total; everything else stays empty
+(it comes from the lease agreement). Enter asset `Headquarters space`, term `24`, rate `6` →
+analyze → `PAYMENT_MATCHES_BILLS` (pass, compared with the lessor's **latest** bill). Change
+the payment → `PAYMENT_DIFFERS_FROM_BILLS`; change the lessor to one with no bills →
+`NO_LESSOR_BILLS`.
+
+**With an upload**, type *Bills*:
+```csv
+Bill No,Vendor,Total,Date,Account
+RENT-09,Central Offices,5000.00,2026-09-01,Rent
+RENT-10,Central Offices,5000.00,2026-10-01,Rent
+```
+Prefill from `RENT-10` → lessor *Central Offices*, payment 5,000.00.
+
+**Manual cases:**
+
+| Case | Input | Expected |
+|---|---|---|
+| PDF example | lessor `Central Offices`, asset `Headquarters space`, payment `5000`, term `24`, rate `6`, no file | **Lease schedule**, Normal. Liability 112,814.33, right-of-use asset 112,814.33, total payments 120,000.00, interest 7,185.67. `LEASE_CLASSIFICATION` (info), `DISCOUNT_RATE_IN_RANGE`, `NO_OPTIONS_RECORDED`, `NO_EARLIER_RUN`, `MISSING_LEASE_CLAUSES`, `MISSING_EVIDENCE`. Decision "Classification and assumptions need review" |
+| Direct costs | initial direct costs `2500` | Right-of-use asset 115,314.33 (liability unchanged) |
+| No rate | rate `0` | **Lease assumptions incomplete**, High. `NO_DISCOUNT_RATE`, liability 120,000.00, interest 0.00 |
+| Odd rate | rate `18` | `DISCOUNT_RATE_OUT_OF_RANGE` (warning) |
+| Short term | term `9` | **Short-term lease**, `SHORT_TERM_LEASE` (info) |
+| Same lease again | second analyzed run, same lessor and asset | `LEASE_MODIFICATION` (warning) |
+| Threshold | Governance: short-term lease empty; term `9` | No `SHORT_TERM_LEASE` |
+
+Also check: the approval matrix routes on the **lease liability**.
+
+---
+
 ## SOX Controls
 
 **Data source:** not used (manual input). Business reference = control ID.
@@ -489,5 +565,7 @@ uv run pytest tests/agent_catalog -q
   prefill from parameters, end to end
 - `test_financial_close_prefill.py`: trial balance and aging parsing, the 24-month window,
   account/period choices, AR vs aging, AP sign, and a failed history sync
+- `test_contract_prefill.py`: Revenue Recognition from an invoice's lines and service dates,
+  Lease Accounting from a rent bill, and their checks against the fake QuickBooks
 - `test_reporting_prefill.py`: periods (month/quarter/year, last year), P&L by class and
   budget parsing, Board quarter vs last year, FP&A by unit and metric, no budget

@@ -172,6 +172,8 @@ class FakeIntuit:
             {"Id": "56", "DisplayName": "Acme Cloud Services", "Active": True},
             {"Id": "57", "DisplayName": "Old Supplier", "Active": False},
         ]
+        # More query rows by entity, added by a test (e.g. {"Invoice": [...]})
+        self.extra: dict[str, list[dict[str, Any]]] = {}
 
     def _tokens(self) -> httpx.Response:
         self.issued += 1
@@ -325,6 +327,7 @@ class FakeIntuit:
                 "Budget": self.budgets,
                 **RECEIVABLES_AND_EXPENSES,
             }[entity]
+            rows = [*rows, *self.extra.get(entity, [])]
             return httpx.Response(200, json={"QueryResponse": {entity: rows}})
         return httpx.Response(404)
 

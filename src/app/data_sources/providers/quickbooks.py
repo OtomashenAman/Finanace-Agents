@@ -385,8 +385,24 @@ def _linked_invoices(payment: dict[str, Any]) -> list[tuple[str, Any]]:
     ]
 
 
+def _sales_lines(row: dict[str, Any]) -> tuple[str | None, list[str]]:
+    """An invoice's product/service lines as "item: amount" text, and their service dates."""
+    items: list[str] = []
+    dates: list[str] = []
+    for line in row.get("Line", []):
+        detail = line.get("SalesItemLineDetail")
+        if line.get("DetailType") != "SalesItemLineDetail" or detail is None:
+            continue
+        name = line.get("Description") or _ref_name(detail, "ItemRef") or "Item"
+        items.append(f"{name}: {Decimal(str(line.get('Amount', 0))):,.2f}")
+        if detail.get("ServiceDate"):
+            dates.append(detail["ServiceDate"])
+    return ("\n".join(items) or None), sorted(dates)
+
+
 def _invoice(row: dict[str, Any], paid_on: dict[str, str]) -> Invoice:
     balance = row.get("Balance")
+    line_items, service_dates = _sales_lines(row)
     return Invoice(
         external_id=str(row["Id"]),
         doc_number=row.get("DocNumber") or f"Invoice {row['Id']}",
@@ -397,6 +413,9 @@ def _invoice(row: dict[str, Any], paid_on: dict[str, str]) -> Invoice:
         due_date=row.get("DueDate"),
         # Fully paid: the date of the last payment applied to it
         paid_date=paid_on.get(str(row["Id"])) if balance == 0 else None,
+        line_items=line_items[:4000] if line_items else None,
+        service_start=service_dates[0] if service_dates else None,
+        service_end=service_dates[-1] if service_dates else None,
     )
 
 
