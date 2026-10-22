@@ -1,0 +1,4 @@
+Account,Account Number,Type,Period,Balance
+Operating Account,1000,Bank,2026-09,250000.00
+Accounts Receivable (A/R),1200,Accounts Receivable,2026-09,120000.00
+Accounts Payable (A/P),2000,Accounts Payable,2026-09,-49000.00

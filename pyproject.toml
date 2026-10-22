@@ -1,0 +1,215 @@
+[project]
+name = "finance-acc"
+version = "0.1.0"
+description = "Finance Agent Command Center - 12 AI finance agents with maker-checker approvals and audit trail"
+readme = "README.md"
+authors = [
+    { name = "abhishek-p-026", email = "abhishek.p@kompglobal.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.20.0",
+    "asyncpg>=0.32.0",
+    "charset-normalizer>=3.5.2",
+    "cryptography>=46.0.0",
+    "email-validator>=2.3.0",
+    "fastapi>=0.147.0",
+    "filetype>=1.2.0",
+    "httpx>=0.28.1",
+    "openai>=3.35.1",
+    "openpyxl>=3.1.5",
+    "pgvector>=0.5.1",
+    "pwdlib[argon2]>=0.3.1",
+    "pydantic>=2.14.1",
+    "pydantic-settings>=2.16.0",
+    "pyjwt>=2.15.1",
+    "pypdf>=6.21.1",
+    "python-docx>=1.2.0",
+    "python-multipart>=0.0.32",
+    "sqlalchemy[asyncio]>=2.1.5",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[tool.uv]
+package = false
+
+
+[dependency-groups]
+dev = [
+    "mypy>=2.4.0",
+    "poethepoet>=0.49.0",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.17.1",
+    "types-openpyxl>=3.1.5.20261017",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-ra --strict-markers --strict-config"
+cache_dir = ".cache/pytest"
+filterwarnings = ["error::DeprecationWarning:src.*"]
+
+[tool.coverage.run]
+source = ["src/app"]
+branch = true
+data_file = ".cache/coverage/.coverage"
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError"]
+
+[tool.coverage.html]
+directory = ".cache/coverage/html"
+
+[tool.coverage.xml]
+output = ".cache/coverage/coverage.xml"
+
+[tool.ruff]
+cache-dir = ".cache/ruff"
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+extend-exclude = ["src/db_migration/versions", "src/frontend"]
+force-exclude = true  # honour excludes even when file names are passed explicitly (editors, hooks)
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # isort
+    "B",        # bugbear
+    "UP",       # pyupgrade
+    "SIM",      # simplify
+    "C4",       # comprehensions
+    "DTZ",      # timezone-aware datetimes (audit timestamps)
+    "S",        # bandit security
+    "ASYNC",    # async pitfalls
+    "RUF",
+]
+ignore = ["B008"]  # FastAPI Depends() in defaults
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106"]
+"scripts/**" = ["S603", "S607"]  # dev helpers intentionally run subprocesses
+
+[tool.ruff.lint.isort]
+known-first-party = ["src"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+cache_dir = ".cache/mypy"
+python_version = "3.12"
+files = ["src/app"]
+mypy_path = "."
+explicit_package_bases = true  # src/ has no __init__.py; modules are src.app.*
+exclude = ["src/db_migration/"]
+strict = true
+plugins = ["pydantic.mypy"]
+warn_unreachable = true
+
+[[tool.mypy.overrides]]
+module = ["filetype", "filetype.*"]  # no type stubs published
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+
+
+# ---------------------------------------------------------------------------
+# Tasks: cross-platform (Linux / macOS / Windows). Run `uv run poe` to list them.
+# ---------------------------------------------------------------------------
+[tool.poe]
+envfile = ".env"   # DATABASE_URL etc. for uvicorn / alembic / pytest (optional file)
+
+[tool.poe.tasks]
+# setup
+env-init.script = "scripts.dev:init_env"
+env-init.help = "Create .env from .env.example (if missing)"
+install-backend = { cmd = "uv sync", help = "Install backend dependencies" }
+install-frontend = { script = "scripts.dev:npm('ci')", help = "Install frontend dependencies (npm ci)" }
+install = { sequence = ["install-backend", "install-frontend"], help = "Install backend + frontend dependencies" }
+setup = { sequence = ["env-init", "install"], help = "First-time setup on a fresh clone" }
+
+# local dev
+dev-backend = { cmd = "uvicorn src.app.main:app --reload --port 8088", help = "Run FastAPI with reload on :8088 (needs db-up)" }
+dev-frontend = { script = "scripts.dev:npm('run', 'dev')", help = "Run Vite on :8081 (proxies /api to backend)" }
+
+# quality
+test = { cmd = "pytest", help = "Run backend tests" }
+test-cov = { cmd = "pytest --cov --cov-report=term --cov-report=html", help = "Tests with coverage (.cache/coverage/html)" }
+_lint-backend = "ruff check ."
+_lint-frontend = { script = "scripts.dev:npm('run', 'lint')" }
+lint = { sequence = ["_lint-backend", "_lint-frontend"], help = "Lint backend (ruff) + frontend (eslint)" }
+_lint-fix-backend = "ruff check --fix ."
+_lint-fix-frontend = { script = "scripts.dev:npm('run', 'lint:fix')" }
+lint-fix = { sequence = ["_lint-fix-backend", "_lint-fix-frontend"], help = "Auto-fix lint issues" }
+format = { cmd = "ruff format .", help = "Format Python code" }
+format-check = { cmd = "ruff format --check .", help = "Check Python formatting" }
+_typecheck-backend = "mypy"
+_typecheck-frontend = { script = "scripts.dev:npm('run', 'typecheck')" }
+typecheck = { sequence = ["_typecheck-backend", "_typecheck-frontend"], help = "mypy + tsc" }
+check = { sequence = ["lint", "format-check", "typecheck", "test"], help = "Everything CI runs" }
+
+# database
+db-up = { sequence = [{ cmd = "docker compose up -d --wait db" }, "migrate", "sync-agents"], help = "Start Postgres/pgvector (:5434), migrate, sync agents" }
+db-down = { cmd = "docker compose stop db", help = "Stop the db container (data kept)" }
+db-shell = { script = "scripts.dev:db_shell", help = "psql inside the db container" }
+migrate = { cmd = "alembic upgrade head", help = "Apply migrations" }
+downgrade = { cmd = "alembic downgrade -1", help = "Roll back one migration" }
+seed = { cmd = "python -m src.app.cli.seed", help = "Create demo Finance Admin (--reset-password to reset/unlock)" }
+sync-agents = { cmd = "python -m src.app.cli.sync_agents", help = "Upsert agent_catalog/registry.py into the agents table" }
+sample-workbook = { script = "scripts.dev:sample_workbook", help = "Rebuild docs/sample-uploads/all-agents.xlsx from its CSVs" }
+
+[tool.poe.tasks.migration]
+help = "Autogenerate a migration: poe migration \"add runs table\""
+cmd = "alembic revision --autogenerate -m \"${message}\""
+args = [{ name = "message", positional = true, required = true }]
+
+[tool.poe.tasks.docker-up]
+cmd = "docker compose up --build"
+help = "Dev stack: db + backend (reload) + vite (HMR)"
+
+[tool.poe.tasks.docker-up-d]
+cmd = "docker compose up -d --build"
+help = "Dev stack in background"
+
+[tool.poe.tasks.docker-down]
+cmd = "docker compose down"
+help = "Stop dev stack"
+
+[tool.poe.tasks.docker-logs]
+cmd = "docker compose logs -f"
+help = "Follow dev stack logs"
+
+[tool.poe.tasks.docker-reset]
+cmd = "docker compose down -v"
+help = "Stop dev stack and DELETE the db volume"
+
+[tool.poe.tasks.docker-prod-up]
+cmd = "docker compose -f docker-compose.prod.yml up -d --build"
+help = "Production stack (needs real .env)"
+
+[tool.poe.tasks.docker-prod-down]
+cmd = "docker compose -f docker-compose.prod.yml down"
+help = "Stop production stack"
+
+[tool.poe.tasks.docker-prod-logs]
+cmd = "docker compose -f docker-compose.prod.yml logs -f"
+help = "Follow production stack logs"
+
+[tool.poe.tasks.build-frontend]
+script = "scripts.dev:npm('run', 'build')"
+help = "Production build of the frontend"
+
+[tool.poe.tasks.clean]
+script = "scripts.dev:clean"
+help = "Remove .cache, __pycache__ and frontend dist"

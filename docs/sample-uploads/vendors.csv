@@ -1,0 +1,4 @@
+Name,Email,Tax ID,Active
+Acme Cloud Services,billing@acme.example,94-1234567,yes
+Central Offices,leasing@centraloffices.example,,yes
+Old Supplier,,,no

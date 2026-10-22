@@ -1,0 +1,16 @@
+# Example scrape config. /metrics is served by the backend (not through nginx); send
+# METRICS_TOKEN as a bearer token.
+global:
+  scrape_interval: 30s
+
+rule_files:
+  - alerts.yml
+
+scrape_configs:
+  - job_name: finance-acc
+    metrics_path: /metrics
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/finance-acc-metrics-token
+    static_configs:
+      - targets: ["backend:8088"]

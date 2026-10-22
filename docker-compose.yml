@@ -1,0 +1,117 @@
+# Development stack: Postgres/pgvector + FastAPI (hot reload) + Vite (HMR)
+#   uv run poe docker-up   (or: docker compose up --build)
+#   uv run poe db-up       (only the database; run backend/frontend locally)
+# Production stack lives in docker-compose.prod.yml
+
+name: finance-acc
+
+x-db-env: &db-env
+  POSTGRES_USER: ${POSTGRES_USER:-finance}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-finance}
+  POSTGRES_DB: ${POSTGRES_DB:-finance_acc}
+
+services:
+  db:
+    # Postgres 16 + pgvector extension (same image in dev, CI and prod)
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment: *db-env
+    ports:
+      # host 5434 by default: 5432/5433 are commonly taken by a local Postgres or other projects
+      - "${POSTGRES_PORT:-5434}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-off: schema to head + agent catalog sync, so a fresh pull never runs on a stale DB
+  migrate:
+    build:
+      context: .
+      dockerfile: src/Dockerfile
+      target: dev
+    restart: "no"
+    command: ["sh", "-c", "alembic upgrade head && python -m src.app.cli.sync_agents"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      ENVIRONMENT: development
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-finance}:${POSTGRES_PASSWORD:-finance}@db:5432/${POSTGRES_DB:-finance_acc}
+    volumes:
+      - ./src:/app/src
+      - ./alembic.ini:/app/alembic.ini
+      - ./pyproject.toml:/app/pyproject.toml
+    depends_on:
+      db:
+        condition: service_healthy
+
+  backend:
+    build:
+      context: .
+      dockerfile: src/Dockerfile
+      target: dev
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      ENVIRONMENT: development
+      # Set DOCKER_FILE_POLLING=true if hot reload misses changes (Windows / some macOS setups)
+      WATCHFILES_FORCE_POLLING: ${DOCKER_FILE_POLLING:-false}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-finance}:${POSTGRES_PASSWORD:-finance}@db:5432/${POSTGRES_DB:-finance_acc}
+    ports:
+      - "${BACKEND_PORT:-8088}:8088"
+    volumes:
+      - ./src:/app/src
+      - ./alembic.ini:/app/alembic.ini
+      - ./tests:/app/tests
+      - ./pyproject.toml:/app/pyproject.toml
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  # Background jobs (AI explanations, QuickBooks write-back). Restarts on code changes.
+  worker:
+    build:
+      context: .
+      dockerfile: src/Dockerfile
+      target: dev
+    restart: unless-stopped
+    command: ["watchfiles", "--filter", "python", "python -m src.app.cli.worker", "src/app"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      ENVIRONMENT: development
+      WATCHFILES_FORCE_POLLING: ${DOCKER_FILE_POLLING:-false}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-finance}:${POSTGRES_PASSWORD:-finance}@db:5432/${POSTGRES_DB:-finance_acc}
+    volumes:
+      - ./src:/app/src
+      - ./pyproject.toml:/app/pyproject.toml
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  frontend:
+    build:
+      context: ./src/frontend
+      target: dev
+    restart: unless-stopped
+    environment:
+      VITE_API_PROXY_TARGET: http://backend:8088
+      VITE_USE_POLLING: ${DOCKER_FILE_POLLING:-false}
+    ports:
+      - "${FRONTEND_PORT:-8081}:8081"
+    volumes:
+      - ./src/frontend:/app
+      # keep the container's node_modules (linux binaries), not the host's
+      - /app/node_modules
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:

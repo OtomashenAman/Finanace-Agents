@@ -1,0 +1,265 @@
+"""Building blocks for agent input forms.
+
+An agent's Input model is a normal Pydantic model built from these helpers. The same model
+validates the API, drives the generated frontend form, and is sent to the LLM.
+"""
+
+from copy import copy
+from decimal import Decimal
+from typing import Annotated, Any, Literal
+
+from annotated_types import MaxLen
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    create_model,
+    model_validator,
+)
+
+FieldKind = Literal[
+    "text", "textarea", "money", "number", "percent", "boolean", "money_map", "choice"
+]
+
+# A name -> amount table in a policy, e.g. expense limits per category
+MoneyMap = dict[
+    Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)],
+    Annotated[
+        Decimal,
+        Field(ge=Decimal(0), max_digits=18, decimal_places=2),
+        AfterValidator(lambda v: v.quantize(Decimal("0.01"))),
+    ],
+]
+
+
+class AgentInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _empty_means_default(cls, data: Any) -> Any:
+        """A field with a default (a checkbox: False) that arrives empty takes its default.
+
+        Saved runs store unanswered checkboxes as NULL; without this they'd fail validation.
+        """
+        if not isinstance(data, dict):
+            return data
+        empty = {
+            name: info.default
+            for name, info in cls.model_fields.items()
+            if data.get(name, ...) is None and not info.is_required() and info.default is not None
+        }
+        return {**data, **empty} if empty else data
+
+
+def text_field(
+    label: str,
+    *,
+    required: bool = True,
+    max_length: int = 200,
+    pattern: str | None = None,
+    help: str | None = None,
+) -> Any:
+    return Field(
+        ... if required else None,
+        title=label,
+        description=help,
+        min_length=1 if required else None,
+        max_length=max_length,
+        pattern=pattern,
+        json_schema_extra={"ui": "text"},
+    )
+
+
+def textarea_field(
+    label: str, *, required: bool = False, max_length: int = 4000, help: str | None = None
+) -> Any:
+    """Free text (notes, clauses, assumptions): optional by default."""
+    return Field(
+        ... if required else None,
+        title=label,
+        description=help,
+        min_length=1 if required else None,
+        max_length=max_length,
+        json_schema_extra={"ui": "textarea"},
+    )
+
+
+def money_field(
+    label: str, *, required: bool = True, gt: Decimal | None = None, help: str | None = None
+) -> Any:
+    return Field(
+        ... if required else None,
+        title=label,
+        description=help,
+        gt=gt,
+        ge=None if gt is not None else Decimal(0),
+        max_digits=18,
+        decimal_places=2,
+        json_schema_extra={"ui": "money"},
+    )
+
+
+def signed_money_field(label: str, *, required: bool = True, help: str | None = None) -> Any:
+    """An amount that may be negative (e.g. a balance or a variance)."""
+    return Field(
+        ... if required else None,
+        title=label,
+        description=help,
+        max_digits=18,
+        decimal_places=2,
+        json_schema_extra={"ui": "money"},
+    )
+
+
+def number_field(
+    label: str,
+    *,
+    required: bool = True,
+    ge: Decimal | int | None = 0,
+    le: Decimal | int | None = None,
+    decimal_places: int | None = None,
+    help: str | None = None,
+) -> Any:
+    """A count or plain number. Annotate as int for whole numbers (days, months, items);
+    for a Decimal, decimal_places should match the column's scale."""
+    return Field(
+        ... if required else None,
+        title=label,
+        description=help,
+        ge=ge,
+        le=le,
+        decimal_places=decimal_places,
+        json_schema_extra={"ui": "number"},
+    )
+
+
+def percent_field(
+    label: str,
+    *,
+    required: bool = True,
+    ge: Decimal | None = Decimal(-100),
+    le: Decimal | None = Decimal(1000),
+    help: str | None = None,
+) -> Any:
+    """A percentage as entered (6 means 6%), so it may be negative for a change."""
+    return Field(
+        ... if required else None,
+        title=label,
+        description=help,
+        ge=ge,
+        le=le,
+        max_digits=9,
+        decimal_places=4,
+        json_schema_extra={"ui": "percent"},
+    )
+
+
+def choice_field(label: str, *, options: list[str] | None = None, help: str | None = None) -> Any:
+    """Pick one value. Fixed `options` go in the form spec; without them the agent supplies
+    them from the user's data (BaseAgent.prefill_options)."""
+    extra: dict[str, Any] = {"ui": "choice", "options": options}
+    return Field(
+        ..., title=label, description=help, min_length=1, max_length=200, json_schema_extra=extra
+    )
+
+
+def bool_field(label: str, *, default: bool = False, help: str | None = None) -> Any:
+    """A checkbox: always sent, so it has a default rather than being required."""
+    return Field(default, title=label, description=help, json_schema_extra={"ui": "boolean"})
+
+
+class PolicySettings(BaseModel):
+    """An agent's thresholds: every field has a default, admins version their changes."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+def money_setting(label: str, default: Decimal | None, *, help: str | None = None) -> Any:
+    """A threshold amount (None = the check is off)."""
+    return Field(
+        default,
+        title=label,
+        description=help,
+        ge=Decimal(0),
+        max_digits=18,
+        decimal_places=2,
+        json_schema_extra={"ui": "money"},
+    )
+
+
+def percent_setting(label: str, default: Decimal | None, *, help: str | None = None) -> Any:
+    """A threshold percentage, as entered (5 means 5%; None = the check is off)."""
+    return Field(
+        default,
+        title=label,
+        description=help,
+        ge=Decimal(0),
+        le=Decimal(1000),
+        max_digits=9,
+        decimal_places=4,
+        json_schema_extra={"ui": "percent"},
+    )
+
+
+def money_map_setting(label: str, *, help: str | None = None) -> Any:
+    """Amounts by name, e.g. {"Meals": 75.00, "Lodging": 200.00} (empty: none set)."""
+    return Field(
+        default_factory=dict, title=label, description=help, json_schema_extra={"ui": "money_map"}
+    )
+
+
+def number_setting(label: str, default: int | None, *, help: str | None = None) -> Any:
+    """A threshold count, e.g. days or items (None = the check is off)."""
+    return Field(default, title=label, description=help, ge=0, json_schema_extra={"ui": "number"})
+
+
+class FormField(BaseModel):
+    name: str
+    label: str
+    kind: FieldKind
+    required: bool
+    help: str | None
+    max_length: int | None
+    default: Any = None  # the value an empty optional field starts with (e.g. 30 days)
+    options: list[str] | None = None  # fixed choices of a "choice" field
+
+
+def form_fields(schema: type[BaseModel]) -> list[FormField]:
+    """Describe an Input model for the frontend form renderer."""
+    fields = []
+    for name, info in schema.model_fields.items():
+        extra = info.json_schema_extra if isinstance(info.json_schema_extra, dict) else {}
+        max_length = next((m.max_length for m in info.metadata if isinstance(m, MaxLen)), None)
+        fields.append(
+            FormField(
+                name=name,
+                label=info.title or name,
+                kind=extra.get("ui", "text"),
+                required=info.is_required(),
+                help=info.description,
+                max_length=max_length,
+                default=None if info.is_required() else info.get_default(call_default_factory=True),
+                options=extra.get("options"),
+            )
+        )
+    return fields
+
+
+def draft_schema(schema: type[BaseModel]) -> type[BaseModel]:
+    """Same fields and constraints, all optional: lets users save a half-filled form.
+
+    Fields that have a default keep it (a checkbox left out is False, not empty), so a saved
+    draft still validates against the full schema.
+    """
+    fields: dict[str, Any] = {}
+    for name, info in schema.model_fields.items():
+        optional = copy(info)
+        if info.is_required():
+            optional.default = None
+        annotation: Any = info.annotation
+        fields[name] = (annotation | None, optional)
+    model: type[BaseModel] = create_model(f"{schema.__name__}Draft", __base__=AgentInput, **fields)
+    return model

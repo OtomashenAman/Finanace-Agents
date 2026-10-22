@@ -1,0 +1,41 @@
+{
+  // Shared workspace settings (committed). Works on Linux, macOS and Windows:
+  // VS Code auto-detects the uv-created .venv, so no OS-specific interpreter path here.
+
+  // Dev database from `uv run poe db-up` (dev-only credentials, same as .env.example)
+  "sqltools.connections": [
+    {
+      "name": "FinanceACC (local docker)",
+      "driver": "PostgreSQL",
+      "server": "localhost",
+      "port": 5434,
+      "database": "finance_acc",
+      "username": "finance",
+      "password": "finance",
+      "previewLimit": 100
+    }
+  ],
+  "sqltools.useNodeRuntime": true,
+
+  "files.eol": "\n",
+  "files.exclude": {
+    "**/__pycache__": true,
+    ".cache": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    ".venv": true,
+    ".cache": true,
+    "uv.lock": true,
+    "src/frontend/package-lock.json": true
+  },
+
+  "python.testing.pytestEnabled": true,
+  "python.testing.pytestArgs": ["tests"],
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": { "source.organizeImports": "explicit" }
+  },
+  "eslint.workingDirectories": ["src/frontend"]
+}
