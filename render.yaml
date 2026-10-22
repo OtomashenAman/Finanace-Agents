@@ -12,11 +12,8 @@ services:
     branch: render-deploy
     dockerfilePath: ./src/Dockerfile
     dockerContext: .
-    # Free plan has no pre-deploy step: migrate + sync the agent catalog on every start
-    dockerCommand: >-
-      sh -c "alembic upgrade head && python -m src.app.cli.sync_agents &&
-      exec uvicorn src.app.main:app --host 0.0.0.0 --port 8088
-      --proxy-headers --forwarded-allow-ips '*' --no-server-header"
+    # Migrate + sync the agent catalog, then serve (Render doesn't shell-parse this: no quotes)
+    dockerCommand: sh src/app/cli/render-start.sh
     healthCheckPath: /health
     envVars:
       - key: PORT
