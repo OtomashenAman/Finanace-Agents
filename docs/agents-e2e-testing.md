@@ -9,7 +9,10 @@ the engine tests in `tests/agent_catalog/` (same input gives the same result).
 Use **one** data source per user while testing:
 
 - **QuickBooks** (main path): Data Sources → Connect QuickBooks (sandbox company) → Sync now.
-- **Upload** (only when QuickBooks isn't available): Data Sources → Upload file.
+- **Upload** (only when QuickBooks isn't available): Data Sources → Upload file. One XLSX
+  with a sheet per type (*Several types, one sheet each*) loads everything as one source;
+  `sample-uploads/all-agents.xlsx` covers every agent (see
+  [sample-uploads/](sample-uploads/README.md)).
 
 Don't connect QuickBooks and upload files for the same user at once. If you switch,
 remove the old source first.
@@ -565,6 +568,9 @@ uv run pytest tests/agent_catalog -q
   prefill from parameters, end to end
 - `test_financial_close_prefill.py`: trial balance and aging parsing, the 24-month window,
   account/period choices, AR vs aging, AP sign, and a failed history sync
+- `tests/data_sources/test_workbook_upload.py`: workbook uploads (sheet names, per-sheet type
+  and mapping, all-or-nothing import into one source) and agents prefilled from the sample
+  workbook
 - `test_contract_prefill.py`: Revenue Recognition from an invoice's lines and service dates,
   Lease Accounting from a rent bill, and their checks against the fake QuickBooks
 - `test_reporting_prefill.py`: periods (month/quarter/year, last year), P&L by class and

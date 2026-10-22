@@ -1,0 +1,3 @@
+Reference,Customer,Amount,Date,Invoice No,Amount Applied,Unapplied Amount,Remittance
+CHK-100,Harbor Distribution,500.00,2026-08-20,INV-8000,500.00,0,
+WIRE-2901,Harbor Distribution,900.00,2026-10-15,,,900.00,Short paid INV-8021: damaged pallet

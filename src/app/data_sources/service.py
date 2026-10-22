@@ -57,9 +57,12 @@ from src.app.data_sources.schemas import (
     RecordOut,
     RecordTypeInfo,
     RedirectUri,
+    SheetChoice,
+    SheetPreview,
     SourceOwner,
     UploadPreview,
     UploadResult,
+    WorkbookPreview,
 )
 from src.app.jobs import queue as jobs
 from src.app.jobs.queue import JobContext
@@ -551,16 +554,17 @@ def record_types() -> list[RecordTypeInfo]:
     ]
 
 
-def _parse(
-    data: bytes,
-    filename: str,
-    record_type: RecordType,
-    mapping: dict[str, str | None] | None,
-) -> tuple[upload_parser.Table, dict[str, str | None], upload_parser.ImportResult]:
+def _read(data: bytes, filename: str) -> upload_parser.Table:
     try:
-        table = upload_parser.read_table(data, filename, get_settings().upload_max_rows)
+        return upload_parser.read_table(data, filename, get_settings().upload_max_rows)
     except ExtractionError as exc:
         raise UploadRejectedError(str(exc)) from exc
+
+
+def _apply_mapping(
+    table: upload_parser.Table, record_type: RecordType, mapping: dict[str, str | None] | None
+) -> tuple[dict[str, str | None], upload_parser.ImportResult]:
+    """The mapping (suggested when None, else checked) and the records it gives."""
     fields = upload_parser.fields_for(record_type)
     if mapping is None:
         mapping = upload_parser.suggest_mapping(record_type, table.headers)
@@ -572,18 +576,24 @@ def _parse(
         if missing_headers:
             raise UploadRejectedError(f"Column(s) not in the file: {', '.join(missing_headers)}.")
         mapping = {f: mapping.get(f) for f in fields}
-    return table, mapping, upload_parser.build_records(record_type, table, mapping)
+    return mapping, upload_parser.build_records(record_type, table, mapping)
 
 
-def preview_upload(
-    data: bytes, filename: str, record_type: RecordType, mapping: dict[str, str | None] | None
-) -> UploadPreview:
-    table, mapping, result = _parse(data, filename, record_type, mapping)
-    unmapped = [
+def _unmapped(record_type: RecordType, mapping: dict[str, str | None]) -> list[str]:
+    return [
         f
         for f, required in upload_parser.fields_for(record_type).items()
         if required and not mapping.get(f)
     ]
+
+
+def _preview(
+    table: upload_parser.Table,
+    record_type: RecordType,
+    mapping: dict[str, str | None],
+    result: upload_parser.ImportResult,
+) -> UploadPreview:
+    unmapped = _unmapped(record_type, mapping)
     errors = [f"Map a column to the required field '{f}'." for f in unmapped] + result.errors
     return UploadPreview(
         record_type=record_type,
@@ -597,35 +607,39 @@ def preview_upload(
     )
 
 
-async def import_upload(
+def _check_importable(
+    record_type: RecordType,
+    mapping: dict[str, str | None],
+    result: upload_parser.ImportResult,
+    skip_invalid: bool,
+    where: str = "",
+) -> None:
+    """Reject a table that can't be imported as chosen; `where` prefixes messages (a sheet)."""
+    unmapped = _unmapped(record_type, mapping)
+    if unmapped:
+        raise UploadRejectedError(f"{where}Map a column to: {', '.join(unmapped)}.")
+    if not result.records:
+        first = result.errors[0] if result.errors else "no rows"
+        raise UploadRejectedError(f"{where}No valid rows to import. {first}")
+    if result.error_count and not skip_invalid:
+        raise UploadRejectedError(
+            f"{where}{result.error_count} row(s) have problems. Fix the file, or import only "
+            f"the {len(result.records)} valid row(s). First: {result.errors[0]}"
+        )
+
+
+async def _save_upload(
     session: AsyncSession,
     user: User,
     *,
     data: bytes,
     filename: str,
-    record_type: RecordType,
-    mapping: dict[str, str | None],
     name: str | None,
-    skip_invalid: bool,
+    records: dict[RecordType, list[Record]],
+    skipped: int,
     ctx: RequestContext,
 ) -> UploadResult:
-    _, mapping, result = _parse(data, filename, record_type, mapping)
-    unmapped = [
-        f
-        for f, required in upload_parser.fields_for(record_type).items()
-        if required and not mapping.get(f)
-    ]
-    if unmapped:
-        raise UploadRejectedError(f"Map a column to: {', '.join(unmapped)}.")
-    if not result.records:
-        first = result.errors[0] if result.errors else "no rows"
-        raise UploadRejectedError(f"No valid rows to import. {first}")
-    if result.error_count and not skip_invalid:
-        raise UploadRejectedError(
-            f"{result.error_count} row(s) have problems. Fix the file, or import only the "
-            f"{len(result.records)} valid row(s). First: {result.errors[0]}"
-        )
-
+    """A new upload source holding `records` (refused if this exact file is already uploaded)."""
     sha256 = hashlib.sha256(data).hexdigest()
     existing = await session.scalar(
         select(DataSource.name).where(
@@ -647,8 +661,9 @@ async def import_upload(
     )
     session.add(source)
     await session.flush()
-    await _replace_records(session, source, {record_type: result.records})
+    await _replace_records(session, source, records)
     source.last_synced_at = utcnow()
+    imported = sum(len(items) for items in records.values())
     record_event(
         session,
         "data_source.uploaded",
@@ -657,15 +672,164 @@ async def import_upload(
         source_id=str(source.id),
         filename=source.filename,
         sha256=sha256,
-        record_type=record_type.value,
-        imported=len(result.records),
-        skipped=result.error_count,
+        record_type=", ".join(t.value for t in records),
+        imported=imported,
+        skipped=skipped,
     )
     await session.commit()
     return UploadResult(
-        source=DataSourceOut.model_validate(source),
-        imported=len(result.records),
+        source=DataSourceOut.model_validate(source), imported=imported, skipped=skipped
+    )
+
+
+def preview_upload(
+    data: bytes, filename: str, record_type: RecordType, mapping: dict[str, str | None] | None
+) -> UploadPreview:
+    table = _read(data, filename)
+    mapping, result = _apply_mapping(table, record_type, mapping)
+    return _preview(table, record_type, mapping, result)
+
+
+async def import_upload(
+    session: AsyncSession,
+    user: User,
+    *,
+    data: bytes,
+    filename: str,
+    record_type: RecordType,
+    mapping: dict[str, str | None],
+    name: str | None,
+    skip_invalid: bool,
+    ctx: RequestContext,
+) -> UploadResult:
+    table = _read(data, filename)
+    mapping, result = _apply_mapping(table, record_type, mapping)
+    _check_importable(record_type, mapping, result, skip_invalid)
+    return await _save_upload(
+        session,
+        user,
+        data=data,
+        filename=filename,
+        name=name,
+        records={record_type: result.records},
         skipped=result.error_count,
+        ctx=ctx,
+    )
+
+
+# --- workbook uploads (one sheet per record type, one source) ---------------------------
+
+
+@dataclass
+class _Sheet:
+    name: str
+    record_type: RecordType | None  # None: skipped
+    note: str | None = None
+    table: upload_parser.Table | None = None
+    mapping: dict[str, str | None] | None = None
+    result: upload_parser.ImportResult | None = None
+
+
+def _parse_workbook(
+    data: bytes, filename: str, choices: dict[str, SheetChoice] | None
+) -> tuple[list[_Sheet], list[str]]:
+    """Each sheet read as the type chosen for it (or the one its name gives), and the errors
+    that stop the whole workbook from being imported."""
+    try:
+        tables = upload_parser.read_workbook(data, filename, get_settings().upload_max_rows)
+    except ExtractionError as exc:
+        raise UploadRejectedError(str(exc)) from exc
+    choices = choices or {}
+    unknown = [name for name in choices if name not in {n for n, _ in tables}]
+    if unknown:
+        raise UploadRejectedError(f"Sheet(s) not in the file: {', '.join(unknown)}.")
+
+    sheets: list[_Sheet] = []
+    for name, table in tables:
+        choice = choices.get(name)
+        if table is None:
+            sheets.append(_Sheet(name, None, "No header row and data rows: skipped"))
+            continue
+        record_type = choice.record_type if choice else upload_parser.sheet_record_type(name)
+        if record_type is None:
+            note = "Skipped" if choice else "Sheet name isn't a known type: pick one or skip it"
+            sheets.append(_Sheet(name, None, note, table))
+            continue
+        mapping, result = _apply_mapping(table, record_type, choice.mapping if choice else None)
+        sheets.append(_Sheet(name, record_type, None, table, mapping, result))
+
+    errors: list[str] = []
+    first_of: dict[RecordType, str] = {}
+    for sheet in sheets:
+        if sheet.record_type is None:
+            continue
+        if sheet.record_type in first_of:
+            errors.append(
+                f"Sheets '{first_of[sheet.record_type]}' and '{sheet.name}' are both "
+                f"{RECORD_LABELS[sheet.record_type]}: keep one, or skip one."
+            )
+        else:
+            first_of[sheet.record_type] = sheet.name
+    if not first_of:
+        errors.append("No sheet to import: name the sheets after a type (e.g. Bills) or pick one.")
+    return sheets, errors
+
+
+def preview_workbook(
+    data: bytes, filename: str, choices: dict[str, SheetChoice] | None
+) -> WorkbookPreview:
+    sheets, errors = _parse_workbook(data, filename, choices)
+    return WorkbookPreview(
+        sheets=[
+            SheetPreview(
+                sheet=s.name,
+                record_type=s.record_type,
+                preview=(
+                    _preview(s.table, s.record_type, s.mapping, s.result)
+                    if s.record_type and s.table and s.mapping is not None and s.result
+                    else None
+                ),
+                note=s.note,
+                empty=s.table is None,
+            )
+            for s in sheets
+        ],
+        errors=errors,
+    )
+
+
+async def import_workbook(
+    session: AsyncSession,
+    user: User,
+    *,
+    data: bytes,
+    filename: str,
+    choices: dict[str, SheetChoice] | None,
+    name: str | None,
+    skip_invalid: bool,
+    ctx: RequestContext,
+) -> UploadResult:
+    """Every sheet that has a type, into one new source; nothing is imported if one fails."""
+    sheets, errors = _parse_workbook(data, filename, choices)
+    if errors:
+        raise UploadRejectedError(errors[0])
+    records: dict[RecordType, list[Record]] = {}
+    skipped = 0
+    for s in sheets:
+        if s.record_type is None or s.mapping is None or s.result is None:
+            continue
+        _check_importable(s.record_type, s.mapping, s.result, skip_invalid, f"Sheet '{s.name}': ")
+        records[s.record_type] = s.result.records
+        skipped += s.result.error_count
+    return await _save_upload(
+        session,
+        user,
+        data=data,
+        filename=filename,
+        name=name,
+        records=records,
+        skipped=skipped,
+        ctx=ctx,
     )
 
 

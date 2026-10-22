@@ -1,0 +1,4 @@
+Bill No,Vendor,Total,Tax,Balance,Date,Due Date,PO Number,GL Account
+INV-2048,Acme Cloud Services,12500.00,500.00,12500.00,2026-10-01,2026-11-10,PO-77,6100 Cloud Hosting
+RENT-09,Central Offices,5000.00,0,0,2026-09-01,2026-09-30,,Rent
+RENT-10,Central Offices,5000.00,0,5000.00,2026-10-01,2026-10-31,,Rent

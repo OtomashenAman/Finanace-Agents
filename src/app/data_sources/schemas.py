@@ -100,6 +100,29 @@ class UploadPreview(BaseModel):
     errors: list[str]
 
 
+class SheetPreview(BaseModel):
+    """One sheet of a workbook upload: the type it is read as (None: skipped) and its preview."""
+
+    sheet: str
+    record_type: RecordType | None
+    preview: UploadPreview | None  # None when skipped
+    note: str | None = None  # why it is skipped
+    empty: bool = False  # no header and data rows: it can't be given a type
+
+
+class WorkbookPreview(BaseModel):
+    sheets: list[SheetPreview]
+    errors: list[str]  # about the workbook as a whole, e.g. two sheets of the same type
+
+
+class SheetChoice(BaseModel):
+    """What the user chose for one sheet: its type (None: skip it) and column mapping
+    (None: the suggested one)."""
+
+    record_type: RecordType | None
+    mapping: dict[str, str | None] | None = None
+
+
 class UploadResult(BaseModel):
     source: DataSourceOut
     imported: int

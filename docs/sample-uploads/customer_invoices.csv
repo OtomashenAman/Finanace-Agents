@@ -1,0 +1,5 @@
+Invoice No,Customer,Total,Balance,Invoice Date,Due Date,Paid Date,Line Items,Service Start,Service End
+INV-8021,Harbor Distribution,1000.00,1000.00,2026-09-01,2026-09-30,,,,
+INV-8000,Harbor Distribution,500.00,0,2026-07-16,2026-08-15,2026-08-20,,,
+INV-9001,Quiet Customer,400.00,400.00,2026-10-01,2026-11-01,,,,
+CTR-2026-091,Futura Technologies,120000.00,0,2026-01-01,2026-01-31,2026-01-30,Hosting: 90000.00; Support: 30000.00,2026-01-01,2026-12-01

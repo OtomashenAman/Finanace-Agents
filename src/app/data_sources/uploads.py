@@ -19,7 +19,7 @@ from pydantic import ValidationError
 from src.app.common.text_extraction.base import ExtractionError, check_zip_archive
 from src.app.common.text_extraction.delimited import decode_text
 from src.app.common.text_extraction.spreadsheet import cell_text
-from src.app.data_sources.records import RECORD_MODELS, Record, RecordType
+from src.app.data_sources.records import RECORD_LABELS, RECORD_MODELS, Record, RecordType
 
 SUPPORTED_EXTENSIONS = (".csv", ".xlsx")
 MAX_REPORTED_ERRORS = 50
@@ -142,6 +142,69 @@ def _normalize(header: str) -> str:
     return re.sub(r"[^a-z0-9]", "", header.lower())
 
 
+# Sheet names (normalized) recognized per record type, besides its label in RECORD_LABELS
+_SHEET_NAMES: dict[RecordType, tuple[str, ...]] = {
+    RecordType.VENDOR: ("vendors", "vendor", "suppliers", "vendormaster"),
+    RecordType.BILL: ("bills", "bill", "supplierinvoices", "apinvoices", "payables"),
+    RecordType.PURCHASE_ORDER: ("purchaseorders", "purchaseorder", "pos"),
+    RecordType.ACCOUNT: ("chartofaccounts", "accounts", "coa"),
+    RecordType.CUSTOMER: ("customers", "customer", "clients"),
+    RecordType.INVOICE: ("invoices", "customerinvoices", "salesinvoices", "arinvoices"),
+    RecordType.PAYMENT: ("payments", "customerpayments"),
+    RecordType.EXPENSE: ("expenses", "cardtransactions", "cardexpenses"),
+    RecordType.ACCOUNT_BALANCE: ("accountbalances", "trialbalance", "balances"),
+    RecordType.SUBLEDGER_TOTAL: ("subledgertotals", "subledger", "agingtotals"),
+    RecordType.PERIOD_RESULT: ("profitandloss", "pl", "pnl", "incomestatement"),
+}
+
+
+def sheet_record_type(sheet: str) -> RecordType | None:
+    """The record type a workbook sheet holds, by its name ("Bills", "P&L", ...)."""
+    name = _normalize(sheet)
+    for record_type, names in _SHEET_NAMES.items():
+        if name in names or name == _normalize(RECORD_LABELS[record_type]):
+            return record_type
+    return None
+
+
+def _table(raw: list[list[str]], max_rows: int) -> Table:
+    """First non-empty row is the header."""
+    rows = [row for row in raw if any(row)]
+    if len(rows) < 2:
+        raise ExtractionError("The file needs a header row and at least one data row.")
+    headers = [h or f"Column {i + 1}" for i, h in enumerate(rows[0])]
+    body = [(row + [""] * len(headers))[: len(headers)] for row in rows[1:]]
+    if len(body) > max_rows:
+        raise ExtractionError(f"Too many rows ({len(body):,}); the limit is {max_rows:,}.")
+    return Table(headers, body)
+
+
+def read_workbook(data: bytes, filename: str, max_rows: int) -> list[tuple[str, Table | None]]:
+    """Every sheet of an XLSX file, in order: (sheet name, table), or None when a sheet has no
+    header and data row."""
+    if not filename.lower().endswith(".xlsx"):
+        raise ExtractionError("Upload an .xlsx file with one sheet per type.")
+    check_zip_archive(data, "XLSX")
+    try:
+        workbook = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    except Exception as exc:  # openpyxl raises many types for broken files
+        raise ExtractionError("This XLSX file is damaged and can't be read.") from exc
+    sheets: list[tuple[str, Table | None]] = []
+    try:
+        for sheet in workbook.worksheets:
+            raw = [[cell_text(v) for v in row] for row in sheet.iter_rows(values_only=True)]
+            try:
+                table: Table | None = _table(raw, max_rows)
+            except ExtractionError as exc:
+                if str(exc).startswith("Too many rows"):
+                    raise ExtractionError(f"Sheet '{sheet.title}': {exc}") from exc
+                table = None
+            sheets.append((sheet.title, table))
+    finally:
+        workbook.close()
+    return sheets
+
+
 def read_table(data: bytes, filename: str, max_rows: int) -> Table:
     """First sheet (XLSX) or the file (CSV): first non-empty row is the header."""
     name = filename.lower()
@@ -167,15 +230,7 @@ def read_table(data: bytes, filename: str, max_rows: int) -> Table:
             workbook.close()
     else:
         raise ExtractionError("Upload a .csv or .xlsx file.")
-
-    rows = [row for row in raw if any(row)]
-    if len(rows) < 2:
-        raise ExtractionError("The file needs a header row and at least one data row.")
-    headers = [h or f"Column {i + 1}" for i, h in enumerate(rows[0])]
-    body = [(row + [""] * len(headers))[: len(headers)] for row in rows[1:]]
-    if len(body) > max_rows:
-        raise ExtractionError(f"Too many rows ({len(body):,}); the limit is {max_rows:,}.")
-    return Table(headers, body)
+    return _table(raw, max_rows)
 
 
 def fields_for(record_type: RecordType) -> dict[str, bool]:

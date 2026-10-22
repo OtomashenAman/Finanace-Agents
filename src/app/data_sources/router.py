@@ -5,6 +5,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Form, Query, Response, UploadFile, status
 from fastapi.responses import RedirectResponse
+from pydantic import TypeAdapter, ValidationError
 
 from src.app.agent_catalog.runs.exceptions import DocumentTooLargeError
 from src.app.auth.dependencies import AdminUser, CurrentUser
@@ -24,9 +25,11 @@ from src.app.data_sources.schemas import (
     RecordOut,
     RecordTypeInfo,
     RedirectUri,
+    SheetChoice,
     SourceUpdate,
     UploadPreview,
     UploadResult,
+    WorkbookPreview,
 )
 
 router = APIRouter(prefix="/data-sources", tags=["data sources"])
@@ -58,6 +61,20 @@ def _parse_mapping(raw: str | None) -> dict[str, str | None] | None:
     ):
         raise UploadRejectedError("The column mapping must map field names to column names.")
     return mapping
+
+
+_SHEETS = TypeAdapter(dict[str, SheetChoice])
+
+
+def _parse_sheets(raw: str | None) -> dict[str, SheetChoice] | None:
+    if raw is None:
+        return None
+    try:
+        return _SHEETS.validate_json(raw)
+    except ValidationError as exc:
+        raise UploadRejectedError(
+            "The sheet choices must map sheet names to {record_type, mapping}."
+        ) from exc
 
 
 # --- the user's own sources (static paths first: "/{source_id}" would shadow them) -----
@@ -154,6 +171,50 @@ async def import_upload(
         filename=file.filename or "upload",
         record_type=record_type,
         mapping=_parse_mapping(mapping) or {},
+        name=name,
+        skip_invalid=skip_invalid,
+        ctx=ctx,
+    )
+
+
+@router.post("/uploads/workbook/preview", response_model=WorkbookPreview, responses=_ERRORS)
+async def preview_workbook(
+    file: UploadFile,
+    _: CurrentUser,
+    sheets: Annotated[
+        str | None, Form(description="JSON {sheet: {record_type, mapping}}; default: by name")
+    ] = None,
+) -> WorkbookPreview:
+    """Read every sheet of an XLSX file as the type its name gives (or the one chosen)."""
+    data = await _read_upload(file)
+    return service.preview_workbook(data, file.filename or "upload", _parse_sheets(sheets))
+
+
+@router.post(
+    "/uploads/workbook",
+    response_model=UploadResult,
+    status_code=status.HTTP_201_CREATED,
+    responses=_ERRORS,
+)
+async def import_workbook(
+    file: UploadFile,
+    session: SessionDep,
+    user: CurrentUser,
+    ctx: RequestContextDep,
+    sheets: Annotated[
+        str | None, Form(description="JSON {sheet: {record_type, mapping}}; default: by name")
+    ] = None,
+    name: Annotated[str | None, Form(max_length=200)] = None,
+    skip_invalid: Annotated[bool, Form()] = False,
+) -> UploadResult:
+    """Import every typed sheet as one new data source (all sheets or none)."""
+    data = await _read_upload(file)
+    return await service.import_workbook(
+        session,
+        user,
+        data=data,
+        filename=file.filename or "upload",
+        choices=_parse_sheets(sheets),
         name=name,
         skip_invalid=skip_invalid,
         ctx=ctx,

@@ -79,6 +79,14 @@ export function useUpload() {
   return useMutation({ mutationFn: dataSourcesApi.upload, meta: { invalidates } })
 }
 
+export function usePreviewWorkbook() {
+  return useMutation({ mutationFn: dataSourcesApi.previewWorkbook })
+}
+
+export function useUploadWorkbook() {
+  return useMutation({ mutationFn: dataSourcesApi.uploadWorkbook, meta: { invalidates } })
+}
+
 export function useAllSources() {
   return useQuery({ queryKey: dataSourceKeys.all(), queryFn: dataSourcesApi.allSources })
 }

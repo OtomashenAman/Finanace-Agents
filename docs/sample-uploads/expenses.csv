@@ -1,0 +1,3 @@
+Transaction ID,Date,Merchant,Amount,Payment Type,Category,Employee,Receipt
+TX-501,2026-10-02,Northbridge Hotel,285.00,CreditCard,Lodging,Jordan Smith,yes
+TX-502,2026-10-02,Northbridge Hotel,285.00,CreditCard,Lodging,Jordan Smith,no

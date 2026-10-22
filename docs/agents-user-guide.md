@@ -100,6 +100,10 @@ upload. A QuickBooks sync brings two kinds of data:
 | **Records** | vendors, bills, purchase orders, accounts (with bank balances), customers, invoices, payments, expenses | right away, when you sync |
 | **Month-end history** | for each of the last **24 complete months**: the trial balance, the AR and AP aging totals, and the profit and loss (by class), plus budgets and the books closing date | in the background after each sync (about 100 QuickBooks reports); the source card shows *Fetching month-end balances…* until it's done |
 
+Uploads take a CSV or XLSX holding one type (each file is its own source), or one XLSX with a
+sheet per type, named after it (*Bills*, *Customer invoices*, *Profit and loss*…), imported as
+**one** source. An upload has no books closing date, so the closed-period checks don't apply.
+
 Two ways to prefill a run:
 - **Pick one record** (AP Invoice: a bill; Expense Audit: an expense; Cash Application: a
   payment; AR Collections: a customer; Revenue Recognition: a customer invoice; Lease

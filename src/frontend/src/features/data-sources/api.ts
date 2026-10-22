@@ -62,6 +62,29 @@ export interface UploadPreview {
   errors: string[]
 }
 
+/** One sheet of a workbook upload: read as record_type (null: skipped) */
+export interface SheetPreview {
+  sheet: string
+  record_type: RecordType | null
+  preview: UploadPreview | null
+  note: string | null
+  /** No header and data rows: it can't be given a type */
+  empty: boolean
+}
+
+export interface WorkbookPreview {
+  sheets: SheetPreview[]
+  errors: string[]
+}
+
+/** A sheet's type (null: skip it) and mapping (omitted: the suggested one) */
+export interface SheetChoice {
+  record_type: RecordType | null
+  mapping?: ColumnMapping | null
+}
+
+export type SheetChoices = Record<string, SheetChoice>
+
 export interface UploadResult {
   source: DataSource
   imported: number
@@ -101,6 +124,13 @@ export interface UploadRequest {
   skipInvalid?: boolean
 }
 
+export interface WorkbookRequest {
+  file: File
+  sheets?: SheetChoices
+  name?: string
+  skipInvalid?: boolean
+}
+
 const source = (id: string) => `/data-sources/${encodeURIComponent(id)}`
 
 function uploadForm({ file, recordType, mapping, name, skipInvalid }: UploadRequest): FormData {
@@ -108,6 +138,15 @@ function uploadForm({ file, recordType, mapping, name, skipInvalid }: UploadRequ
   form.append("file", file)
   form.append("record_type", recordType)
   if (mapping) form.append("mapping", JSON.stringify(mapping))
+  if (name) form.append("name", name)
+  if (skipInvalid) form.append("skip_invalid", "true")
+  return form
+}
+
+function workbookForm({ file, sheets, name, skipInvalid }: WorkbookRequest): FormData {
+  const form = new FormData()
+  form.append("file", file)
+  if (sheets) form.append("sheets", JSON.stringify(sheets))
   if (name) form.append("name", name)
   if (skipInvalid) form.append("skip_invalid", "true")
   return form
@@ -136,6 +175,14 @@ export const dataSourcesApi = {
     apiRequest<UploadPreview>("/data-sources/uploads/preview", { method: "POST", form: uploadForm(req) }),
   upload: (req: UploadRequest) =>
     apiRequest<UploadResult>("/data-sources/uploads", { method: "POST", form: uploadForm(req) }),
+  /** One XLSX, one sheet per record type, imported as one source */
+  previewWorkbook: (req: WorkbookRequest) =>
+    apiRequest<WorkbookPreview>("/data-sources/uploads/workbook/preview", {
+      method: "POST",
+      form: workbookForm(req),
+    }),
+  uploadWorkbook: (req: WorkbookRequest) =>
+    apiRequest<UploadResult>("/data-sources/uploads/workbook", { method: "POST", form: workbookForm(req) }),
 
   // Finance Admin
   allSources: () => apiRequest<AdminDataSource[]>("/admin/data-sources"),
