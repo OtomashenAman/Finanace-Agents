@@ -1,0 +1,87 @@
+# Render Blueprint: FastAPI backend (Docker, free) + Vite SPA (static site); database on Neon.
+#   Render dashboard -> New -> Blueprint -> pick this repo
+# Free plan has no worker service: JOBS_WORKER_IN_APP runs the job worker inside the API process.
+# Secrets marked `sync: false` are asked for once in the dashboard (never committed).
+
+services:
+  - type: web
+    name: finance-acc-api
+    runtime: docker
+    plan: free
+    region: ohio  # same region as the Neon database (us-east-2)
+    branch: render-deploy
+    dockerfilePath: ./src/Dockerfile
+    dockerContext: .
+    # Free plan has no pre-deploy step: migrate + sync the agent catalog on every start
+    dockerCommand: >-
+      sh -c "alembic upgrade head && python -m src.app.cli.sync_agents &&
+      exec uvicorn src.app.main:app --host 0.0.0.0 --port 8088
+      --proxy-headers --forwarded-allow-ips '*' --no-server-header"
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: "8088"
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_FORMAT
+        value: json
+      - key: WEB_CONCURRENCY
+        value: "1"  # 512 MB free instance
+      - key: JOBS_WORKER_IN_APP
+        value: "true"
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: SECRET_KEY
+        generateValue: true
+      # postgresql+asyncpg://...neon.tech/neondb?ssl=require  (direct host, not -pooler)
+      - key: DATABASE_URL
+        sync: false
+      # python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+      - key: DATA_ENCRYPTION_KEY
+        sync: false
+      # The static site's URL, e.g. https://finance-acc.onrender.com
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: LLM_PROVIDER
+        sync: false
+      - key: AZURE_OPENAI_API_KEY
+        sync: false
+      - key: AZURE_OPENAI_ENDPOINT
+        sync: false
+      - key: AZURE_OPENAI_API_VERSION
+        sync: false
+      - key: AZURE_OPENAI_DEPLOYMENT
+        sync: false
+
+  - type: web
+    name: finance-acc
+    runtime: static
+    branch: render-deploy
+    rootDir: src/frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+    # Same as nginx.conf: /api proxied to the backend (same origin, no CORS), SPA fallback last.
+    # If Render gives the backend another hostname, update the /api destination to match.
+    routes:
+      - type: rewrite
+        source: /api/*
+        destination: https://finance-acc-api.onrender.com/api/*
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable

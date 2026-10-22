@@ -63,6 +63,8 @@ class Settings(BaseSettings):
     jobs_mode: Literal["queue", "inline"] = "queue"
     jobs_poll_seconds: float = 1.0
     jobs_lock_timeout_seconds: int = 600  # a running job older than this is retried
+    # Queue mode on hosts without a separate worker service: the API process runs the worker
+    jobs_worker_in_app: bool = False
 
     # Audit trail: events older than this are removed by `python -m src.app.cli.audit purge`
     audit_retention_days: int = 7 * 365

@@ -1,4 +1,7 @@
+import asyncio
+import contextlib
 import hmac
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -7,9 +10,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
+import src.app.jobs.handlers  # noqa: F401 - registers every handler (in-app worker)
 from src.app.core.config import get_settings
-from src.app.core.db import SessionDep, get_engine
+from src.app.core.db import SessionDep, get_engine, get_sessionmaker
 from src.app.core.errors import register_exception_handlers
+from src.app.core.llm.factory import get_llm_provider
 from src.app.core.observability import (
     ObservabilityMiddleware,
     configure_metrics,
@@ -17,13 +22,34 @@ from src.app.core.observability import (
     http_metrics,
     setup_logging,
 )
+from src.app.jobs.queue import run_worker
 from src.app.monitoring.metrics import business_metrics
 from src.app.router import api_router
+
+log = logging.getLogger("finance_acc.jobs")
+
+WORKER_RESTART_SECONDS = 5.0
+
+
+async def in_app_worker(stop: asyncio.Event) -> None:
+    """The job worker as a task of the API process; a crash is logged and the worker restarted."""
+    while not stop.is_set():
+        try:
+            await run_worker(get_sessionmaker(), get_llm_provider(), stop)
+        except Exception:
+            log.exception("in-app worker crashed, restarting in %ss", WORKER_RESTART_SECONDS)
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(stop.wait(), timeout=WORKER_RESTART_SECONDS)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    stop = asyncio.Event()
+    worker = asyncio.create_task(in_app_worker(stop)) if get_settings().jobs_worker_in_app else None
     yield
+    stop.set()  # the worker finishes its current job first
+    if worker is not None:
+        await worker
     flush_metrics(force=True)
     await get_engine().dispose()
 
