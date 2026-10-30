@@ -26,6 +26,19 @@ export const WORKFLOW_SHORT: Record<WorkflowKey, string> = {
   reporting: "Reporting",
 }
 
+/** URL segment of each workflow's workspace: /pod/ar, /pod/bank... */
+export const WORKFLOW_SLUG: Record<WorkflowKey, string> = {
+  ar_collections: "ar",
+  bank_recon: "bank",
+  fpa_trend: "fpa",
+  treasury: "treasury",
+  reporting: "reporting",
+}
+
+export function workflowFromSlug(slug: string | undefined): WorkflowKey | undefined {
+  return (Object.keys(WORKFLOW_SLUG) as WorkflowKey[]).find((k) => WORKFLOW_SLUG[k] === slug)
+}
+
 export const CASE_STATUS: Record<CaseStatus, [string, Tone]> = {
   draft: ["Draft", "neutral"],
   in_review: ["In review", "info"],

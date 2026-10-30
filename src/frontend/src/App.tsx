@@ -22,11 +22,10 @@ import { AiMonitoringPage } from "@/features/monitoring/ai-monitoring-page"
 import { OverviewPage } from "@/features/overview/overview-page"
 import { PodAssignmentsPage } from "@/features/service-pod/assignments-page"
 import { CasePage } from "@/features/service-pod/case-page"
-import { CasesPage } from "@/features/service-pod/cases-page"
+import { WorkflowCasesPage } from "@/features/service-pod/cases-page"
 import { InboxPage, ReviewQueuePage, TasksPage } from "@/features/service-pod/queue-pages"
 import { SourcesPage } from "@/features/service-pod/sources-page"
-import { ArPortfolioPage } from "@/features/service-pod/flows/ar-collections/portfolio-page"
-import { UnappliedCashPage } from "@/features/service-pod/flows/bank-recon/unapplied-page"
+import { WorkflowHomePage, WorkflowsPage } from "@/features/service-pod/workflows-page"
 import { queryClient } from "@/lib/query-client"
 
 const router = createBrowserRouter([
@@ -48,15 +47,16 @@ const router = createBrowserRouter([
           { path: "/approvals", element: <ApprovalsPage /> },
           { path: "/audit", element: <AuditPage /> },
           { path: "/data-sources", element: <DataSourcesPage /> },
-          { path: "/pod", element: <Navigate to="/pod/cases" replace /> },
-          { path: "/pod/cases", element: <CasesPage /> },
+          { path: "/pod", element: <WorkflowsPage /> },
+          { path: "/pod/cases", element: <Navigate to="/pod" replace /> },
           { path: "/pod/cases/:caseId", element: <CasePage /> },
-          { path: "/pod/ar", element: <ArPortfolioPage /> },
-          { path: "/pod/bank", element: <UnappliedCashPage /> },
           { path: "/pod/inbox", element: <InboxPage /> },
           { path: "/pod/review", element: <ReviewQueuePage /> },
           { path: "/pod/tasks", element: <TasksPage /> },
           { path: "/pod/sources", element: <SourcesPage /> },
+          // Each workflow's workspace: /pod/ar, /pod/ar/cases, /pod/bank...
+          { path: "/pod/:slug", element: <WorkflowHomePage /> },
+          { path: "/pod/:slug/cases", element: <WorkflowCasesPage /> },
           {
             element: <RequireAdmin />,
             children: [

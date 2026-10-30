@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Link, useParams } from "react-router"
-import { ArrowLeft } from "lucide-react"
+import { ArrowLeft, ChevronRight } from "lucide-react"
 import { toast } from "sonner"
 
 import { AppPage } from "@/components/layout/app-page"
@@ -17,20 +17,29 @@ import { RefreshSource } from "./components/refresh-source"
 import { FLOW_UI } from "./flows"
 import { useRunAction } from "./use-run-action"
 import { useCase, useProposeTask } from "./hooks"
-import { CASE_STATUS, formatDateTime, shortHash, TASK_STATUS, WORKFLOW_SHORT } from "./labels"
+import { CASE_STATUS, formatDateTime, shortHash, TASK_STATUS, WORKFLOW_SHORT, WORKFLOW_SLUG } from "./labels"
 
 function Header({ c }: { c: CaseDetail }) {
   const [label, tone] = CASE_STATUS[c.status]
   return (
     <div className="rounded-lg border bg-card p-5">
-      <Link to="/pod/cases" className="mb-2 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="size-3" aria-hidden /> All cases
-      </Link>
+      <p className="mb-2 flex items-center gap-1 text-xs text-muted-foreground">
+        <Link to="/pod" className="hover:text-foreground">
+          Workflows
+        </Link>
+        <ChevronRight className="size-3" aria-hidden />
+        <Link to={`/pod/${WORKFLOW_SLUG[c.workflow]}/cases`} className="inline-flex items-center gap-1 hover:text-foreground">
+          <ArrowLeft className="size-3" aria-hidden /> {WORKFLOW_SHORT[c.workflow]} cases
+        </Link>
+      </p>
       <p className="flex flex-wrap items-center gap-2">
         <span className="text-lg font-bold text-brand-navy">{c.reference}</span>
         <span className="text-lg">{c.title}</span>
         <Pill label={label} tone={tone} />
         {c.is_demo && <DemoBadge />}
+        <span title="Service POD reads QuickBooks only; a Finance Admin posts by hand and a fresh export proves it">
+          <Pill label="QuickBooks writes: none" tone="neutral" />
+        </span>
       </p>
       <dl className="mt-3 grid gap-x-6 gap-y-1 text-xs sm:grid-cols-2 lg:grid-cols-4">
         <div>
@@ -68,7 +77,7 @@ function CaseData({ c }: { c: CaseDetail }) {
   return (
     <Card
       title="Case data"
-      hint="What the workflow selected and calculated. Workflow screens arrive in the next phases."
+      hint="What the workflow selected and calculated (technical view)."
       actions={
         c.allowed_actions.edit === null &&
         !editing && (

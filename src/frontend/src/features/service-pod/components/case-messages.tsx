@@ -31,7 +31,7 @@ const CHECK_LABELS: Record<keyof ApprovalChecks, string> = {
 }
 
 /** What the AI read from a reply, next to the reply itself (deck: reply understanding). */
-function Extraction({ m }: { m: Message }) {
+export function Extraction({ m }: { m: Message }) {
   if (!m.extraction_status) return null
   const notes = m.extraction?.notes ?? []
   const output = m.extraction?.output
@@ -101,6 +101,7 @@ function MessageItem({ m, c }: { m: Message; c: CaseDetail }) {
   const owner = c.my_roles.includes("owner")
   const reviewer = c.my_roles.includes("reviewer")
   const pending = send.isPending || update.isPending || reconcile.isPending
+  const ReplyPanel = FLOW_UI[c.workflow]?.ReplyPanel
 
   return (
     <li className="py-3 text-sm">
@@ -135,12 +136,12 @@ function MessageItem({ m, c }: { m: Message; c: CaseDetail }) {
           </div>
         </div>
       ) : (
-        <div className={m.direction === "inbound" ? "grid gap-2 lg:grid-cols-2" : ""}>
+        <div className={m.direction === "inbound" ? "grid gap-3 lg:grid-cols-2" : ""}>
           <div>
             <p className="mt-1 font-medium">{m.subject}</p>
             <pre className="mt-1 max-h-60 overflow-auto rounded bg-secondary/40 p-2 font-sans text-xs whitespace-pre-wrap">{m.body}</pre>
           </div>
-          {m.direction === "inbound" && <Extraction m={m} />}
+          {m.direction === "inbound" && (ReplyPanel ? <ReplyPanel c={c} m={m} /> : <Extraction m={m} />)}
         </div>
       )}
       <p className="mt-1 text-xs text-muted-foreground">

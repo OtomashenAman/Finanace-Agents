@@ -1,17 +1,18 @@
 import { useState } from "react"
 import { Link, useNavigate } from "react-router"
 
-import { AppPage } from "@/components/layout/app-page"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
 import type { BankWorklist, Snapshot } from "../../api"
-import { Card, Empty, LoadError, Loading, Pill, PodTabs } from "../../components/bits"
+import { Card, Empty, LoadError, Loading, Pill } from "../../components/bits"
+import { WorkflowWorkspace } from "../../components/workspace"
 import { useBankWorklist, useCreateCase, useSnapshotRows } from "../../hooks"
 import { CASE_STATUS } from "../../labels"
 import { attempt, selectClass } from "../../ui"
 import { fmt, useCanPrepare } from "../shared"
 import { Kpi, SourceLine } from "../shared-ui"
+import { HOME_LABEL } from "./meta"
 
 function OpenReceipt({ row, snapshot }: { row: BankWorklist["rows"][number]; snapshot: Snapshot }) {
   const create = useCreateCase()
@@ -66,8 +67,7 @@ export function UnappliedCashPage() {
   const { data, isPending, isError } = useBankWorklist()
   const canOpen = useCanPrepare("bank_recon")
   return (
-    <AppPage title="Service POD" subtitle="Bank-to-Invoice: unmatched cash is obvious, and nothing is applied from an amount alone.">
-      <PodTabs />
+    <WorkflowWorkspace workflow="bank_recon" homeLabel={HOME_LABEL}>
       {isPending && <Loading what="receipts" />}
       {isError && <LoadError what="receipts (you need a role in Bank-to-Invoice)" />}
       {data && !data.snapshot && <Empty>No snapshot with bank receipts yet. Add a bank statement on Sources.</Empty>}
@@ -115,6 +115,6 @@ export function UnappliedCashPage() {
           </Card>
         </>
       )}
-    </AppPage>
+    </WorkflowWorkspace>
   )
 }

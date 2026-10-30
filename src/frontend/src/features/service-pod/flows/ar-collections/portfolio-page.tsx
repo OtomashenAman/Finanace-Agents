@@ -1,14 +1,15 @@
 import { Link, useNavigate } from "react-router"
 
-import { AppPage } from "@/components/layout/app-page"
 import { Button } from "@/components/ui/button"
 
-import { Card, Empty, LoadError, Loading, PodTabs } from "../../components/bits"
+import { Card, Empty, LoadError, Loading } from "../../components/bits"
+import { WorkflowWorkspace } from "../../components/workspace"
 import { useArPortfolio, useCreateCase } from "../../hooks"
 import { CASE_STATUS } from "../../labels"
 import { attempt } from "../../ui"
 import { fmt, useCanPrepare } from "../shared"
 import { Kpi, SourceLine } from "../shared-ui"
+import { HOME_LABEL } from "./meta"
 
 /** AR Collections portfolio: open AR, aging, priority customers and next action. */
 export function ArPortfolioPage() {
@@ -18,8 +19,7 @@ export function ArPortfolioPage() {
   const canOpen = useCanPrepare("ar_collections")
 
   return (
-    <AppPage title="Service POD" subtitle="AR Collections: who owes what, how late, and the next step for each customer.">
-      <PodTabs />
+    <WorkflowWorkspace workflow="ar_collections" homeLabel={HOME_LABEL}>
       {isPending && <Loading what="the portfolio" />}
       {isError && <LoadError what="the portfolio (you need a role in AR Collections)" />}
       {data && !data.snapshot && <Empty>No snapshot with customers and invoices yet. Import one on Sources.</Empty>}
@@ -93,6 +93,6 @@ export function ArPortfolioPage() {
           </div>
         </>
       )}
-    </AppPage>
+    </WorkflowWorkspace>
   )
 }

@@ -1,15 +1,16 @@
 import { useState } from "react"
+import { Link } from "react-router"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
 import type { CaseDetail } from "../../api"
 import { Card, GuardedButton, Pill } from "../../components/bits"
-import { formatDateTime } from "../../labels"
+import { formatDateTime, MESSAGE_STATUS, TASK_STATUS } from "../../labels"
 import { selectClass } from "../../ui"
 import { useRunAction } from "../../use-run-action"
 import { money, type InvoiceState } from "../shared"
-import { InvoiceTable } from "../shared-ui"
+import { CheckRow, InvoiceTable } from "../shared-ui"
 
 interface AllocationState {
   lines: { invoice_id: string; invoice_number: string; amount: string }[]
@@ -22,7 +23,15 @@ interface AllocationState {
 export function BankPanel({ c }: { c: CaseDetail }) {
   const { run, pending } = useRunAction(c)
   const s = c.state as {
-    receipt?: { reference: string; payer: string; date: string; amount: string; currency: string; cleared: boolean }
+    receipt?: {
+      reference: string
+      payer: string
+      date: string
+      amount: string
+      currency: string
+      cleared: boolean
+      proof_reference: string | null
+    }
     customer?: { name: string }
     open_invoices?: InvoiceState[]
     currency?: string
@@ -34,11 +43,25 @@ export function BankPanel({ c }: { c: CaseDetail }) {
   const [amounts, setAmounts] = useState<Record<string, string>>({})
   const r = s.receipt
   const total = (s.allocation?.lines ?? []).reduce((sum, l) => sum + Number(l.amount), 0)
+  const task = c.posting_tasks.find((t) => t.kind === "receive_payment")
+  const recorded = c.blockers.some((b) => b.includes("already records"))
+  const ack = [...c.messages].reverse().find((m) => m.purpose === "acknowledgement")
+  const variance = r && s.allocation ? Number(r.amount) - total : null
 
   return (
     <Card title={r ? `${r.reference} · ${money(r.amount, r.currency)}` : "Receipt"} hint={r ? `${r.payer} · value date ${r.date} · ${r.cleared ? "cleared" : "NOT cleared"}` : undefined}>
+      <p className="mb-3 flex flex-wrap gap-1.5">
+        <Pill label={`Bank cleared: ${r?.cleared ? "yes" : "no"}`} tone={r?.cleared ? "good" : "bad"} />
+        <Pill
+          label={variance === null ? "Variance: no allocation yet" : `Variance: ${money(variance, s.currency)}`}
+          tone={variance === null ? "neutral" : variance === 0 ? "good" : "bad"}
+        />
+        <Pill label={`Posting: ${task ? TASK_STATUS[task.status][0].toLowerCase() : "not queued"}`} tone={task?.status === "verified" ? "good" : "info"} />
+        <Pill label="App writes to QuickBooks: 0" tone="neutral" />
+      </p>
       <p className="mb-2 text-sm">
         Customer: <strong>{s.customer?.name}</strong>
+        {r?.proof_reference && <span className="ml-2 text-xs text-muted-foreground">Bank proof: {r.proof_reference}</span>}
       </p>
       <InvoiceTable rows={s.open_invoices ?? []} currency={s.currency} />
       <div className="mt-4 rounded-md bg-secondary/40 p-3 text-sm">
@@ -104,17 +127,40 @@ export function BankPanel({ c }: { c: CaseDetail }) {
         </form>
       )}
 
-      <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3">
-        <GuardedButton
-          reason={c.allowed_actions.create_posting_task}
-          disabled={pending}
-          onClick={() => void run("create_posting_task", {}, "Manual Receive Payment queued for the Finance Admin.")}
-        >
-          Queue manual QuickBooks posting
-        </GuardedButton>
-        {c.posting_tasks.map((t) => (
-          <Pill key={t.id} label={`Posting: ${t.status.replace("_", " ")}`} tone={t.status === "verified" ? "good" : "info"} />
-        ))}
+      <div className="mt-4 rounded-md bg-secondary/40 p-3 text-sm">
+        <p className="font-semibold text-brand-navy">Posting control</p>
+        <ul className="mt-1 divide-y text-xs">
+          <CheckRow state={recorded ? "failed" : "done"} label="Duplicate check">
+            {recorded ? "A newer source already records this payment" : "No payment with this reference is recorded in QuickBooks"}
+          </CheckRow>
+          <CheckRow state={task ? (task.status === "proposed" ? "waiting" : "done") : "waiting"} label="Manual task">
+            {task
+              ? `Receive Payment, applied as allocated: ${TASK_STATUS[task.status][0].toLowerCase()}${task.external_txn_id ? ` (QuickBooks ${task.external_txn_id})` : ""}`
+              : "Queued once the allocation is approved"}
+          </CheckRow>
+          <CheckRow state={task?.status === "verified" ? "done" : "waiting"} label="Re-read QuickBooks">
+            {task?.status === "verified"
+              ? `Verified against a fresh export ${task.verified_at ? formatDateTime(task.verified_at) : ""}`
+              : "Required after posting: a fresh export must show the payment and balances"}
+          </CheckRow>
+          <CheckRow state={ack?.status === "sent" ? "done" : task?.status === "verified" ? "waiting" : "na"} label="Acknowledgement">
+            {ack ? `${ack.subject}: ${MESSAGE_STATUS[ack.status][0].toLowerCase()}` : "Only after verification"}
+          </CheckRow>
+        </ul>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <GuardedButton
+            reason={c.allowed_actions.create_posting_task}
+            disabled={pending}
+            onClick={() => void run("create_posting_task", {}, "Manual Receive Payment queued for the Finance Admin.")}
+          >
+            Queue manual QuickBooks posting
+          </GuardedButton>
+          {task && task.status !== "verified" && (
+            <Link to="/pod/tasks" className="text-xs text-primary hover:underline">
+              Approve / record / verify in Manual QB Tasks (Finance Admin)
+            </Link>
+          )}
+        </div>
       </div>
     </Card>
   )

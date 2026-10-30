@@ -1,3 +1,6 @@
+import type { ReactNode } from "react"
+import { CircleCheck, CircleDashed, CircleMinus, CircleX } from "lucide-react"
+
 import type { Snapshot } from "../api"
 import { DemoBadge } from "../components/bits"
 import { money, type InvoiceState } from "./shared"
@@ -43,5 +46,24 @@ export function SourceLine({ snapshot }: { snapshot: Snapshot | null }) {
       Source: {snapshot.company_name} · {snapshot.entity.code} · as of {snapshot.as_of} · {snapshot.basis}
       {snapshot.is_demo && <DemoBadge />}
     </p>
+  )
+}
+
+export type Check = "done" | "waiting" | "na" | "failed"
+const ICON: Record<Check, ReactNode> = {
+  done: <CircleCheck className="size-4 text-emerald-700" aria-label="done" />,
+  waiting: <CircleDashed className="size-4 text-amber-700" aria-label="waiting" />,
+  na: <CircleMinus className="size-4 text-muted-foreground" aria-label="not applicable" />,
+  failed: <CircleX className="size-4 text-red-700" aria-label="failed" />,
+}
+
+/** One line of a checklist: state icon, what, detail. */
+export function CheckRow({ state, label, children }: { state: Check; label: string; children: ReactNode }) {
+  return (
+    <li className="grid grid-cols-[20px_120px_1fr] items-start gap-2 py-1.5">
+      {ICON[state]}
+      <span className="font-medium">{label}</span>
+      <span className="text-muted-foreground">{children}</span>
+    </li>
   )
 }
