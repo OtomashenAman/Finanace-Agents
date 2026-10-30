@@ -43,6 +43,12 @@ export function ReviewTasks({ c }: { c: CaseDetail }) {
               <p className="mt-1 text-xs">
                 Resolved by {t.resolved_by}: <span className="italic">{t.resolution}</span>
               </p>
+            ) : t.requirement ? (
+              <p className="mt-1 text-xs text-amber-800">
+                {t.requirement.type === "customer_date"
+                  ? "Settles only when the customer's reply gives the date."
+                  : `Settles when an approved ${t.requirement.kind?.replace("_", " ")} for ${t.requirement.invoice ?? "the case"} is added.`}
+              </p>
             ) : (
               reason === null && (
                 <div className="mt-2 flex gap-2">

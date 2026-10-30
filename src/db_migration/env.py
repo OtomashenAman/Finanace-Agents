@@ -17,11 +17,11 @@ import src.app.data_sources.models
 import src.app.entities.models
 import src.app.governance.models
 import src.app.jobs.models
-import src.app.service_pod.access.models
-import src.app.service_pod.cases.models
-import src.app.service_pod.messaging.models
-import src.app.service_pod.snapshots.models
-import src.app.service_pod.tasks.models  # noqa: F401
+import src.app.service_pod.core.access.models
+import src.app.service_pod.core.cases.models
+import src.app.service_pod.core.messaging.models
+import src.app.service_pod.core.snapshots.models
+import src.app.service_pod.core.tasks.models  # noqa: F401
 from src.app.common.models import Base
 
 # this is the Alembic Config object, which provides

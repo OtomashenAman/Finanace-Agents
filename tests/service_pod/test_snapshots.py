@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.core.config import get_settings
 from src.app.entities.models import LegalEntity
-from src.app.service_pod.workflows import Capacity
+from src.app.service_pod.core.workflows import Capacity
 from tests.service_pod.conftest import AR, PodUser, import_snapshot, snapshot_payload
 
 

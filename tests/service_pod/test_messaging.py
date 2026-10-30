@@ -4,12 +4,12 @@ import pytest
 from httpx import AsyncClient
 
 from src.app.core.config import get_settings
-from src.app.service_pod.messaging import providers
+from src.app.service_pod.core.messaging import providers
 from tests.service_pod.conftest import CUSTOMER_EMAIL
 
 DRAFT = {
     "audience": "customer",
-    "purpose": "payment_schedule_request",
+    "purpose": "case_message",  # generic: no fact block (see test_ar_flow for those)
     "to_email": CUSTOMER_EMAIL,
     "subject": "Confirm payment schedule for INV-101 / INV-102",
     "body": "Our records show INV-101 ($15,000) and INV-102 ($10,000) outstanding.",
@@ -20,7 +20,12 @@ async def _draft(client: AsyncClient, case: dict[str, Any], **changes: Any) -> A
     return await client.post(f"/api/v1/pod/cases/{case['id']}/messages", json={**DRAFT, **changes})
 
 
+CHECKS = {"recipient": True, "mapping": True, "tone": True}
+
+
 async def _post(client: AsyncClient, url: str, message: dict[str, Any], **body: Any) -> Any:
+    if url.endswith("/approve"):
+        body.setdefault("checks", CHECKS)
     return await client.post(url, json={"expected_version": message["version"], **body})
 
 
@@ -53,6 +58,8 @@ async def test_approve_edit_send_once(ar_team: dict[str, Any], ar_case: dict[str
 
     r = await _post(prep, f"/api/v1/pod/messages/{msg['id']}/approve", msg)
     assert r.status_code == 409  # the author can't approve
+    r = await _post(rev, f"/api/v1/pod/messages/{msg['id']}/approve", msg, checks={})
+    assert r.status_code == 409  # recipient, mapping and tone must be confirmed
 
     approved = (await _post(rev, f"/api/v1/pod/messages/{msg['id']}/approve", msg)).json()
     assert approved["status"] == "approved"

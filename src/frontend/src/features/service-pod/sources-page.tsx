@@ -15,6 +15,7 @@ import { attempt, selectClass } from "./ui"
 import {
   useImportBankStatement,
   useImportJson,
+  useImportQbxml,
   useImportQuickBooks,
   useSnapshotRows,
   useSnapshots,
@@ -47,6 +48,50 @@ function JsonImport() {
       </Field>
       <Button type="submit" size="sm" disabled={!file || !entityId || importJson.isPending}>
         <FileJson /> Import export
+      </Button>
+    </form>
+  )
+}
+
+function QbxmlImport() {
+  const { data: entities = [] } = useEntities()
+  const [entityId, setEntityId] = useState<string | null>(null)
+  const [file, setFile] = useState<File | null>(null)
+  const [currency, setCurrency] = useState("USD")
+  const [basis, setBasis] = useState("Accrual")
+  const [asOf, setAsOf] = useState("")
+  const importQbxml = useImportQbxml()
+  return (
+    <form
+      className="space-y-3"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (file && entityId)
+          void attempt(() => importQbxml.mutateAsync({ file, entityId, currency, basis, asOf }), imported)
+      }}
+    >
+      <Field label="Legal entity">
+        <EntitySelect entities={entities} value={entityId} onChange={setEntityId} className="w-full" />
+      </Field>
+      <Field label="qbXML responses (.xml)" hint="Company, Customer, Invoice, ReceivePayment and Account query responses.">
+        <Input type="file" accept=".xml,.qbxml,text/xml,application/xml" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+      </Field>
+      <div className="grid grid-cols-3 gap-3">
+        <Field label="Currency">
+          <Input value={currency} maxLength={3} onChange={(e) => setCurrency(e.target.value.toUpperCase())} />
+        </Field>
+        <Field label="Basis">
+          <select className={selectClass} value={basis} onChange={(e) => setBasis(e.target.value)}>
+            <option>Accrual</option>
+            <option>Cash</option>
+          </select>
+        </Field>
+        <Field label="As of">
+          <Input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} />
+        </Field>
+      </div>
+      <Button type="submit" size="sm" disabled={!file || !entityId || !asOf || importQbxml.isPending}>
+        <FileJson /> Import qbXML
       </Button>
     </form>
   )
@@ -238,6 +283,9 @@ export function SourcesPage() {
           <div className="space-y-6">
             <Card title="Import an export">
               <JsonImport />
+            </Card>
+            <Card title="QuickBooks Desktop / Enterprise (qbXML)">
+              <QbxmlImport />
             </Card>
             <Card title="From QuickBooks Online">
               <QuickBooksImport />

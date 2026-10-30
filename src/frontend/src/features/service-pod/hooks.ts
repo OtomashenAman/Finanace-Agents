@@ -47,6 +47,14 @@ export function useTasks(status?: TaskStatus | null) {
   return useQuery({ queryKey: [POD_TAG, "tasks", status ?? null], queryFn: () => podApi.tasks(status) })
 }
 
+export function useArPortfolio() {
+  return useQuery({ queryKey: [POD_TAG, "ar-portfolio"], queryFn: podApi.arPortfolio })
+}
+
+export function useBankWorklist() {
+  return useQuery({ queryKey: [POD_TAG, "bank-worklist"], queryFn: podApi.bankWorklist })
+}
+
 export function usePodAssignments() {
   return useQuery({ queryKey: [POD_TAG, "assignments"], queryFn: podApi.assignments, meta: { dependsOn: ["users"] } })
 }
@@ -62,7 +70,11 @@ export const useCreateCase = () => usePodMutation(podApi.createCase)
 export const useCaseAction = () => usePodMutation(podApi.caseAction)
 export const useCreateDraft = () => usePodMutation(podApi.createDraft)
 export const useUpdateMessage = () => usePodMutation(podApi.updateMessage)
-export const useMessageStep = () => usePodMutation(podApi.messageStep)
+export const useApproveMessage = () => usePodMutation(podApi.approveMessage)
+export const useSendMessage = () => usePodMutation(podApi.sendMessage)
+export const useImportQbxml = () => usePodMutation(podApi.importQbxml)
+/** A suggested draft: nothing is saved, so nothing to refresh */
+export const useCompose = () => useMutation({ mutationFn: podApi.compose })
 export const useReconcile = () => usePodMutation(podApi.reconcile)
 export const useImportReply = () => usePodMutation(podApi.importReply)
 export const useUploadArtifact = () => usePodMutation(podApi.uploadArtifact)

@@ -111,6 +111,8 @@ export interface ReviewTask {
   subject: string | null
   detail: string
   blocking: boolean
+  /** What settles it when a note isn't enough (a customer's dated reply, a matching document) */
+  requirement: { type: "customer_date" | "document"; kind?: string; invoice?: string | null } | null
   status: "open" | "resolved"
   resolution: string | null
   created_by: string | null
@@ -161,6 +163,12 @@ export interface Message {
   subject: string
   body: string
   artifact_ids: string[]
+  /** The source's verified figures, which must stay in the body unchanged */
+  fact_block: string | null
+  approval_checks: ApprovalChecks | null
+  /** Replies: what the AI read, with provenance and notes, or why it couldn't */
+  extraction: { output?: Record<string, unknown>; provenance?: Record<string, string>; notes?: string[]; error?: string } | null
+  extraction_status: "pending" | "done" | "failed" | "skipped" | null
   approved_by: string | null
   approved_at: string | null
   provider: string | null
@@ -176,6 +184,77 @@ export interface Message {
   created_by: string
   created_at: string
   updated_at: string
+}
+
+export interface ApprovalChecks {
+  recipient: boolean
+  mapping: boolean
+  tone: boolean
+}
+
+export interface Composed {
+  to_email: string | null
+  to_name: string | null
+  subject: string
+  body: string
+  fact_block: string | null
+  ai_drafted: boolean
+  note: string | null
+}
+
+export interface InvoiceRow {
+  id: string
+  number: string
+  due_date: string
+  balance: string
+  days_overdue: number
+}
+
+export interface CaseRef {
+  id: string
+  reference: string
+  status: CaseStatus
+}
+
+export interface ArPortfolio {
+  snapshot: Snapshot | null
+  currency: string | null
+  ar_balance: string
+  overdue_over_30: string
+  approved_promises: string
+  open_exceptions: number
+  aging: { label: string; amount: string; count: number }[]
+  customers: {
+    customer_id: string
+    name: string
+    email: string | null
+    overdue: string
+    max_days_overdue: number
+    invoices: InvoiceRow[]
+    open_case: CaseRef | null
+    next_action: string
+  }[]
+}
+
+export interface BankWorklist {
+  snapshot: Snapshot | null
+  unmatched_total: string
+  receipts: number
+  possible_duplicates: number
+  pending_admin: number
+  rows: {
+    reference: string
+    payer: string
+    date: string
+    amount: string
+    currency: string
+    cleared: boolean
+    matched_customer_id: string | null
+    matched_customer: string | null
+    open_invoices: InvoiceRow[]
+    possible_duplicate: boolean
+    open_case: CaseRef | null
+  }[]
 }
 
 export interface Artifact {
@@ -234,6 +313,9 @@ export type CaseActionName =
   | "update_action"
   | "propose_commitment"
   | "decide_commitment"
+  | "refresh_source"
+  | "set_allocation"
+  | "create_posting_task"
 
 export interface CaseDetail extends CaseSummary {
   snapshot: Snapshot
@@ -314,6 +396,27 @@ export const podApi = {
   },
   importQuickBooks: (body: { data_source_id: string; entity_id: string; currency: string; basis: string }) =>
     apiRequest<SnapshotImportResult>("/pod/snapshots/quickbooks", { method: "POST", json: body }),
+  importQbxml: ({
+    file,
+    entityId,
+    currency,
+    basis,
+    asOf,
+  }: {
+    file: File
+    entityId: string
+    currency: string
+    basis: string
+    asOf: string
+  }) => {
+    const form = new FormData()
+    form.append("file", file)
+    form.append("entity_id", entityId)
+    form.append("currency", currency)
+    form.append("basis", basis)
+    form.append("as_of", asOf)
+    return apiRequest<SnapshotImportResult>("/pod/snapshots/qbxml", { method: "POST", form })
+  },
   importBankStatement: ({ snapshotId, file }: { snapshotId: string; file: File }) => {
     const form = new FormData()
     form.append("file", file)
@@ -347,8 +450,14 @@ export const podApi = {
     apiRequest<Message>(`/pod/cases/${caseId}/messages`, { method: "POST", json: draft }),
   updateMessage: ({ id, version, ...changes }: { id: string; version: number } & Partial<MessageDraft>) =>
     apiRequest<Message>(`/pod/messages/${id}`, { method: "PATCH", json: { expected_version: version, ...changes } }),
-  messageStep: ({ id, version, step }: { id: string; version: number; step: "approve" | "send" }) =>
-    apiRequest<Message>(`/pod/messages/${id}/${step}`, { method: "POST", json: { expected_version: version } }),
+  approveMessage: ({ id, version, checks }: { id: string; version: number; checks: ApprovalChecks }) =>
+    apiRequest<Message>(`/pod/messages/${id}/approve`, { method: "POST", json: { expected_version: version, checks } }),
+  sendMessage: ({ id, version }: { id: string; version: number }) =>
+    apiRequest<Message>(`/pod/messages/${id}/send`, { method: "POST", json: { expected_version: version } }),
+  compose: ({ caseId, purpose }: { caseId: string; purpose: string }) =>
+    apiRequest<Composed>(`/pod/cases/${caseId}/messages/compose`, { method: "POST", json: { purpose } }),
+  arPortfolio: () => apiRequest<ArPortfolio>("/pod/ar/portfolio"),
+  bankWorklist: () => apiRequest<BankWorklist>("/pod/bank/unapplied"),
   reconcile: ({
     id,
     version,

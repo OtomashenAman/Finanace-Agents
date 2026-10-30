@@ -10,6 +10,8 @@ import { TONE_CLASSES } from "../labels"
 
 const TABS = [
   { to: "/pod/cases", label: "Cases" },
+  { to: "/pod/ar", label: "AR Portfolio" },
+  { to: "/pod/bank", label: "Unapplied Cash" },
   { to: "/pod/inbox", label: "Inbox" },
   { to: "/pod/review", label: "AI Review" },
   { to: "/pod/tasks", label: "Manual QB Tasks" },

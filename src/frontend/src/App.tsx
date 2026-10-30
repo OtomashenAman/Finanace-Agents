@@ -25,6 +25,8 @@ import { CasePage } from "@/features/service-pod/case-page"
 import { CasesPage } from "@/features/service-pod/cases-page"
 import { InboxPage, ReviewQueuePage, TasksPage } from "@/features/service-pod/queue-pages"
 import { SourcesPage } from "@/features/service-pod/sources-page"
+import { ArPortfolioPage } from "@/features/service-pod/flows/ar-collections/portfolio-page"
+import { UnappliedCashPage } from "@/features/service-pod/flows/bank-recon/unapplied-page"
 import { queryClient } from "@/lib/query-client"
 
 const router = createBrowserRouter([
@@ -49,6 +51,8 @@ const router = createBrowserRouter([
           { path: "/pod", element: <Navigate to="/pod/cases" replace /> },
           { path: "/pod/cases", element: <CasesPage /> },
           { path: "/pod/cases/:caseId", element: <CasePage /> },
+          { path: "/pod/ar", element: <ArPortfolioPage /> },
+          { path: "/pod/bank", element: <UnappliedCashPage /> },
           { path: "/pod/inbox", element: <InboxPage /> },
           { path: "/pod/review", element: <ReviewQueuePage /> },
           { path: "/pod/tasks", element: <TasksPage /> },

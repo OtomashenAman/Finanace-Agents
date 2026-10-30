@@ -5,8 +5,8 @@ from typing import Any
 
 from src.app.core.db import get_sessionmaker
 from src.app.entities.models import LegalEntity
-from src.app.service_pod.access.models import PodAssignment
-from src.app.service_pod.workflows import Capacity, WorkflowKey
+from src.app.service_pod.core.access.models import PodAssignment
+from src.app.service_pod.core.workflows import Capacity, WorkflowKey
 from tests.service_pod.conftest import act, import_snapshot, snapshot_payload
 
 TASK = {

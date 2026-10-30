@@ -4,7 +4,7 @@ import pathlib
 import pytest
 from pydantic import BaseModel
 
-from src.app.service_pod.ai import (
+from src.app.service_pod.common.ai import (
     AiOutputRejectedError,
     CitedNarrative,
     Fact,

@@ -12,8 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.auth.models import User, UserRole
 from src.app.entities.models import EntityAssignment, LegalEntity
-from src.app.service_pod.access.models import PodAssignment
-from src.app.service_pod.workflows import Capacity, WorkflowKey
+from src.app.service_pod.core.access.models import PodAssignment
+from src.app.service_pod.core.workflows import Capacity, WorkflowKey
 from tests.conftest import ClientFactory, MakeUser
 
 AR = WorkflowKey.AR_COLLECTIONS

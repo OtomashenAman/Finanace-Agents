@@ -72,6 +72,7 @@ class Settings(BaseSettings):
     # Service POD: read-only source snapshots
     pod_snapshot_max_bytes: int = 5 * 1024 * 1024
     pod_bank_csv_max_bytes: int = 2 * 1024 * 1024
+    pod_qbxml_max_bytes: int = 10 * 1024 * 1024
     pod_max_rows_per_collection: int = 10_000
     # Snapshots labelled SYNTHETIC_DEMO (or from a QuickBooks sandbox). Unset: allowed outside
     # production only, so a client installation never shows demo figures as its books

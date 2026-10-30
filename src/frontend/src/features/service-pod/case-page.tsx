@@ -13,6 +13,8 @@ import { Card, DemoBadge, Empty, Field, LoadError, Loading, Pill, PodTabs } from
 import { attempt, selectClass } from "./ui"
 import { Artifacts, Messages } from "./components/case-messages"
 import { Commitments, Decisions, OwnedActions, ReviewTasks } from "./components/case-sections"
+import { RefreshSource } from "./components/refresh-source"
+import { FLOW_UI } from "./flows"
 import { useRunAction } from "./use-run-action"
 import { useCase, useProposeTask } from "./hooks"
 import { CASE_STATUS, formatDateTime, shortHash, TASK_STATUS, WORKFLOW_SHORT } from "./labels"
@@ -197,6 +199,7 @@ function PostingTasks({ c }: { c: CaseDetail }) {
 export function CasePage() {
   const { caseId } = useParams()
   const { data: c, isPending, isError } = useCase(caseId)
+  const flow = c ? FLOW_UI[c.workflow] : undefined
   return (
     <AppPage title="Service POD" subtitle={c ? `${c.reference} · updated ${formatDateTime(c.updated_at)}` : undefined}>
       <PodTabs />
@@ -205,17 +208,19 @@ export function CasePage() {
       {c && (
         <div className="space-y-6">
           <Header c={c} />
+          <RefreshSource c={c} />
           <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
             <div className="space-y-6">
+              {flow && <flow.CasePanel c={c} />}
               <ReviewTasks c={c} />
               <Messages c={c} />
-              <Commitments c={c} />
+              {(flow?.showsCommitments ?? true) && <Commitments c={c} />}
               <OwnedActions c={c} />
             </div>
             <div className="space-y-6">
               <Decisions c={c} />
               <Artifacts c={c} />
-              <PostingTasks c={c} />
+              {!flow?.ownsPosting && <PostingTasks c={c} />}
               <CaseData c={c} />
             </div>
           </div>

@@ -1,28 +1,96 @@
 import { useState } from "react"
-import { Download, Mail, Send } from "lucide-react"
+import { Bot, Download, Mail, Send, Sparkles } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { apiDownload } from "@/lib/api"
 
-import type { ArtifactKind, CaseDetail, Message } from "../api"
+import type { ApprovalChecks, ArtifactKind, CaseDetail, Message } from "../api"
 import {
+  useApproveMessage,
+  useCompose,
   useCreateDraft,
   useDecideArtifact,
   useEmailStatus,
   useImportReply,
-  useMessageStep,
   useReconcile,
+  useSendMessage,
   useUpdateMessage,
   useUploadArtifact,
 } from "../hooks"
+import { FLOW_UI } from "../flows"
 import { ARTIFACT_KIND, formatDateTime, MESSAGE_STATUS } from "../labels"
 import { Card, Empty, Field, Pill } from "./bits"
 import { attempt, selectClass } from "../ui"
 
+const CHECK_LABELS: Record<keyof ApprovalChecks, string> = {
+  recipient: "Recipient is the customer's verified contact",
+  mapping: "Invoices and amounts are the right ones",
+  tone: "Tone is appropriate",
+}
+
+/** What the AI read from a reply, next to the reply itself (deck: reply understanding). */
+function Extraction({ m }: { m: Message }) {
+  if (!m.extraction_status) return null
+  const notes = m.extraction?.notes ?? []
+  const output = m.extraction?.output
+  return (
+    <div className="mt-2 rounded border border-sky-200 bg-sky-50/60 p-2 text-xs">
+      <p className="flex items-center gap-1 font-semibold text-sky-900">
+        <Bot className="size-3.5" aria-hidden /> AI reading:{" "}
+        {m.extraction_status === "pending" && "in progress…"}
+        {m.extraction_status === "done" && "done (checked against the customer's words)"}
+        {m.extraction_status === "failed" && "rejected, a person reads it"}
+        {m.extraction_status === "skipped" && "not available, a person reads it"}
+      </p>
+      {m.extraction?.error && <p className="mt-1 text-red-800">{m.extraction.error}</p>}
+      {notes.length > 0 && (
+        <ul className="mt-1 list-disc pl-4">
+          {notes.map((n) => (
+            <li key={n}>{n}</li>
+          ))}
+        </ul>
+      )}
+      {output && (
+        <details className="mt-1">
+          <summary className="cursor-pointer text-muted-foreground">
+            Structured output · {m.extraction?.provenance?.model} · {m.extraction?.provenance?.prompt_version}
+          </summary>
+          <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap">{JSON.stringify(output, null, 2)}</pre>
+        </details>
+      )}
+    </div>
+  )
+}
+
+function ApproveBox({ m }: { m: Message }) {
+  const approve = useApproveMessage()
+  const [checks, setChecks] = useState<ApprovalChecks>({ recipient: false, mapping: false, tone: false })
+  const customer = m.audience === "customer"
+  const ready = !customer || (checks.recipient && checks.mapping && checks.tone)
+  return (
+    <div className="w-full space-y-1 rounded border p-2">
+      {customer &&
+        (Object.keys(CHECK_LABELS) as (keyof ApprovalChecks)[]).map((k) => (
+          <label key={k} className="flex items-center gap-2 text-xs">
+            <input type="checkbox" checked={checks[k]} onChange={(e) => setChecks({ ...checks, [k]: e.target.checked })} />
+            {CHECK_LABELS[k]}
+          </label>
+        ))}
+      <Button
+        size="sm"
+        disabled={approve.isPending || !ready}
+        onClick={() => void attempt(() => approve.mutateAsync({ id: m.id, version: m.version, checks }), "Message approved.")}
+      >
+        Approve message
+      </Button>
+    </div>
+  )
+}
+
 function MessageItem({ m, c }: { m: Message; c: CaseDetail }) {
-  const step = useMessageStep()
+  const send = useSendMessage()
   const update = useUpdateMessage()
   const reconcile = useReconcile()
   const [editing, setEditing] = useState(false)
@@ -32,7 +100,7 @@ function MessageItem({ m, c }: { m: Message; c: CaseDetail }) {
   const [label, tone] = MESSAGE_STATUS[m.status]
   const owner = c.my_roles.includes("owner")
   const reviewer = c.my_roles.includes("reviewer")
-  const pending = step.isPending || update.isPending || reconcile.isPending
+  const pending = send.isPending || update.isPending || reconcile.isPending
 
   return (
     <li className="py-3 text-sm">
@@ -46,7 +114,8 @@ function MessageItem({ m, c }: { m: Message; c: CaseDetail }) {
       {editing ? (
         <div className="mt-2 space-y-2">
           <Input value={subject} onChange={(e) => setSubject(e.target.value)} />
-          <Textarea rows={6} value={body} onChange={(e) => setBody(e.target.value)} />
+          <Textarea rows={8} value={body} onChange={(e) => setBody(e.target.value)} />
+          {m.fact_block && <p className="text-xs text-muted-foreground">Keep the figures block exactly as it is.</p>}
           <div className="flex gap-2">
             <Button
               size="sm"
@@ -66,13 +135,17 @@ function MessageItem({ m, c }: { m: Message; c: CaseDetail }) {
           </div>
         </div>
       ) : (
-        <>
-          <p className="mt-1 font-medium">{m.subject}</p>
-          <pre className="mt-1 max-h-60 overflow-auto rounded bg-secondary/40 p-2 font-sans text-xs whitespace-pre-wrap">{m.body}</pre>
-        </>
+        <div className={m.direction === "inbound" ? "grid gap-2 lg:grid-cols-2" : ""}>
+          <div>
+            <p className="mt-1 font-medium">{m.subject}</p>
+            <pre className="mt-1 max-h-60 overflow-auto rounded bg-secondary/40 p-2 font-sans text-xs whitespace-pre-wrap">{m.body}</pre>
+          </div>
+          {m.direction === "inbound" && <Extraction m={m} />}
+        </div>
       )}
       <p className="mt-1 text-xs text-muted-foreground">
         {m.direction === "inbound" ? `Received ${formatDateTime(m.received_at)}` : `Drafted by ${m.created_by}`}
+        {m.fact_block && " · figures locked to the source"}
         {m.approved_by && ` · approved by ${m.approved_by} (${m.provider})`}
         {m.sent_at && ` · sent ${formatDateTime(m.sent_at)}`}
         {m.artifact_ids.length > 0 && ` · ${m.artifact_ids.length} attachment(s)`}
@@ -85,13 +158,13 @@ function MessageItem({ m, c }: { m: Message; c: CaseDetail }) {
               Edit
             </Button>
           )}
-          {reviewer && m.status === "draft" && (
-            <Button size="sm" disabled={pending} onClick={() => void attempt(() => step.mutateAsync({ id: m.id, version: m.version, step: "approve" }), "Message approved.")}>
-              Approve message
-            </Button>
-          )}
+          {reviewer && m.status === "draft" && <ApproveBox m={m} />}
           {(owner || reviewer) && m.status === "approved" && (
-            <Button size="sm" disabled={pending} onClick={() => void attempt(() => step.mutateAsync({ id: m.id, version: m.version, step: "send" }), (r) => MESSAGE_STATUS[r.status][0])}>
+            <Button
+              size="sm"
+              disabled={pending}
+              onClick={() => void attempt(() => send.mutateAsync({ id: m.id, version: m.version }), (r) => MESSAGE_STATUS[r.status][0])}
+            >
               <Send /> Send
             </Button>
           )}
@@ -119,13 +192,18 @@ function MessageItem({ m, c }: { m: Message; c: CaseDetail }) {
 
 function DraftForm({ c }: { c: CaseDetail }) {
   const create = useCreateDraft()
+  const compose = useCompose()
   const email = useEmailStatus()
+  const purposes = FLOW_UI[c.workflow]?.purposes ?? {}
   const approved = c.artifacts.filter((a) => a.status === "approved")
+  const [purpose, setPurpose] = useState(Object.keys(purposes)[0] ?? "case_message")
   const [audience, setAudience] = useState<"customer" | "internal">("customer")
   const [to, setTo] = useState("")
   const [subject, setSubject] = useState("")
   const [body, setBody] = useState("")
   const [attach, setAttach] = useState<string[]>([])
+  const [composedNote, setComposedNote] = useState<string | null>(null)
+  const workflowPurpose = purpose !== "case_message"
   return (
     <form
       className="mt-3 space-y-2 border-t pt-3"
@@ -135,7 +213,7 @@ function DraftForm({ c }: { c: CaseDetail }) {
           () =>
             create.mutateAsync({
               caseId: c.id,
-              draft: { audience, purpose: "case_message", to_email: to, subject, body, artifact_ids: attach },
+              draft: { audience, purpose, to_email: to, subject, body, artifact_ids: attach },
             }),
           "Draft saved. A reviewer approves it before it can be sent.",
         ).then((r) => {
@@ -143,6 +221,7 @@ function DraftForm({ c }: { c: CaseDetail }) {
             setSubject("")
             setBody("")
             setAttach([])
+            setComposedNote(null)
           }
         })
       }}
@@ -154,15 +233,61 @@ function DraftForm({ c }: { c: CaseDetail }) {
           {email.data.problem && ` · ${email.data.problem}`}
         </p>
       )}
+      <div className="flex flex-wrap gap-2">
+        <select
+          className={`${selectClass} w-auto`}
+          value={purpose}
+          onChange={(e) => {
+            setPurpose(e.target.value)
+            if (e.target.value !== "case_message") setAudience("customer")
+          }}
+          aria-label="Purpose"
+        >
+          {Object.entries(purposes).map(([k, v]) => (
+            <option key={k} value={k}>
+              {v}
+            </option>
+          ))}
+          <option value="case_message">Other message (no figures)</option>
+        </select>
+        {workflowPurpose && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={compose.isPending}
+            onClick={() =>
+              void attempt(() => compose.mutateAsync({ caseId: c.id, purpose }), (d) =>
+                d.ai_drafted ? "Draft suggested (AI wording, figures from the source)." : "Template draft (no AI wording).",
+              ).then((d) => {
+                if (!d) return
+                setTo(d.to_email ?? "")
+                setSubject(d.subject)
+                setBody(d.body)
+                setComposedNote(d.note)
+              })
+            }
+          >
+            <Sparkles /> Suggest draft
+          </Button>
+        )}
+      </div>
+      {composedNote && <p className="text-xs text-amber-800">{composedNote}</p>}
       <div className="grid gap-2 sm:grid-cols-[140px_1fr]">
-        <select className={selectClass} value={audience} onChange={(e) => setAudience(e.target.value as "customer" | "internal")} aria-label="Audience">
+        <select
+          className={selectClass}
+          value={audience}
+          disabled={workflowPurpose}
+          onChange={(e) => setAudience(e.target.value as "customer" | "internal")}
+          aria-label="Audience"
+        >
           <option value="customer">Customer</option>
           <option value="internal">Internal</option>
         </select>
         <Input type="email" placeholder={audience === "customer" ? "The verified contact from the source" : "A configured internal recipient"} value={to} onChange={(e) => setTo(e.target.value)} />
       </div>
       <Input placeholder="Subject" value={subject} onChange={(e) => setSubject(e.target.value)} />
-      <Textarea rows={5} placeholder="Message" value={body} onChange={(e) => setBody(e.target.value)} />
+      <Textarea rows={8} className="font-mono text-xs" placeholder="Message" value={body} onChange={(e) => setBody(e.target.value)} />
       {approved.length > 0 && (
         <div className="flex flex-wrap gap-3 text-xs">
           {approved.map((a) => (

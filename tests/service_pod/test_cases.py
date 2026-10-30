@@ -3,7 +3,7 @@ from typing import Any
 from httpx import AsyncClient
 
 from src.app.entities.models import LegalEntity
-from src.app.service_pod.workflows import Capacity, WorkflowKey
+from src.app.service_pod.core.workflows import Capacity, WorkflowKey
 from tests.service_pod.conftest import AR, TRS, PodUser, act, import_snapshot
 
 FPA = WorkflowKey.FPA_TREND
