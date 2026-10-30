@@ -51,7 +51,12 @@ async def latest_snapshot(
 ) -> PodSnapshot | None:
     if snapshot_id is not None:
         return await snapshots.get_visible(session, access, snapshot_id)
-    query = select(PodSnapshot).order_by(PodSnapshot.created_at.desc()).limit(50)
+    query = (
+        select(PodSnapshot)
+        .where(PodSnapshot.id.not_in(snapshots.archived_ids()))
+        .order_by(PodSnapshot.created_at.desc())
+        .limit(50)
+    )
     if access.entity_ids is not None:
         query = query.where(PodSnapshot.entity_id.in_(access.entity_ids))
     for snap in await session.scalars(query):

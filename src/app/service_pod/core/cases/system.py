@@ -18,7 +18,7 @@ from src.app.service_pod.core.cases.models import (
     ReviewTaskKind,
     ReviewTaskStatus,
 )
-from src.app.service_pod.core.snapshots.models import PodSnapshot
+from src.app.service_pod.core.snapshots.models import PodSnapshot, PodSnapshotArchive
 
 SYSTEM = RequestContext(ip=None, user_agent="service pod")
 REVIEWED = frozenset({CaseStatus.AWAITING_FINAL, CaseStatus.APPROVED})
@@ -126,6 +126,8 @@ async def newer_snapshot(session: AsyncSession, case: PodCase) -> PodSnapshot | 
             PodSnapshot.entity_id == current.entity_id,
             PodSnapshot.company_id == current.company_id,
             PodSnapshot.created_at > current.created_at,
+            # an archived snapshot (e.g. a wrong import) never asks cases to refresh
+            PodSnapshot.id.not_in(select(PodSnapshotArchive.snapshot_id)),
         )
         .order_by(PodSnapshot.created_at.desc())
         .limit(1)

@@ -15,8 +15,8 @@ export function useEmailStatus(enabled = true) {
   return useQuery({ queryKey: [POD_TAG, "email-status"], queryFn: podApi.emailStatus, enabled, staleTime: 60_000 })
 }
 
-export function useSnapshots() {
-  return useQuery({ queryKey: [POD_TAG, "snapshots"], queryFn: podApi.snapshots })
+export function useSnapshots(includeArchived = false) {
+  return useQuery({ queryKey: [POD_TAG, "snapshots", includeArchived], queryFn: () => podApi.snapshots(includeArchived) })
 }
 
 export function useSnapshotRows(id: string | null, collection: Collection | null) {
@@ -73,6 +73,9 @@ export const useUpdateMessage = () => usePodMutation(podApi.updateMessage)
 export const useApproveMessage = () => usePodMutation(podApi.approveMessage)
 export const useSendMessage = () => usePodMutation(podApi.sendMessage)
 export const useImportQbxml = () => usePodMutation(podApi.importQbxml)
+export const useArchiveSnapshot = () => usePodMutation(podApi.archiveSnapshot)
+export const useRestoreSnapshot = () => usePodMutation(podApi.restoreSnapshot)
+export const useDeleteSnapshot = () => usePodMutation(podApi.deleteSnapshot)
 /** A suggested draft: nothing is saved, so nothing to refresh */
 export const useCompose = () => useMutation({ mutationFn: podApi.compose })
 export const useReconcile = () => usePodMutation(podApi.reconcile)

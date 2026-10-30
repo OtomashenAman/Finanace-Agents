@@ -69,6 +69,13 @@ export interface Snapshot {
   row_counts: Partial<Record<Collection, number>>
   imported_by: string
   imported_at: string
+  used_by_cases: number
+  /** Why it can't be deleted (cases, a verified posting, a later snapshot); null: unused */
+  in_use: string | null
+  archived: boolean
+  archived_reason: string | null
+  archived_by: string | null
+  archived_at: string | null
 }
 
 export interface SnapshotImportResult {
@@ -410,7 +417,13 @@ export const podApi = {
   workflows: () => apiRequest<Workflow[]>("/pod/workflows"),
   emailStatus: () => apiRequest<EmailStatus>("/pod/email-status"),
 
-  snapshots: () => apiRequest<Snapshot[]>("/pod/snapshots"),
+  snapshots: (includeArchived = false) =>
+    apiRequest<Snapshot[]>(`/pod/snapshots${includeArchived ? "?include_archived=true" : ""}`),
+  archiveSnapshot: ({ id, reason }: { id: string; reason: string }) =>
+    apiRequest<Snapshot>(`/pod/snapshots/${id}/archive`, { method: "POST", json: { reason } }),
+  restoreSnapshot: (id: string) => apiRequest<Snapshot>(`/pod/snapshots/${id}/restore`, { method: "POST" }),
+  deleteSnapshot: ({ id, reason }: { id: string; reason: string }) =>
+    apiRequest<void>(`/pod/snapshots/${id}`, { method: "DELETE", json: { reason } }),
   snapshotRows: (id: string, collection: Collection) =>
     apiRequest<{ collection: Collection; rows: Record<string, unknown>[] }>(
       `/pod/snapshots/${id}/rows${qs({ collection })}`,

@@ -26,3 +26,8 @@ class DemoSnapshotNotAllowedError(AppError):
         "This installation doesn't accept demonstration data (SYNTHETIC_DEMO or a QuickBooks "
         "sandbox). Import an authorized read-only export of the company's books."
     )
+
+
+class SnapshotConflictError(AppError):
+    status_code = 409
+    code = "snapshot_conflict"

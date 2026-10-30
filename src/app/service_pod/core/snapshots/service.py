@@ -4,11 +4,10 @@ import uuid
 from datetime import date
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import Select, delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.audit.service import record_event
-from src.app.auth.models import User
 from src.app.common.context import RequestContext
 from src.app.core.config import get_settings
 from src.app.data_sources.models import DataSource, SourceKind
@@ -16,8 +15,10 @@ from src.app.entities import service as entities
 from src.app.entities.models import LegalEntity
 from src.app.entities.schemas import EntityRef
 from src.app.service_pod.common.canonical import fingerprint, plain
+from src.app.service_pod.common.people import DELETED, names
 from src.app.service_pod.core.access.exceptions import PodForbiddenError
 from src.app.service_pod.core.access.service import PodAccess
+from src.app.service_pod.core.cases.models import PodCase
 from src.app.service_pod.core.snapshots import importers
 from src.app.service_pod.core.snapshots.contract import (
     Basis,
@@ -27,55 +28,84 @@ from src.app.service_pod.core.snapshots.contract import (
 )
 from src.app.service_pod.core.snapshots.exceptions import (
     DemoSnapshotNotAllowedError,
+    SnapshotConflictError,
     SnapshotInvalidError,
     SnapshotNotFoundError,
 )
-from src.app.service_pod.core.snapshots.models import PodSnapshot, SourceType
+from src.app.service_pod.core.snapshots.models import PodSnapshot, PodSnapshotArchive, SourceType
 from src.app.service_pod.core.snapshots.schemas import (
     QuickBooksSnapshotRequest,
     SnapshotImportResult,
     SnapshotRows,
     SnapshotSummary,
 )
+from src.app.service_pod.core.tasks.models import PodPostingTask
 
 
 def document(snapshot: PodSnapshot) -> SnapshotDocument:
     return SnapshotDocument.model_validate(snapshot.payload)
 
 
-async def _summaries(session: AsyncSession, snapshots: list[PodSnapshot]) -> list[SnapshotSummary]:
-    entity_refs = await entities.refs(session, {s.entity_id for s in snapshots})
-    names = dict(
-        (
-            await session.execute(
-                select(User.id, User.full_name).where(
-                    User.id.in_({s.imported_by for s in snapshots})
-                )
-            )
-        ).all()
+async def _counts(session: AsyncSession, column: Any, ids: list[uuid.UUID]) -> dict[uuid.UUID, int]:
+    rows = await session.execute(
+        select(column, func.count()).where(column.in_(ids)).group_by(column)
     )
-    return [
-        SnapshotSummary(
-            id=s.id,
-            entity=entity_refs[s.entity_id],
-            parent_id=s.parent_id,
-            source_type=s.source_type,
-            provenance=s.provenance,
-            is_demo=s.is_demo,
-            company_id=s.company_id,
-            company_name=s.company_name,
-            currency=s.currency,
-            basis=s.basis,
-            as_of=s.as_of,
-            source_reference=s.source_reference,
-            sha256=s.sha256,
-            coverage=[Collection(c) for c in s.coverage],
-            row_counts=s.row_counts,
-            imported_by=names.get(s.imported_by, "a deleted user"),
-            imported_at=s.created_at,
+    return dict(rows.all())
+
+
+async def _summaries(session: AsyncSession, snapshots: list[PodSnapshot]) -> list[SnapshotSummary]:
+    ids = [s.id for s in snapshots]
+    entity_refs = await entities.refs(session, {s.entity_id for s in snapshots})
+    archives = {
+        a.snapshot_id: a
+        for a in await session.scalars(
+            select(PodSnapshotArchive).where(PodSnapshotArchive.snapshot_id.in_(ids))
         )
-        for s in snapshots
-    ]
+    }
+    people = await names(
+        session, [*(s.imported_by for s in snapshots), *(a.archived_by for a in archives.values())]
+    )
+    cases = await _counts(session, PodCase.snapshot_id, ids)
+    proofs = await _counts(session, PodPostingTask.verification_snapshot_id, ids)
+    children = await _counts(session, PodSnapshot.parent_id, ids)
+    out = []
+    for s in snapshots:
+        archive = archives.get(s.id)
+        uses = []
+        if cases.get(s.id):
+            uses.append(f"{cases[s.id]} case(s) use it")
+        if proofs.get(s.id):
+            uses.append("it verified a posting")
+        if children.get(s.id):
+            uses.append("a later snapshot extends it")
+        out.append(
+            SnapshotSummary(
+                id=s.id,
+                entity=entity_refs[s.entity_id],
+                parent_id=s.parent_id,
+                source_type=s.source_type,
+                provenance=s.provenance,
+                is_demo=s.is_demo,
+                company_id=s.company_id,
+                company_name=s.company_name,
+                currency=s.currency,
+                basis=s.basis,
+                as_of=s.as_of,
+                source_reference=s.source_reference,
+                sha256=s.sha256,
+                coverage=[Collection(c) for c in s.coverage],
+                row_counts=s.row_counts,
+                imported_by=people.get(s.imported_by, DELETED),
+                imported_at=s.created_at,
+                used_by_cases=cases.get(s.id, 0),
+                in_use="; ".join(uses) or None,
+                archived=archive is not None,
+                archived_reason=archive.reason if archive else None,
+                archived_by=people.get(archive.archived_by, DELETED) if archive else None,
+                archived_at=archive.created_at if archive else None,
+            )
+        )
+    return out
 
 
 async def summary(session: AsyncSession, snapshot: PodSnapshot) -> SnapshotSummary:
@@ -256,12 +286,21 @@ async def import_bank_statement(
     return await _store(session, access, entity, doc, SourceType.BANK_CSV, ctx, parent=parent)
 
 
+def archived_ids() -> Select[tuple[uuid.UUID]]:
+    return select(PodSnapshotArchive.snapshot_id)
+
+
 async def list_snapshots(
-    session: AsyncSession, access: PodAccess, entity_id: uuid.UUID | None
+    session: AsyncSession,
+    access: PodAccess,
+    entity_id: uuid.UUID | None,
+    include_archived: bool = False,
 ) -> list[SnapshotSummary]:
     if not (access.is_admin or access.is_poster or access.case_workflows):
         return []
     query = select(PodSnapshot).order_by(PodSnapshot.created_at.desc()).limit(200)
+    if not include_archived:
+        query = query.where(PodSnapshot.id.not_in(archived_ids()))
     if access.entity_ids is not None:
         query = query.where(PodSnapshot.entity_id.in_(access.entity_ids))
     if entity_id is not None:
@@ -296,3 +335,109 @@ async def origin_type(session: AsyncSession, snapshot: PodSnapshot) -> SourceTyp
 
 async def entity_ref(session: AsyncSession, entity_id: uuid.UUID) -> EntityRef:
     return (await entities.refs(session, {entity_id}))[entity_id]
+
+
+# --- taking a snapshot out of use ------------------------------------------------------
+
+
+async def archive_snapshot(
+    session: AsyncSession,
+    access: PodAccess,
+    snapshot_id: uuid.UUID,
+    reason: str,
+    ctx: RequestContext,
+) -> SnapshotSummary:
+    """Hide a snapshot from lists and pickers; it stays as evidence and can be restored."""
+    access.require_poster("archive source data")
+    snapshot = await get_visible(session, access, snapshot_id)
+    if await session.get(PodSnapshotArchive, snapshot.id) is not None:
+        raise SnapshotConflictError("This snapshot is already archived.")
+    session.add(
+        PodSnapshotArchive(snapshot_id=snapshot.id, archived_by=access.user.id, reason=reason)
+    )
+    _event(
+        session,
+        "pod.snapshot_archived",
+        ctx,
+        access,
+        snapshot,
+        f"Archived the snapshot of {snapshot.company_name} as of {snapshot.as_of}: {reason}",
+        reason=reason,
+    )
+    await session.commit()
+    return await summary(session, snapshot)
+
+
+async def restore_snapshot(
+    session: AsyncSession, access: PodAccess, snapshot_id: uuid.UUID, ctx: RequestContext
+) -> SnapshotSummary:
+    access.require_poster("restore source data")
+    snapshot = await get_visible(session, access, snapshot_id)
+    archive = await session.get(PodSnapshotArchive, snapshot.id)
+    if archive is None:
+        raise SnapshotConflictError("This snapshot isn't archived.")
+    await session.delete(archive)
+    _event(
+        session,
+        "pod.snapshot_restored",
+        ctx,
+        access,
+        snapshot,
+        f"Restored the snapshot of {snapshot.company_name} as of {snapshot.as_of}",
+    )
+    await session.commit()
+    return await summary(session, snapshot)
+
+
+async def delete_snapshot(
+    session: AsyncSession,
+    access: PodAccess,
+    snapshot_id: uuid.UUID,
+    reason: str,
+    ctx: RequestContext,
+) -> None:
+    """Remove a snapshot nothing depends on (no case, no verification, no later snapshot
+    built on it), e.g. a wrong import. Anything used is evidence: archive it instead."""
+    access.require_poster("delete source data")
+    snapshot = await get_visible(session, access, snapshot_id)
+    in_use = (await summary(session, snapshot)).in_use
+    if in_use:
+        raise SnapshotConflictError(
+            f"This snapshot can't be deleted: {in_use}. Archive it instead."
+        )
+    _event(
+        session,
+        "pod.snapshot_deleted",
+        ctx,
+        access,
+        snapshot,
+        f"Deleted the unused snapshot of {snapshot.company_name} as of {snapshot.as_of}: {reason}",
+        reason=reason,
+        company=snapshot.company_name,
+        as_of=snapshot.as_of.isoformat(),
+    )
+    # The database refuses deleting snapshots unless this transaction says it's this path
+    await session.execute(text("SET LOCAL finance_acc.pod_snapshot_delete = 'on'"))
+    await session.execute(delete(PodSnapshot).where(PodSnapshot.id == snapshot.id))
+    await session.commit()
+
+
+def _event(
+    session: AsyncSession,
+    event: str,
+    ctx: RequestContext,
+    access: PodAccess,
+    snapshot: PodSnapshot,
+    summary_text: str,
+    **details: Any,
+) -> None:
+    record_event(
+        session,
+        event,
+        ctx,
+        actor_id=access.user.id,
+        snapshot_id=str(snapshot.id),
+        sha256=snapshot.sha256,
+        summary=summary_text,
+        **details,
+    )

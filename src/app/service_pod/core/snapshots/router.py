@@ -15,6 +15,7 @@ from src.app.service_pod.core.snapshots.exceptions import SnapshotTooLargeError
 from src.app.service_pod.core.snapshots.schemas import (
     QuickBooksSnapshotRequest,
     SnapshotImportResult,
+    SnapshotRemoval,
     SnapshotRows,
     SnapshotSummary,
 )
@@ -22,7 +23,7 @@ from src.app.service_pod.core.snapshots.schemas import (
 router = APIRouter(prefix="/snapshots", tags=["service pod: snapshots"])
 
 _ERRORS: dict[int | str, dict[str, Any]] = {
-    code: {"model": ErrorResponse} for code in (403, 404, 413, 422)
+    code: {"model": ErrorResponse} for code in (403, 404, 409, 413, 422)
 }
 
 
@@ -133,9 +134,50 @@ async def import_bank_statement(
 
 @router.get("", response_model=list[SnapshotSummary])
 async def list_snapshots(
-    session: SessionDep, access: PodAccessDep, entity_id: uuid.UUID | None = None
+    session: SessionDep,
+    access: PodAccessDep,
+    entity_id: uuid.UUID | None = None,
+    include_archived: bool = False,
 ) -> list[SnapshotSummary]:
-    return await service.list_snapshots(session, access, entity_id)
+    """Newest first; archived snapshots only when asked for."""
+    return await service.list_snapshots(session, access, entity_id, include_archived)
+
+
+@router.post("/{snapshot_id}/archive", response_model=SnapshotSummary, responses=_ERRORS)
+async def archive_snapshot(
+    snapshot_id: uuid.UUID,
+    body: SnapshotRemoval,
+    session: SessionDep,
+    access: PodAccessDep,
+    ctx: RequestContextDep,
+) -> SnapshotSummary:
+    """Take a snapshot out of use (hidden from lists and pickers, kept as evidence)."""
+    return await service.archive_snapshot(session, access, snapshot_id, body.reason, ctx)
+
+
+@router.post("/{snapshot_id}/restore", response_model=SnapshotSummary, responses=_ERRORS)
+async def restore_snapshot(
+    snapshot_id: uuid.UUID, session: SessionDep, access: PodAccessDep, ctx: RequestContextDep
+) -> SnapshotSummary:
+    return await service.restore_snapshot(session, access, snapshot_id, ctx)
+
+
+@router.delete(
+    "/{snapshot_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    responses=_ERRORS,
+)
+async def delete_snapshot(
+    snapshot_id: uuid.UUID,
+    body: SnapshotRemoval,
+    session: SessionDep,
+    access: PodAccessDep,
+    ctx: RequestContextDep,
+) -> None:
+    """Delete a snapshot nothing depends on (409 when a case, a verification or a later
+    snapshot uses it: archive it instead)."""
+    await service.delete_snapshot(session, access, snapshot_id, body.reason, ctx)
 
 
 @router.get("/{snapshot_id}", response_model=SnapshotSummary, responses=_ERRORS)

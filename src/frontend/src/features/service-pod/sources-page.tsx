@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { FileJson, Landmark, Upload } from "lucide-react"
+import { Archive, ArchiveRestore, FileJson, Landmark, Trash2, Upload } from "lucide-react"
 
 import { AppPage } from "@/components/layout/app-page"
 import { Button } from "@/components/ui/button"
@@ -10,13 +10,15 @@ import { useEntities } from "@/features/entities/hooks"
 import { cn } from "@/lib/utils"
 
 import type { Collection, Snapshot, SnapshotImportResult } from "./api"
-import { Card, DemoBadge, Empty, Field, LoadError, Loading, PodTabs } from "./components/bits"
+import { Card, DemoBadge, Empty, Field, LoadError, Loading, Pill, PodTabs } from "./components/bits"
 import { attempt, selectClass } from "./ui"
 import {
+  useArchiveSnapshot,
+  useDeleteSnapshot,
   useImportBankStatement,
   useImportJson,
-  useImportQbxml,
   useImportQuickBooks,
+  useRestoreSnapshot,
   useSnapshotRows,
   useSnapshots,
   useWorkflows,
@@ -55,50 +57,6 @@ function JsonImport() {
       </Field>
       <Button type="submit" size="sm" disabled={!file || !entityId || importJson.isPending}>
         <FileJson /> Import
-      </Button>
-    </form>
-  )
-}
-
-function QbxmlImport() {
-  const { data: entities = [] } = useEntities()
-  const [entityId, setEntityId] = useState<string | null>(null)
-  const [file, setFile] = useState<File | null>(null)
-  const [currency, setCurrency] = useState("USD")
-  const [basis, setBasis] = useState("Accrual")
-  const [asOf, setAsOf] = useState("")
-  const importQbxml = useImportQbxml()
-  return (
-    <form
-      className="space-y-3"
-      onSubmit={(e) => {
-        e.preventDefault()
-        if (file && entityId)
-          void attempt(() => importQbxml.mutateAsync({ file, entityId, currency, basis, asOf }), imported)
-      }}
-    >
-      <Field label="Legal entity">
-        <EntitySelect entities={entities} value={entityId} onChange={setEntityId} className="w-full" />
-      </Field>
-      <Field label="qbXML responses (.xml)" hint="Company, Customer, Invoice, ReceivePayment and Account query responses.">
-        <Input type="file" accept=".xml,.qbxml,text/xml,application/xml" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-      </Field>
-      <div className="grid grid-cols-3 gap-3">
-        <Field label="Currency">
-          <Input value={currency} maxLength={3} onChange={(e) => setCurrency(e.target.value.toUpperCase())} />
-        </Field>
-        <Field label="Basis">
-          <select className={selectClass} value={basis} onChange={(e) => setBasis(e.target.value)}>
-            <option>Accrual</option>
-            <option>Cash</option>
-          </select>
-        </Field>
-        <Field label="As of">
-          <Input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} />
-        </Field>
-      </div>
-      <Button type="submit" size="sm" disabled={!file || !entityId || !asOf || importQbxml.isPending}>
-        <FileJson /> Import qbXML
       </Button>
     </form>
   )
@@ -240,11 +198,79 @@ function Rows({ snapshot }: { snapshot: Snapshot }) {
   )
 }
 
+/** Archive (hidden, kept as evidence) or, when nothing depends on it, delete a snapshot. */
+function Removal({ snapshot }: { snapshot: Snapshot }) {
+  const archive = useArchiveSnapshot()
+  const restore = useRestoreSnapshot()
+  const remove = useDeleteSnapshot()
+  const [how, setHow] = useState<"archive" | "delete" | null>(null)
+  const [reason, setReason] = useState("")
+  const busy = archive.isPending || restore.isPending || remove.isPending
+
+  if (snapshot.archived) {
+    return (
+      <div className="flex flex-wrap items-center gap-2 border-t pt-3 text-xs">
+        <span className="text-muted-foreground">
+          Archived by {snapshot.archived_by} {formatDateTime(snapshot.archived_at)}: {snapshot.archived_reason}
+        </span>
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => void attempt(() => restore.mutateAsync(snapshot.id), "Snapshot restored.")}>
+          <ArchiveRestore /> Restore
+        </Button>
+      </div>
+    )
+  }
+  return (
+    <div className="space-y-2 border-t pt-3 text-xs">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => setHow(how === "archive" ? null : "archive")}>
+          <Archive /> Archive
+        </Button>
+        <span title={snapshot.in_use ? `Can't delete: ${snapshot.in_use}. Archive it instead.` : undefined}>
+          <Button
+            size="sm"
+            variant="outline"
+            className="text-red-800"
+            disabled={busy || !!snapshot.in_use}
+            onClick={() => setHow(how === "delete" ? null : "delete")}
+          >
+            <Trash2 /> Delete
+          </Button>
+        </span>
+        <span className="text-muted-foreground">
+          {snapshot.in_use ? `In use: ${snapshot.in_use}. It can only be archived.` : "Not used by any case: it can be deleted."}
+        </span>
+      </div>
+      {how && (
+        <form
+          className="flex flex-wrap gap-2"
+          onSubmit={(e) => {
+            e.preventDefault()
+            void attempt(
+              () =>
+                (how === "archive"
+                  ? archive.mutateAsync({ id: snapshot.id, reason })
+                  : remove.mutateAsync({ id: snapshot.id, reason })
+                ).then(() => true),
+              how === "archive" ? "Snapshot archived." : "Snapshot deleted.",
+            ).then((done) => done && setHow(null))
+          }}
+        >
+          <Input className="h-9 max-w-sm" placeholder="Reason (kept in the audit trail)" value={reason} onChange={(e) => setReason(e.target.value)} />
+          <Button type="submit" size="sm" variant={how === "delete" ? "destructive" : "default"} disabled={busy || reason.trim().length < 3}>
+            {how === "archive" ? "Archive snapshot" : "Delete for good"}
+          </Button>
+        </form>
+      )}
+    </div>
+  )
+}
+
 /** Immutable source snapshots: what every case calculates from. */
 export function SourcesPage() {
   const { data: workflows = [] } = useWorkflows()
   const canImport = workflows.some((w) => w.my_capacities.includes("poster"))
-  const snapshots = useSnapshots()
+  const [showArchived, setShowArchived] = useState(false)
+  const snapshots = useSnapshots(showArchived)
   const [openId, setOpenId] = useState<string | null>(null)
 
   return (
@@ -254,7 +280,16 @@ export function SourcesPage() {
     >
       <PodTabs />
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
-        <Card title="Snapshots" hint="Newest first. Missing collections stay missing: workflows that need them refuse the snapshot.">
+        <Card
+          title="Snapshots"
+          hint="Newest first. Missing collections stay missing: workflows that need them refuse the snapshot."
+          actions={
+            <label className="flex items-center gap-2 text-xs">
+              <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
+              Show archived
+            </label>
+          }
+        >
           {snapshots.isPending && <Loading what="snapshots" />}
           {snapshots.isError && <LoadError what="snapshots" />}
           {snapshots.data?.length === 0 && <Empty>No snapshots yet.</Empty>}
@@ -268,18 +303,21 @@ export function SourcesPage() {
                       {s.entity.code} · {s.currency} · {s.basis} · as of {s.as_of}
                     </span>
                     {s.is_demo && <DemoBadge />}
+                    {s.archived && <Pill label="Archived" tone="neutral" />}
                   </p>
                   <p className="mt-0.5 text-xs text-muted-foreground">
                     {s.source_type.replace("_", " ")} · {s.coverage.length} collections · imported by {s.imported_by}{" "}
                     {formatDateTime(s.imported_at)} · sha256 {shortHash(s.sha256)}
                     {s.parent_id && " · extends an earlier snapshot"}
+                    {s.used_by_cases > 0 && ` · ${s.used_by_cases} case(s)`}
                   </p>
                 </button>
                 {openId === s.id && (
                   <div className="mt-3 space-y-4 rounded-md bg-secondary/30 p-3">
                     <p className="text-xs break-all text-muted-foreground">Source: {s.source_reference}</p>
                     <Rows snapshot={s} />
-                    {canImport && <BankStatement snapshot={s} />}
+                    {canImport && !s.archived && <BankStatement snapshot={s} />}
+                    {canImport && <Removal snapshot={s} />}
                   </div>
                 )}
               </li>
@@ -290,9 +328,6 @@ export function SourcesPage() {
           <div className="space-y-6">
             <Card title="Import an export">
               <JsonImport />
-            </Card>
-            <Card title="QuickBooks Desktop / Enterprise (qbXML)">
-              <QbxmlImport />
             </Card>
             <Card title="From QuickBooks Online">
               <QuickBooksImport />

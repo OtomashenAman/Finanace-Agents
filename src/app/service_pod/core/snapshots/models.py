@@ -59,3 +59,18 @@ class PodSnapshot(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     row_counts: Mapped[dict[str, int]] = mapped_column(JSONB)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
     imported_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+
+
+class PodSnapshotArchive(CreatedAtMixin, Base):
+    """A snapshot taken out of everyday use (e.g. imported with the wrong as-of date). The
+    snapshot itself stays, unchanged, as evidence for the cases that used it; restoring it
+    removes this row. created_at is when it was archived."""
+
+    __tablename__ = "pod_snapshot_archives"
+    __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012 - SQLAlchemy class config
+
+    snapshot_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("pod_snapshots.id", ondelete="CASCADE"), primary_key=True
+    )
+    archived_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+    reason: Mapped[str] = mapped_column(Text)
