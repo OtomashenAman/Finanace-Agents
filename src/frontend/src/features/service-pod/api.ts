@@ -234,6 +234,31 @@ export interface ArPortfolio {
     open_case: CaseRef | null
     next_action: string
   }[]
+  /** Approved promises being watched, overdue first */
+  promises: PromiseRow[]
+}
+
+export interface PromiseRow {
+  case_id: string
+  case_reference: string
+  customer: string
+  invoice_number: string
+  amount: string
+  expected_date: string
+  /** negative: overdue by that many days */
+  days_until: number
+  state: "upcoming" | "due" | "overdue" | "received"
+  /** the evidence of cash: a verified bank posting or a newer source */
+  received_by: string | null
+}
+
+export interface RelatedCase {
+  id: string
+  reference: string
+  workflow: WorkflowKey
+  title: string
+  status: CaseStatus
+  summary: string | null
 }
 
 export interface BankWorklist {
@@ -331,6 +356,8 @@ export interface CaseDetail extends CaseSummary {
   messages: Message[]
   artifacts: Artifact[]
   posting_tasks: PostingTask[]
+  /** Other workflows' cases about the same customer (e.g. the bank receipt paying a promise) */
+  related_cases: RelatedCase[]
   blockers: string[]
   completion_blockers: string[]
   /** null: the viewer may do it now; otherwise why not */

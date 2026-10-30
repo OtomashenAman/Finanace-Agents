@@ -60,6 +60,8 @@ class WorkflowHooks:
     extract_reply: (
         Callable[[AsyncSession, PodCase, PodMessage, LLMProvider], Awaitable[None]] | None
     ) = None
+    # One line about a case, shown on related cases of other workflows (same customer)
+    summary: Callable[[AsyncSession, PodCase], Awaitable[str | None]] | None = None
     # Extra problems verifying a posting: (task, case, source it started from, fresh source)
     verify_posting: (
         Callable[[PodPostingTask, PodCase, SnapshotDocument, SnapshotDocument], list[str]] | None

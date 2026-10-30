@@ -29,6 +29,7 @@ from src.app.service_pod.flows.bank_recon.service import (
     draft_blocker,
     facts,
     on_create,
+    summary,
 )
 from src.app.service_pod.flows.bank_recon.spec import SPEC
 from src.app.service_pod.flows.bank_recon.verification import verify_posting
@@ -44,6 +45,7 @@ register(
         draft_blocker=draft_blocker,
         compose=compose,
         extract_reply=extract_reply,
+        summary=summary,
         verify_posting=verify_posting,
     ),
     router,

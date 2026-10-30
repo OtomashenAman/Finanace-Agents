@@ -1,10 +1,11 @@
 import { Link } from "react-router"
 
 import type { CaseDetail } from "../../api"
-import { Card } from "../../components/bits"
+import { Card, Pill } from "../../components/bits"
 import { ARTIFACT_KIND, MESSAGE_STATUS } from "../../labels"
 import { money, type InvoiceState } from "../shared"
 import { CheckRow } from "../shared-ui"
+import { daysUntil, promiseLabel } from "./meta"
 
 interface ArState {
   customer?: { name: string; email: string | null }
@@ -23,6 +24,7 @@ export function ArPanel({ c }: { c: CaseDetail }) {
 
   const docTasks = c.review_tasks.filter((t) => t.requirement?.type === "document")
   const sentArtifacts = new Set(c.messages.filter((m) => m.status === "sent").flatMap((m) => m.artifact_ids))
+  const dated = live.filter((x) => x.status === "approved" && x.expected_date)
   const reply = [...c.messages].reverse().find((m) => m.direction === "outbound" && m.purpose === "follow_up")
 
   return (
@@ -76,6 +78,25 @@ export function ArPanel({ c }: { c: CaseDetail }) {
           </tfoot>
         </table>
       </div>
+
+      {dated.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-muted-foreground">Promise dates:</span>
+          {dated.map((x) => {
+            const days = daysUntil(x.expected_date!)
+            return (
+              <Pill
+                key={x.id}
+                label={`${x.invoice_number} ${money(x.amount, cur)} · ${promiseLabel({ state: days < 0 ? "overdue" : "upcoming", days_until: days })}`}
+                tone={days < 0 ? "bad" : days <= 2 ? "warn" : "info"}
+              />
+            )
+          })}
+          <Link to="/pod/ar" className="text-primary hover:underline">
+            cash received? see Portfolio
+          </Link>
+        </div>
+      )}
 
       <div className="mt-4 rounded-md bg-secondary/40 p-3 text-sm">
         <p className="font-semibold text-brand-navy">Finance Admin checklist</p>

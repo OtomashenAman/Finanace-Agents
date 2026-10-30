@@ -1,6 +1,9 @@
 """AR Collections: the case selection and the AI's reading of a reply."""
 
+import uuid
+from datetime import date
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -68,6 +71,20 @@ class PortfolioCustomer(BaseModel):
     next_action: str
 
 
+class PromiseRow(BaseModel):
+    """An approved promise being watched: when it's due and whether cash came in."""
+
+    case_id: uuid.UUID
+    case_reference: str
+    customer: str
+    invoice_number: str
+    amount: Decimal
+    expected_date: date
+    days_until: int  # negative: overdue by that many days
+    state: Literal["upcoming", "due", "overdue", "received"]
+    received_by: str | None  # the evidence: a verified bank posting or a newer source
+
+
 class ArPortfolio(BaseModel):
     snapshot: SnapshotSummary | None
     currency: str | None
@@ -77,3 +94,4 @@ class ArPortfolio(BaseModel):
     open_exceptions: int
     aging: list[AgingBucket]
     customers: list[PortfolioCustomer]
+    promises: list[PromiseRow]

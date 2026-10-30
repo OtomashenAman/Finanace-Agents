@@ -245,3 +245,23 @@ async def compose(session: AsyncSession, case: PodCase, purpose: str, llm: LLMPr
         ),
         template_closing="Thank you,",
     )
+
+
+async def summary(session: AsyncSession, case: PodCase) -> str | None:
+    """e.g. "WIRE-2901 USD 9,000.00 → INV-101 6,000.00, INV-102 3,000.00 · posting verified"."""
+    receipt = receipt_of(case)
+    currency = str(receipt.get("currency", ""))
+    head = f"{receipt['reference']} {reading.money(reading.dec(receipt['amount']), currency)}"
+    lines = (case.state.get("allocation") or {}).get("lines", [])
+    if not lines:
+        return f"{head} · waiting for the customer's allocation"
+    applied = ", ".join(
+        f"{line['invoice_number']} {reading.dec(line['amount']):,.2f}" for line in lines
+    )
+    status = await session.scalar(
+        select(PodPostingTask.status).where(
+            PodPostingTask.case_id == case.id, PodPostingTask.kind == TaskKind.RECEIVE_PAYMENT
+        )
+    )
+    posting = f"posting {status.value.replace('_', ' ')}" if status else "posting not queued"
+    return f"{head} → {applied} · {posting}"

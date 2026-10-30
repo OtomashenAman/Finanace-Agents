@@ -27,6 +27,7 @@ from src.app.service_pod.core.messaging.models import Direction, MessageStatus, 
 from src.app.service_pod.core.snapshots import service as snapshots
 from src.app.service_pod.core.snapshots.contract import Collection, SnapshotDocument
 from src.app.service_pod.core.workflows import WorkflowKey
+from src.app.service_pod.flows.ar_collections.promises import missed, promise_rows
 from src.app.service_pod.flows.ar_collections.schemas import (
     AgingBucket,
     ArPortfolio,
@@ -59,11 +60,15 @@ def _overdue(doc: SnapshotDocument, customer_id: str) -> list[InvoiceRow]:
     ]
 
 
-async def _next_action(session: AsyncSession, case: PodCase | None, max_days: int) -> str:
+async def _next_action(
+    session: AsyncSession, case: PodCase | None, max_days: int, missed_promise: bool = False
+) -> str:
     if case is None:
         return (
             "Request a payment schedule" if max_days > PRIORITY_DAYS else "Send an overdue reminder"
         )
+    if missed_promise:
+        return "Follow up on the missed promise"
     kinds = set(
         await session.scalars(
             select(PodReviewTask.kind).where(
@@ -116,6 +121,7 @@ async def ar_portfolio(
             open_exceptions=0,
             aging=empty,
             customers=[],
+            promises=[],
         )
     doc = snapshots.document(snap)
     open_items = [i for i in doc.invoices or [] if i.balance > 0]
@@ -162,6 +168,8 @@ async def ar_portfolio(
         else 0
     )
 
+    watched = await promise_rows(session, cases, doc)
+    late = missed(watched)
     customers = []
     for customer in doc.customers or []:
         overdue = _overdue(doc, customer.id)
@@ -180,7 +188,9 @@ async def ar_portfolio(
                 open_case=CaseRef(id=case.id, reference=case.reference, status=case.status)
                 if case
                 else None,
-                next_action=await _next_action(session, case, max_days),
+                next_action=await _next_action(
+                    session, case, max_days, case is not None and case.id in late
+                ),
             )
         )
     customers.sort(key=lambda c: (c.max_days_overdue > PRIORITY_DAYS, c.overdue), reverse=True)
@@ -196,4 +206,5 @@ async def ar_portfolio(
         open_exceptions=int(exceptions or 0),
         aging=aging,
         customers=customers,
+        promises=watched,
     )

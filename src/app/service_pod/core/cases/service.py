@@ -65,6 +65,7 @@ from src.app.service_pod.core.cases.schemas import (
     PersonRef,
     ProposeCommitmentPayload,
     RefreshSourcePayload,
+    RelatedCase,
     ResolveReviewTaskPayload,
     ReviewQueueItem,
     ReviewTaskOut,
@@ -825,10 +826,49 @@ async def get_case(session: AsyncSession, access: PodAccess, case_id: uuid.UUID)
         messages=await messaging.messages_for_case(session, case),
         artifacts=await messaging.artifacts_for_case(session, case),
         posting_tasks=await tasks.tasks_for_case(session, access, case),
+        related_cases=await related_cases(session, access, case),
         blockers=c.blockers,
         completion_blockers=c.completion_blockers,
         allowed_actions={name: a.guard(c) for name, a in actions_for(case).items()},
     )
+
+
+async def related_cases(
+    session: AsyncSession, access: PodAccess, case: PodCase
+) -> list[RelatedCase]:
+    """Other workflows' cases about the same customer that the viewer may see."""
+    customer_id = case.selection.get("customer_id")
+    if not customer_id:
+        return []
+    others = list(
+        await session.scalars(
+            select(PodCase)
+            .where(
+                visible_cases_clause(access),
+                PodCase.entity_id == case.entity_id,
+                PodCase.id != case.id,
+                PodCase.workflow != case.workflow,
+                PodCase.selection["customer_id"].astext == str(customer_id),
+                PodCase.status.not_in([CaseStatus.CANCELLED, CaseStatus.REJECTED]),
+            )
+            .order_by(PodCase.created_at.desc())
+            .limit(20)
+        )
+    )
+    out = []
+    for other in others:
+        summarize = hooks_for(other.workflow).summary
+        out.append(
+            RelatedCase(
+                id=other.id,
+                reference=other.reference,
+                workflow=other.workflow,
+                title=other.title,
+                status=other.status,
+                summary=await summarize(session, other) if summarize else None,
+            )
+        )
+    return out
 
 
 def _task_out(t: PodReviewTask, people: dict[uuid.UUID, str]) -> ReviewTaskOut:

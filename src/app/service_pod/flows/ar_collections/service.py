@@ -4,6 +4,7 @@ messages it sends (verified invoice figures + wording)."""
 from collections import defaultdict
 from decimal import Decimal
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.core.llm.base import LLMProvider
@@ -15,6 +16,7 @@ from src.app.service_pod.core.cases.models import (
     CaseStatus,
     CommitmentStatus,
     PodCase,
+    PodCommitment,
 )
 from src.app.service_pod.core.cases.service import Ctx
 from src.app.service_pod.core.hooks import Composed
@@ -149,4 +151,20 @@ async def compose(session: AsyncSession, case: PodCase, purpose: str, llm: LLMPr
             "copies, please tell us."
         ),
         template_closing="Thank you,",
+    )
+
+
+async def summary(session: AsyncSession, case: PodCase) -> str | None:
+    """e.g. "INV-101, INV-102 · open USD 25,000.00 · approved promises USD 15,000.00"."""
+    currency = str(case.state.get("currency", ""))
+    numbers = ", ".join(invoices_of(case))
+    approved = await session.scalar(
+        select(func.coalesce(func.sum(PodCommitment.amount), 0)).where(
+            PodCommitment.case_id == case.id, PodCommitment.status == CommitmentStatus.APPROVED
+        )
+    )
+    total = reading.money(reading.dec(case.state.get("total_open", 0)), currency)
+    return (
+        f"{numbers} · open {total} · approved promises "
+        f"{reading.money(Decimal(approved or 0), currency)}"
     )

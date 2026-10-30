@@ -14,6 +14,7 @@ import { attempt, selectClass } from "./ui"
 import { Artifacts, Messages } from "./components/case-messages"
 import { Commitments, Decisions, OwnedActions, ReviewTasks } from "./components/case-sections"
 import { RefreshSource } from "./components/refresh-source"
+import { RelatedCases } from "./components/related-cases"
 import { FLOW_UI } from "./flows"
 import { useRunAction } from "./use-run-action"
 import { useCase, useProposeTask } from "./hooks"
@@ -228,6 +229,7 @@ export function CasePage() {
             </div>
             <div className="space-y-6">
               <Decisions c={c} />
+              <RelatedCases c={c} />
               <Artifacts c={c} />
               {!flow?.ownsPosting && <PostingTasks c={c} />}
               <CaseData c={c} />

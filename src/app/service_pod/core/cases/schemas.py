@@ -107,6 +107,18 @@ class CommitmentOut(BaseModel):
     created_at: datetime
 
 
+class RelatedCase(BaseModel):
+    """A case of another workflow about the same customer (e.g. the bank receipt that pays
+    an AR promise)."""
+
+    id: uuid.UUID
+    reference: str
+    workflow: WorkflowKey
+    title: str
+    status: CaseStatus
+    summary: str | None
+
+
 class CaseDetail(CaseSummary):
     snapshot: SnapshotSummary
     selection: JsonObject
@@ -121,6 +133,7 @@ class CaseDetail(CaseSummary):
     messages: list[MessageOut]
     artifacts: list[ArtifactOut]
     posting_tasks: list[TaskOut]
+    related_cases: list[RelatedCase]
     blockers: list[str]  # what stops submission / approval now
     completion_blockers: list[str]
     # action -> None when the viewer may do it now, else the reason they can't
