@@ -71,7 +71,11 @@ async def from_quickbooks(
     session: AsyncSession, source: DataSource, entity_code: str, currency: str, basis: Basis
 ) -> SnapshotDocument:
     """Customers, open invoices, payments and the chart of accounts as last synced. The
-    other collections (GL, bank, cash position...) aren't available from this source."""
+    other collections (GL, bank, cash position...) aren't available from this source.
+
+    Zero-amount payments are left out: QuickBooks uses them to apply a credit memo to an
+    invoice, which moves no cash. A record the contract refuses is reported by name (422),
+    never a crash."""
     customers: list[QbCustomer] = await _records(session, source, RecordType.CUSTOMER)
     invoices: list[QbInvoice] = await _records(session, source, RecordType.INVOICE)
     payments: list[QbPayment] = await _records(session, source, RecordType.PAYMENT)
@@ -92,40 +96,48 @@ async def from_quickbooks(
         if inv.invoice_date is None or inv.due_date is None or inv.balance is None:
             problems.append(f"invoice {inv.doc_number}: date, due date or balance missing")
             continue
-        pod_invoices.append(
-            Invoice(
-                id=inv.external_id,
-                number=inv.doc_number,
-                customer_id=customer_id(inv.customer_name, f"invoice {inv.doc_number}"),
-                txn_date=inv.invoice_date,
-                due_date=inv.due_date,
-                original_amount=inv.total,
-                balance=inv.balance,
+        try:
+            pod_invoices.append(
+                Invoice(
+                    id=inv.external_id,
+                    number=inv.doc_number,
+                    customer_id=customer_id(inv.customer_name, f"invoice {inv.doc_number}"),
+                    txn_date=inv.invoice_date,
+                    due_date=inv.due_date,
+                    original_amount=inv.total,
+                    balance=inv.balance,
+                )
             )
-        )
+        except ValidationError as exc:
+            problems.append(f"invoice {inv.doc_number}: {validation_message(exc)}")
     invoice_ids = {i.number.lower(): i.id for i in pod_invoices}
 
     pod_payments = []
     for pay in payments:
+        if pay.total <= 0:
+            continue  # a credit memo applied to an invoice: no cash moved
         if pay.payment_date is None:
             problems.append(f"payment {pay.reference_number}: date missing")
             continue
-        allocations = []
-        if pay.invoice_number and pay.applied_amount:
-            target = invoice_ids.get(pay.invoice_number.lower())
-            if target is not None:
-                allocations.append(Allocation(invoice_id=target, amount=pay.applied_amount))
-        pod_payments.append(
-            Payment(
-                id=pay.external_id,
-                customer_id=customer_id(pay.customer_name, f"payment {pay.reference_number}"),
-                date=pay.payment_date,
-                amount=pay.total,
-                currency=currency,
-                reference=pay.reference_number,
-                allocations=allocations,
+        try:
+            allocations = []
+            if pay.invoice_number and pay.applied_amount and pay.applied_amount > 0:
+                target = invoice_ids.get(pay.invoice_number.lower())
+                if target is not None:
+                    allocations.append(Allocation(invoice_id=target, amount=pay.applied_amount))
+            pod_payments.append(
+                Payment(
+                    id=pay.external_id,
+                    customer_id=customer_id(pay.customer_name, f"payment {pay.reference_number}"),
+                    date=pay.payment_date,
+                    amount=pay.total,
+                    currency=currency,
+                    reference=pay.reference_number,
+                    allocations=allocations,
+                )
             )
-        )
+        except ValidationError as exc:
+            problems.append(f"payment {pay.reference_number}: {validation_message(exc)}")
     if problems:
         shown = "; ".join(problems[:MAX_REPORTED_ERRORS])
         more = len(problems) - MAX_REPORTED_ERRORS
