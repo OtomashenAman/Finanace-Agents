@@ -52,6 +52,24 @@ async def import_json(
     return _status(await service.import_json(session, access, entity_id, data, ctx), response)
 
 
+@router.post("/workbook", response_model=SnapshotImportResult, responses=_ERRORS)
+async def import_workbook(
+    file: UploadFile,
+    entity_id: Annotated[uuid.UUID, Form()],
+    session: SessionDep,
+    access: PodAccessDep,
+    ctx: RequestContextDep,
+    response: Response,
+) -> SnapshotImportResult:
+    """The normalized export as an Excel workbook: a Company sheet and one sheet per
+    collection (see importers/workbook.py). 201; 200 when identical content exists."""
+    data = await _read(file, get_settings().pod_snapshot_max_bytes)
+    result = await service.import_workbook(
+        session, access, entity_id, data, file.filename or "export.xlsx", ctx
+    )
+    return _status(result, response)
+
+
 @router.post("/qbxml", response_model=SnapshotImportResult, responses=_ERRORS)
 async def import_qbxml(
     file: UploadFile,

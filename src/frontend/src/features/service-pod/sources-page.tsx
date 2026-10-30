@@ -43,11 +43,18 @@ function JsonImport() {
       <Field label="Legal entity">
         <EntitySelect entities={entities} value={entityId} onChange={setEntityId} className="w-full" />
       </Field>
-      <Field label="Normalized export (JSON)" hint="Read-only QuickBooks Desktop / Enterprise export, at most 5 MB.">
-        <Input type="file" accept=".json,application/json" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+      <Field
+        label="Normalized export (Excel or JSON)"
+        hint="A Company sheet plus one sheet per collection (Customers, Invoices, GL lines…), or the same as JSON. At most 5 MB."
+      >
+        <Input
+          type="file"
+          accept=".xlsx,.json,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+        />
       </Field>
       <Button type="submit" size="sm" disabled={!file || !entityId || importJson.isPending}>
-        <FileJson /> Import export
+        <FileJson /> Import
       </Button>
     </form>
   )

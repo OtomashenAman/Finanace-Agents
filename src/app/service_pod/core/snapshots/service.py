@@ -170,6 +170,22 @@ async def import_json(
     return await _store(session, access, entity, doc, SourceType.JSON_EXPORT, ctx)
 
 
+async def import_workbook(
+    session: AsyncSession,
+    access: PodAccess,
+    entity_id: uuid.UUID,
+    data: bytes,
+    filename: str,
+    ctx: RequestContext,
+) -> SnapshotImportResult:
+    """The same normalized export as JSON, as an Excel workbook (same source type, so a
+    later export in either form can verify a posting)."""
+    access.require_poster("import source data")
+    entity = await _entity(session, access, entity_id)
+    doc = importers.parse_workbook(data, filename)
+    return await _store(session, access, entity, doc, SourceType.JSON_EXPORT, ctx)
+
+
 async def import_qbxml(
     session: AsyncSession,
     access: PodAccess,

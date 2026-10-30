@@ -18,6 +18,9 @@ wheels/
 # Client requirement documents (kept locally, not in the repo)
 /*.pdf
 
+# Documentation and sample uploads stay local (tests use their own fixtures)
+/docs/
+
 # Local data
 uploads/
 logs/

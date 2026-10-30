@@ -392,7 +392,9 @@ export const podApi = {
     const form = new FormData()
     form.append("file", file)
     form.append("entity_id", entityId)
-    return apiRequest<SnapshotImportResult>("/pod/snapshots/json", { method: "POST", form })
+    // The same normalized export as JSON or as an Excel workbook (sheet per collection)
+    const kind = file.name.toLowerCase().endsWith(".xlsx") ? "workbook" : "json"
+    return apiRequest<SnapshotImportResult>(`/pod/snapshots/${kind}`, { method: "POST", form })
   },
   importQuickBooks: (body: { data_source_id: string; entity_id: string; currency: string; basis: string }) =>
     apiRequest<SnapshotImportResult>("/pod/snapshots/quickbooks", { method: "POST", json: body }),

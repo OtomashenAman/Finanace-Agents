@@ -168,6 +168,7 @@ downgrade = { cmd = "alembic downgrade -1", help = "Roll back one migration" }
 seed = { cmd = "python -m src.app.cli.seed", help = "Create demo Finance Admin (--reset-password to reset/unlock)" }
 sync-agents = { cmd = "python -m src.app.cli.sync_agents", help = "Upsert agent_catalog/registry.py into the agents table" }
 sample-workbook = { script = "scripts.dev:sample_workbook", help = "Rebuild docs/sample-uploads/all-agents.xlsx from its CSVs" }
+pod-samples = { script = "scripts.pod_samples:main", help = "Rebuild the Service POD test workbooks in docs/sample-uploads/service-pod" }
 
 [tool.poe.tasks.migration]
 help = "Autogenerate a migration: poe migration \"add runs table\""

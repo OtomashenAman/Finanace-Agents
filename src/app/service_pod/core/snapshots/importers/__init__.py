@@ -7,6 +7,7 @@ from src.app.service_pod.core.snapshots.importers.base import check_row_limits
 from src.app.service_pod.core.snapshots.importers.json_export import parse_json_export
 from src.app.service_pod.core.snapshots.importers.qbxml import parse_qbxml
 from src.app.service_pod.core.snapshots.importers.quickbooks_online import from_quickbooks
+from src.app.service_pod.core.snapshots.importers.workbook import parse_workbook
 
 __all__ = [
     "check_row_limits",
@@ -14,5 +15,6 @@ __all__ = [
     "parse_bank_csv",
     "parse_json_export",
     "parse_qbxml",
+    "parse_workbook",
     "with_bank_receipts",
 ]
