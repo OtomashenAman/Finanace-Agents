@@ -10,8 +10,10 @@ from typing import Protocol
 import httpx
 
 from src.app.core.config import get_settings
+from src.app.service_pod.core.messaging.graph import GraphError, GraphMailbox
 
 BREVO_API = "https://api.brevo.com/v3"
+GRAPH_ATTACHMENTS_MAX = 3 * 1024 * 1024  # Graph takes attachments up to 3 MB inline
 
 
 @dataclass(frozen=True)
@@ -135,8 +137,75 @@ class BrevoProvider:
         return str(message_id)
 
 
+class MicrosoftGraphProvider:
+    """Sends as a Microsoft 365 mailbox. The message is first saved as a draft (nothing goes
+    out, and Exchange gives it its Message-ID, which the customer's reply will quote), then
+    sent; the sent mail stays in the mailbox's Sent Items."""
+
+    name = "microsoft"
+    simulated = False
+
+    def __init__(self, mailbox: GraphMailbox, sender: str) -> None:
+        self._mailbox = mailbox
+        self.sender = sender
+
+    async def readiness(self) -> str | None:
+        try:
+            await self._mailbox.token()
+        except GraphError as exc:
+            return str(exc)
+        return None
+
+    async def send(self, email: OutgoingEmail) -> str:
+        if sum(len(a.content) for a in email.attachments) > GRAPH_ATTACHMENTS_MAX:
+            raise SendRefusedError("Attachments over 3 MB in total can't be sent this way.")
+        message: dict[str, object] = {
+            "subject": email.subject,
+            "body": {"contentType": "Text", "content": email.body},
+            "toRecipients": [
+                {
+                    "emailAddress": {
+                        "address": email.to_email,
+                        **({"name": email.to_name} if email.to_name else {}),
+                    }
+                }
+            ],
+            "attachments": [
+                {
+                    "@odata.type": "#microsoft.graph.fileAttachment",
+                    "name": a.filename,
+                    "contentType": a.content_type,
+                    "contentBytes": base64.b64encode(a.content).decode(),
+                }
+                for a in email.attachments
+            ],
+        }
+        if email.sender.lower() != self._mailbox.mailbox.lower():
+            message["from"] = {"emailAddress": {"address": email.sender, "name": email.sender_name}}
+        try:
+            draft = (await self._mailbox.request("POST", "/messages", json=message)).json()
+        except GraphError as exc:
+            # Only a draft was being saved: nothing can have gone out
+            raise SendRefusedError(f"Microsoft didn't take the message: {exc}") from exc
+        try:
+            await self._mailbox.request("POST", f"/messages/{draft['id']}/send")
+        except GraphError as exc:
+            if exc.uncertain:
+                raise SendUncertainError(f"{exc} Check the mailbox's Sent Items.") from exc
+            raise SendRefusedError(f"Microsoft refused to send it: {exc}") from exc
+        message_id = draft.get("internetMessageId")
+        if not message_id:
+            raise SendUncertainError(
+                "Sent, but Microsoft returned no Message-ID: check Sent Items."
+            )
+        return str(message_id)
+
+
 def get_email_provider() -> EmailProvider:
     settings = get_settings()
+    if settings.email_provider == "microsoft":
+        mailbox = GraphMailbox.from_settings()
+        return MicrosoftGraphProvider(mailbox, settings.email_sender or mailbox.mailbox)
     if settings.email_provider == "brevo":
         assert settings.brevo_api_key and settings.email_sender  # noqa: S101 - config validated
         return BrevoProvider(

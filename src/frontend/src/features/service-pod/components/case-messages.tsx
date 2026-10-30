@@ -143,7 +143,7 @@ function MessageItem({ m, c, ReplyPanel }: { m: Message; c: CaseDetail; ReplyPan
         </div>
       )}
       <p className="mt-1 text-xs text-muted-foreground">
-        {m.direction === "inbound" ? `Received ${formatDateTime(m.received_at)}` : `Drafted by ${m.created_by}`}
+        {m.direction === "inbound" ? `Received ${formatDateTime(m.received_at)}${m.created_by ? "" : " · read from the mailbox"}` : `Drafted by ${m.created_by}`}
         {m.fact_block && " · figures locked to the source"}
         {m.approved_by && ` · checked by ${m.approved_by} (${m.provider})`}
         {m.sent_at && ` · sent ${formatDateTime(m.sent_at)}`}
@@ -226,8 +226,15 @@ function DraftForm({
       {email.data && (
         <p className="text-xs text-muted-foreground">
           Transport: {email.data.provider}
+          {email.data.sender && ` from ${email.data.sender}`}
           {email.data.simulated && " (simulated: approved messages are recorded, nothing is sent)"}
           {email.data.problem && ` · ${email.data.problem}`}
+        </p>
+      )}
+      {email.data?.test_recipient && !email.data.simulated && (
+        <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          Test mode: every email goes to <strong>{email.data.test_recipient}</strong>, not the customer (the subject names
+          the real recipient).
         </p>
       )}
       <div className="flex flex-wrap gap-2">

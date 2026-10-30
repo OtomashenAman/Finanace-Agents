@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal, Self
 
-from pydantic import SecretStr, field_validator, model_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -79,12 +79,39 @@ class Settings(BaseSettings):
     pod_allow_demo_snapshots: bool | None = None
 
     # Service POD: email. "outbox" records approved messages without sending anything
-    # (labelled as simulated); "brevo" sends through Brevo's transactional API
-    email_provider: Literal["outbox", "brevo"] = "outbox"
-    email_sender: str | None = None  # a sender verified in the provider
+    # (labelled as simulated); "brevo" sends through Brevo's transactional API; "microsoft"
+    # sends from a Microsoft 365 mailbox through Microsoft Graph (an Entra app with Mail.Send)
+    email_provider: Literal["outbox", "brevo", "microsoft"] = "outbox"
+    # The From address (a sender verified in the provider; for Microsoft, the mailbox itself
+    # unless the app may "Send As" this address)
+    email_sender: str | None = Field(
+        default=None, validation_alias=AliasChoices("EMAIL_SENDER", "AGENT_EMAIL_FROM")
+    )
     email_sender_name: str = "Finance"
     brevo_api_key: SecretStr | None = None
     email_timeout_seconds: float = 20
+    ms_tenant_id: str | None = Field(
+        default=None, validation_alias=AliasChoices("MS_TENANT_ID", "AGENT_MS_TENANT_ID")
+    )
+    ms_client_id: str | None = Field(
+        default=None, validation_alias=AliasChoices("MS_CLIENT_ID", "AGENT_MS_CLIENT_ID")
+    )
+    ms_client_secret: SecretStr | None = Field(
+        default=None, validation_alias=AliasChoices("MS_CLIENT_SECRET", "AGENT_MS_CLIENT_SECRET")
+    )
+    ms_mailbox: str | None = Field(
+        default=None, validation_alias=AliasChoices("MS_MAILBOX", "AGENT_MS_MAILBOX")
+    )
+    # Seconds between reads of the Microsoft mailbox for customer replies (needs Mail.Read);
+    # unset: replies are imported by hand
+    mailbox_poll_seconds: int | None = Field(
+        default=None,
+        ge=30,
+        validation_alias=AliasChoices("MAILBOX_POLL_SECONDS", "AGENT_POLL_INTERVAL"),
+    )
+    # While set, every email goes to this address instead of the customer (the subject names
+    # the real recipient). Mail from demo / sandbox data can only go out this way
+    email_test_recipient: str | None = None
     # The only addresses internal reports may be distributed to
     pod_internal_recipients: list[str] = []
 
@@ -99,6 +126,12 @@ class Settings(BaseSettings):
         "metrics_dir",
         "brevo_api_key",
         "email_sender",
+        "ms_tenant_id",
+        "ms_client_id",
+        "ms_client_secret",
+        "ms_mailbox",
+        "mailbox_poll_seconds",
+        "email_test_recipient",
         "pod_allow_demo_snapshots",
         mode="before",
     )
@@ -120,6 +153,19 @@ class Settings(BaseSettings):
     def _check_email_config(self) -> Self:
         if self.email_provider == "brevo" and not (self.brevo_api_key and self.email_sender):
             raise ValueError("EMAIL_PROVIDER=brevo requires BREVO_API_KEY and EMAIL_SENDER")
+        if self.email_provider == "microsoft":
+            missing = [
+                name
+                for name, value in (
+                    ("AGENT_MS_TENANT_ID", self.ms_tenant_id),
+                    ("AGENT_MS_CLIENT_ID", self.ms_client_id),
+                    ("AGENT_MS_CLIENT_SECRET", self.ms_client_secret),
+                    ("AGENT_MS_MAILBOX", self.ms_mailbox),
+                )
+                if not value
+            ]
+            if missing:
+                raise ValueError(f"EMAIL_PROVIDER=microsoft requires {', '.join(missing)}")
         return self
 
     @model_validator(mode="after")

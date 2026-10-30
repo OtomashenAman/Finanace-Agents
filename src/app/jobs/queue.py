@@ -46,6 +46,8 @@ class RetryLater(Exception):
 Handler = Callable[[AsyncSession, dict[str, Any], JobContext], Awaitable[None]]
 _HANDLERS: dict[str, Handler] = {}
 _DAILY: list[str] = []  # kinds the worker queues once a day (e.g. the audit retention purge)
+# kinds the worker queues every N seconds; N from settings, None: off
+_EVERY: list[tuple[str, Callable[[], int | None]]] = []
 
 
 def handler(kind: str) -> Callable[[Handler], Handler]:
@@ -66,6 +68,34 @@ def daily(kind: str) -> Callable[[Handler], Handler]:
         return fn
 
     return register
+
+
+def every(kind: str, seconds: Callable[[], int | None]) -> Callable[[Handler], Handler]:
+    """Also run this handler every `seconds()` seconds (queued by the workers; the time slot
+    makes it unique, so several workers don't run it twice)."""
+
+    def register(fn: Handler) -> Handler:
+        _EVERY.append((kind, seconds))
+        return fn
+
+    return register
+
+
+async def schedule_periodic(session: AsyncSession) -> int:
+    """Queue the current slot of each periodic job unless already queued (commits)."""
+    now = utcnow().timestamp()
+    queued = 0
+    for kind, seconds in _EVERY:
+        interval = seconds()
+        if not interval:
+            continue
+        slot = int(now // interval)
+        if await enqueue(
+            session, kind, {"slot": slot}, dedupe_key=f"{kind}:{slot}", max_attempts=1
+        ):
+            queued += 1
+    await session.commit()
+    return queued
 
 
 async def schedule_daily(session: AsyncSession) -> int:
@@ -198,10 +228,11 @@ async def work_once(session: AsyncSession, worker: str, llm: LLMProvider) -> boo
 async def run_worker(
     sessionmaker: async_sessionmaker[AsyncSession], llm: LLMProvider, stop: asyncio.Event
 ) -> None:
-    """Poll for jobs until `stop` is set. Every minute: requeue stale jobs, queue daily ones."""
+    """Poll for jobs until `stop` is set. Every minute: requeue stale jobs, queue daily ones;
+    every few seconds: queue periodic ones that are due."""
     worker = f"{socket.gethostname()}:{os.getpid()}"
     poll = get_settings().jobs_poll_seconds
-    last_recovery = 0.0
+    last_recovery = last_periodic = 0.0
     log.info("worker %s started", worker)
     while not stop.is_set():
         loop_time = asyncio.get_running_loop().time()
@@ -212,6 +243,9 @@ async def run_worker(
                 if scheduled := await schedule_daily(session):
                     log.info("queued %d daily job(s)", scheduled)
                 last_recovery = loop_time
+            if loop_time - last_periodic > 10:
+                await schedule_periodic(session)
+                last_periodic = loop_time
             busy = await work_once(session, worker, llm)
         if not busy:
             with contextlib.suppress(TimeoutError):

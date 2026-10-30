@@ -9,4 +9,5 @@ import src.app.audit.jobs  # audit.purge (daily)
 import src.app.data_sources.service  # data_source.history
 import src.app.service_pod.core.messaging.extraction_job  # pod.extract_reply
 import src.app.service_pod.core.messaging.jobs  # pod.send_message
+import src.app.service_pod.core.messaging.mailbox_job  # pod.read_mailbox (periodic)
 import src.app.service_pod.flows  # the workflows' hooks the jobs call

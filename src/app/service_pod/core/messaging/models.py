@@ -96,7 +96,10 @@ class PodMessage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     raw: Mapped[str | None] = mapped_column(Text)  # the reply exactly as imported
     received_at: Mapped[datetime | None]
 
-    created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+    # None: a reply the worker read from the mailbox
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT")
+    )
 
 
 class ArtifactKind(StrEnum):
@@ -143,3 +146,12 @@ class PodArtifact(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
         ForeignKey("users.id", ondelete="RESTRICT")
     )
     decided_at: Mapped[datetime | None]
+
+
+class PodMailboxCursor(TimestampMixin, Base):
+    """How far the worker has read a mailbox's inbox for customer replies."""
+
+    __tablename__ = "pod_mailbox_cursors"
+
+    mailbox: Mapped[str] = mapped_column(String(320), primary_key=True)
+    received_after: Mapped[datetime]

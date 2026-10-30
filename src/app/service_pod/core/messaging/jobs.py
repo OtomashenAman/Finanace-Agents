@@ -58,10 +58,12 @@ async def send_message(session: AsyncSession, payload: dict[str, Any], ctx: JobC
         if ids
         else []
     )
+    # Test mode: the mail goes to the tester, the subject names the real recipient
+    redirect = get_settings().email_test_recipient
     email = providers.OutgoingEmail(
-        to_email=message.to_email,
-        to_name=message.to_name,
-        subject=message.subject,
+        to_email=redirect or message.to_email,
+        to_name=None if redirect else message.to_name,
+        subject=f"[TEST for {message.to_email}] {message.subject}" if redirect else message.subject,
         body=message.body,
         sender=message.sender or "",
         sender_name=get_settings().email_sender_name,
@@ -86,4 +88,6 @@ async def send_message(session: AsyncSession, payload: dict[str, Any], ctx: JobC
     message.error = None
     message.version += 1
     note = " (simulated: outbox, nothing left the app)" if provider.simulated else ""
+    if redirect:
+        note += f" (test mode: delivered to {redirect})"
     event("pod.message_sent", f"sent '{message.subject}' to {message.to_email}{note}")

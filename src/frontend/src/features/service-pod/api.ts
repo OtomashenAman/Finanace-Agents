@@ -173,7 +173,8 @@ export interface Message {
   in_reply_to_id: string | null
   thread_evidence: "header" | "manual" | null
   received_at: string | null
-  created_by: string
+  /** null: read from the mailbox by the worker */
+  created_by: string | null
   created_at: string
   updated_at: string
 }
@@ -366,6 +367,8 @@ export interface EmailStatus {
   ready: boolean
   problem: string | null
   internal_recipients: string[]
+  /** Test mode: every email goes to this address instead of the customer */
+  test_recipient: string | null
 }
 
 export interface MessageDraft {

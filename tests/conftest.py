@@ -62,6 +62,7 @@ TABLES = (
     "pod_review_tasks",
     "pod_approvals",
     "pod_cases",
+    "pod_mailbox_cursors",
     "pod_snapshot_archives",
     "pod_snapshots",
     "password_reset_requests",

@@ -130,7 +130,7 @@ async def _message_outs(session: AsyncSession, messages: list[PodMessage]) -> li
             in_reply_to_id=m.in_reply_to_id,
             thread_evidence=m.thread_evidence,
             received_at=m.received_at,
-            created_by=people.get(m.created_by, DELETED),
+            created_by=name_of(people, m.created_by),
             created_at=m.created_at,
             updated_at=m.updated_at,
         )
@@ -194,6 +194,7 @@ async def email_status() -> EmailStatus:
         ready=problem is None,
         problem=problem,
         internal_recipients=get_settings().pod_internal_recipients,
+        test_recipient=get_settings().email_test_recipient,
     )
 
 
@@ -451,6 +452,14 @@ async def send_message(
     problem = await provider.readiness()
     if problem is not None:
         raise MessageRefusedError(f"Email can't be sent yet: {problem}")
+    if message.audience == Audience.CUSTOMER and not provider.simulated:
+        snapshot = await session.get(PodSnapshot, case.snapshot_id)
+        assert snapshot is not None  # noqa: S101 - RESTRICT foreign key
+        if snapshot.is_demo and not get_settings().email_test_recipient:
+            raise MessageRefusedError(
+                "This case is on demo / sandbox data: real mail from it goes only to a test "
+                "address. Set EMAIL_TEST_RECIPIENT to your own address."
+            )
     message.provider = provider.name
     message.sender = provider.sender
     message.approval_hash = _approval_hash(message, artifacts, provider.name, provider.sender)
@@ -533,14 +542,15 @@ async def reconcile_message(
 
 async def import_reply(
     session: AsyncSession,
-    access: PodAccess,
+    actor_id: uuid.UUID | None,
     case_id: uuid.UUID,
     body: ReplyImport,
     ctx: RequestContext,
     llm: LLMProvider,
 ) -> tuple[MessageOut, bool]:
     """(reply, created). Re-importing the same email returns the existing one. A workflow
-    that reads replies gets it read in the background (see flows.extraction)."""
+    that reads replies gets it read in the background (see flows.extraction). actor_id None:
+    read from the mailbox by the worker."""
     case = await load_case(session, case_id, lock=True)
     _require_open(case)
     sent = list(
@@ -579,7 +589,8 @@ async def import_reply(
         from_email, subject, text = str(body.from_email).lower(), body.subject or "", body.body
         evidence, raw, message_id = "manual", body.body, None
 
-    if from_email != original.to_email.lower():
+    tester = (get_settings().email_test_recipient or "").lower()
+    if from_email not in {original.to_email.lower(), tester}:
         raise ReplyInvalidError(
             f"The reply comes from {from_email}, but the message went to {original.to_email}."
         )
@@ -615,7 +626,7 @@ async def import_reply(
         content_sha256=content_sha,
         raw=raw,
         received_at=utcnow(),
-        created_by=access.user.id,
+        created_by=actor_id,
     )
     session.add(reply)
     await session.flush()
@@ -623,7 +634,7 @@ async def import_reply(
         session,
         "pod.reply_imported",
         ctx,
-        access.user.id,
+        actor_id,
         case,
         reply,
         f"Imported a reply from {from_email} ({evidence} thread)",

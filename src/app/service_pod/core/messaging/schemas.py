@@ -43,7 +43,7 @@ class MessageOut(BaseModel):
     in_reply_to_id: uuid.UUID | None
     thread_evidence: str | None
     received_at: datetime | None
-    created_by: str
+    created_by: str | None  # None: read from the mailbox by the worker
     created_at: datetime
     updated_at: datetime
 
@@ -151,3 +151,4 @@ class EmailStatus(BaseModel):
     ready: bool
     problem: str | None
     internal_recipients: list[str]
+    test_recipient: str | None  # set: every email goes here instead (test mode)

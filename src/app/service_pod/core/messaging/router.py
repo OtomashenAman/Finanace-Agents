@@ -126,7 +126,7 @@ async def import_reply(
     llm: LLM,
 ) -> MessageOut:
     """Import a customer reply (201; 200 when the same email was imported before)."""
-    reply, created = await service.import_reply(session, access, case_id, body, ctx, llm)
+    reply, created = await service.import_reply(session, access.user.id, case_id, body, ctx, llm)
     response.status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
     return reply
 
