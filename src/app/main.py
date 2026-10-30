@@ -22,6 +22,7 @@ from src.app.core.observability import (
     http_metrics,
     setup_logging,
 )
+from src.app.core.origin import OriginCheckMiddleware
 from src.app.jobs.queue import run_worker
 from src.app.monitoring.metrics import business_metrics
 from src.app.router import api_router
@@ -78,7 +79,8 @@ def create_app() -> FastAPI:
             allow_headers=["*"],
         )
 
-    app.add_middleware(ObservabilityMiddleware)
+    app.add_middleware(OriginCheckMiddleware)
+    app.add_middleware(ObservabilityMiddleware)  # outermost: logs refused requests too
     register_exception_handlers(app)
     app.include_router(api_router, prefix="/api/v1")
 

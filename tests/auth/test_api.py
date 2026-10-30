@@ -74,7 +74,7 @@ async def test_login_sets_httponly_cookies_and_returns_user(
     refresh = set_cookie(r, "facc_refresh")
     for cookie in (access, refresh):
         assert "HttpOnly" in cookie
-        assert "SameSite=lax" in cookie
+        assert "SameSite=strict" in cookie
     assert "Path=/api;" in access
     assert "Path=/api/v1/auth" in refresh
 

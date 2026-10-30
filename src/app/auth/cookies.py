@@ -1,5 +1,5 @@
 import re
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import Depends, Request, Response
 
@@ -10,6 +10,9 @@ REFRESH_COOKIE = "facc_refresh"
 ACCESS_COOKIE_PATH = "/api"
 # Refresh cookie is only ever sent to the auth endpoints
 REFRESH_COOKIE_PATH = "/api/v1/auth"
+# Strict: the browser never attaches the session to a request another site starts. The SPA
+# authenticates with same-site fetches, so links into the app (emails, OAuth returns) still work
+SAMESITE: Literal["strict"] = "strict"
 
 # Each browser tab may hold its own session (e.g. an admin and a user side by side): the SPA
 # sends its tab's slot id in this header and the cookies carry the slot in their name. They
@@ -45,7 +48,7 @@ def set_auth_cookies(
         path=ACCESS_COOKIE_PATH,
         httponly=True,
         secure=settings.cookie_secure,
-        samesite="lax",
+        samesite=SAMESITE,
     )
     response.set_cookie(
         refresh_cookie(slot),
@@ -54,7 +57,7 @@ def set_auth_cookies(
         path=REFRESH_COOKIE_PATH,
         httponly=True,
         secure=settings.cookie_secure,
-        samesite="lax",
+        samesite=SAMESITE,
     )
 
 
@@ -65,5 +68,5 @@ def clear_auth_cookies(response: Response, slot: str | None = None) -> None:
         (refresh_cookie(slot), REFRESH_COOKIE_PATH),
     ):
         response.delete_cookie(
-            name, path=path, httponly=True, secure=settings.cookie_secure, samesite="lax"
+            name, path=path, httponly=True, secure=settings.cookie_secure, samesite=SAMESITE
         )
