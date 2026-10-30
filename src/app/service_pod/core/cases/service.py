@@ -1,10 +1,9 @@
 """The case engine shared by the five workflows.
 
-Every change goes through run_action with the version the caller last saw. Approvals bind a
-fingerprint of the case's content (source, selection, results, review tasks, actions,
-commitments): changing any of it after a review sends the case back to review, so nobody
-can approve one thing and have another go out. Reviewers act only on cases they didn't
-prepare, and the final approver must be yet another person.
+Every change goes through run_action with the version the caller last saw. An approval binds
+a fingerprint of the case's content (source, selection, results, review tasks, actions,
+commitments): changing any of it afterwards sends the case back to draft, so what was
+approved is what goes out.
 """
 
 import uuid
@@ -23,12 +22,7 @@ from src.app.entities import service as entities
 from src.app.service_pod.common.canonical import canonical, fingerprint, plain
 from src.app.service_pod.common.people import DELETED, name_of, names
 from src.app.service_pod.core.access.service import PodAccess
-from src.app.service_pod.core.cases.access import (
-    CaseRole,
-    load_case,
-    roles_on,
-    visible_cases_clause,
-)
+from src.app.service_pod.core.cases.access import load_case
 from src.app.service_pod.core.cases.exceptions import (
     CaseActionError,
     InvalidActionPayloadError,
@@ -38,8 +32,6 @@ from src.app.service_pod.core.cases.models import (
     LOCKED_STATUSES,
     CaseStatus,
     CommitmentStatus,
-    Decision,
-    Gate,
     PodApproval,
     PodCase,
     PodCommitment,
@@ -58,7 +50,6 @@ from src.app.service_pod.core.cases.schemas import (
     CaseSummary,
     CommitmentOut,
     DecideCommitmentPayload,
-    DecisionPayload,
     EditPayload,
     EmptyPayload,
     OwnedActionOut,
@@ -79,11 +70,10 @@ from src.app.service_pod.core.snapshots.contract import Collection
 from src.app.service_pod.core.snapshots.models import PodSnapshot
 from src.app.service_pod.core.tasks import service as tasks
 from src.app.service_pod.core.tasks.models import PodPostingTask, TaskStatus
-from src.app.service_pod.core.workflows import WORKFLOWS, Capacity
+from src.app.service_pod.core.workflows import WORKFLOWS
 
 MAX_CASE_DATA = 256 * 1024  # selection / state JSON
-OPEN_FOR_EDIT = frozenset({CaseStatus.DRAFT, CaseStatus.CHANGES_REQUESTED})
-REVIEWED = frozenset({CaseStatus.AWAITING_FINAL, CaseStatus.APPROVED})
+DRAFT = frozenset({CaseStatus.DRAFT})
 
 
 @dataclass
@@ -197,24 +187,11 @@ async def _completion_blockers(session: AsyncSession, case: PodCase) -> list[str
     return problems
 
 
-def valid_review(children: Children, current: str) -> PodApproval | None:
-    reviews = [
-        a
-        for a in children.approvals
-        if a.gate == Gate.REVIEW and a.decision == Decision.APPROVED and a.content_hash == current
-    ]
-    return reviews[-1] if reviews else None
-
-
-# --- guards: None = allowed, else the reason --------------------------------------------
-
-
 @dataclass
 class Ctx:
     session: AsyncSession
     access: PodAccess
     case: PodCase
-    roles: set[CaseRole]
     children: Children
     fingerprint: str
     blockers: list[str]
@@ -230,83 +207,34 @@ class Ctx:
         return self.case.status in LOCKED_STATUSES
 
 
-def need_role(c: Ctx, *roles: CaseRole) -> str | None:
-    if c.locked:
-        return f"The case is {c.case.status.value.replace('_', ' ')}; it can't change any more."
-    if not c.roles & set(roles):
-        spec = WORKFLOWS[c.case.workflow]
-        if CaseRole.OWNER in roles and len(roles) == 1:
-            return "Only the preparer who opened this case can do this."
-        wanted = [spec.labels.get(Capacity(r.value), r.value) for r in roles if r != CaseRole.OWNER]
-        who = " or ".join(wanted) if wanted else "an assigned person"
-        return f"Only the {who} can do this (and not on a case they prepared)."
+def need_status(c: Ctx, allowed: frozenset[CaseStatus], doing: str) -> str | None:
+    if c.case.status not in allowed:
+        return f"Can't {doing} while the case is {c.case.status.value}."
     return None
 
 
-def need_status(c: Ctx, allowed: frozenset[CaseStatus], doing: str) -> str | None:
-    if c.case.status not in allowed:
-        return f"Can't {doing} while the case is {c.case.status.value.replace('_', ' ')}."
+def need_open(c: Ctx) -> str | None:
+    if c.locked:
+        return f"The case is {c.case.status.value}; it can't change any more."
     return None
 
 
 def _guard_edit(c: Ctx) -> str | None:
-    return need_role(c, CaseRole.OWNER) or need_status(c, OPEN_FOR_EDIT, "edit")
+    return need_status(c, DRAFT, "edit")
 
 
-def _guard_submit(c: Ctx) -> str | None:
-    return (
-        need_role(c, CaseRole.OWNER)
-        or need_status(c, OPEN_FOR_EDIT, "submit")
-        or (c.blockers[0] if c.blockers else None)
-    )
-
-
-def _guard_review(c: Ctx) -> str | None:
-    return (
-        need_role(c, CaseRole.REVIEWER)
-        or need_status(c, frozenset({CaseStatus.IN_REVIEW}), "review")
-        or (c.blockers[0] if c.blockers else None)
-    )
-
-
-def _guard_final(c: Ctx) -> str | None:
-    if not WORKFLOWS[c.case.workflow].final_gate:
-        return "This workflow has no final approval."
-    problem = need_role(c, CaseRole.FINAL_APPROVER) or need_status(
-        c, frozenset({CaseStatus.AWAITING_FINAL}), "give the final approval"
-    )
-    if problem:
-        return problem
-    review = valid_review(c.children, c.fingerprint)
-    if review is None:
-        return "The review approval no longer matches the case; it must be reviewed again."
-    if review.user_id == c.user.id:
-        return "The final approval must come from a different person than the reviewer."
-    return c.blockers[0] if c.blockers else None
+def _guard_approve(c: Ctx) -> str | None:
+    return need_status(c, DRAFT, "approve") or (c.blockers[0] if c.blockers else None)
 
 
 def _guard_complete(c: Ctx) -> str | None:
-    return (
-        need_role(c, CaseRole.OWNER, CaseRole.REVIEWER)
-        or need_status(c, frozenset({CaseStatus.APPROVED}), "complete")
-        or (c.completion_blockers[0] if c.completion_blockers else None)
+    return need_status(c, frozenset({CaseStatus.APPROVED}), "complete") or (
+        c.completion_blockers[0] if c.completion_blockers else None
     )
 
 
 def _guard_cancel(c: Ctx) -> str | None:
-    return need_role(c, CaseRole.OWNER) or need_status(c, OPEN_FOR_EDIT, "cancel")
-
-
-def _guard_work(c: Ctx) -> str | None:
-    return need_role(c, CaseRole.OWNER, CaseRole.REVIEWER, CaseRole.FINAL_APPROVER)
-
-
-def _guard_propose(c: Ctx) -> str | None:
-    return need_role(c, CaseRole.OWNER)
-
-
-def _guard_decide_commitment(c: Ctx) -> str | None:
-    return need_role(c, CaseRole.REVIEWER)
+    return need_status(c, DRAFT, "cancel")
 
 
 # --- handlers: change the case, return (summary, content changed) -----------------------
@@ -332,40 +260,10 @@ async def _edit(c: Ctx, p: BaseModel) -> tuple[str, bool]:
     return "Edited", True
 
 
-async def _submit(c: Ctx, _: BaseModel) -> tuple[str, bool]:
-    c.case.status = CaseStatus.IN_REVIEW
-    return "Submitted for review", False
-
-
-async def _decide(c: Ctx, p: BaseModel, gate: Gate) -> tuple[str, bool]:
-    assert isinstance(p, DecisionPayload)  # noqa: S101
-    c.session.add(
-        PodApproval(
-            case_id=c.case.id,
-            gate=gate,
-            decision=p.decision,
-            user_id=c.user.id,
-            content_hash=c.fingerprint,
-            comment=p.comment.strip() if p.comment else None,
-        )
-    )
-    if p.decision == Decision.APPROVED:
-        final = gate == Gate.REVIEW and WORKFLOWS[c.case.workflow].final_gate
-        c.case.status = CaseStatus.AWAITING_FINAL if final else CaseStatus.APPROVED
-    elif p.decision == Decision.CHANGES_REQUESTED:
-        c.case.status = CaseStatus.CHANGES_REQUESTED
-    else:
-        c.case.status = CaseStatus.REJECTED
-    label = "Final decision" if gate == Gate.FINAL else "Review"
-    return f"{label}: {p.decision.value.replace('_', ' ')}", False
-
-
-async def _review(c: Ctx, p: BaseModel) -> tuple[str, bool]:
-    return await _decide(c, p, Gate.REVIEW)
-
-
-async def _final_review(c: Ctx, p: BaseModel) -> tuple[str, bool]:
-    return await _decide(c, p, Gate.FINAL)
+async def _approve(c: Ctx, _: BaseModel) -> tuple[str, bool]:
+    c.session.add(PodApproval(case_id=c.case.id, user_id=c.user.id, content_hash=c.fingerprint))
+    c.case.status = CaseStatus.APPROVED
+    return "Approved", False
 
 
 async def _complete(c: Ctx, _: BaseModel) -> tuple[str, bool]:
@@ -500,8 +398,6 @@ async def _decide_commitment(c: Ctx, p: BaseModel) -> tuple[str, bool]:
         raise InvalidActionPayloadError("Unknown commitment.")
     if commitment.status != CommitmentStatus.PROPOSED:
         raise CaseActionError("This commitment was already decided.")
-    if commitment.created_by == c.user.id:
-        raise CaseActionError("You can't approve a commitment you proposed.")
     if p.decision == "approved" and commitment.expected_date is None:
         raise CaseActionError(
             "A commitment without a date can't be approved: get the date from the customer."
@@ -517,7 +413,7 @@ async def _refresh_source(c: Ctx, p: BaseModel) -> tuple[str, bool]:
     assert isinstance(p, RefreshSourcePayload)  # noqa: S101
     current = await c.session.get(PodSnapshot, c.case.snapshot_id)
     assert current is not None  # noqa: S101 - RESTRICT foreign key
-    fresh = await snapshots.get_visible(c.session, c.access, p.snapshot_id)
+    fresh = await snapshots.load_snapshot(c.session, p.snapshot_id)
     if (fresh.entity_id, fresh.company_id) != (current.entity_id, current.company_id):
         raise InvalidActionPayloadError("Choose a snapshot of the same company and entity.")
     if fresh.created_at <= current.created_at:
@@ -542,20 +438,16 @@ class ActionSpec:
 
 ACTIONS: dict[str, ActionSpec] = {
     "edit": ActionSpec(EditPayload, _guard_edit, _edit),
-    "submit": ActionSpec(EmptyPayload, _guard_submit, _submit),
-    "review": ActionSpec(DecisionPayload, _guard_review, _review),
-    "final_review": ActionSpec(DecisionPayload, _guard_final, _final_review),
+    "approve": ActionSpec(EmptyPayload, _guard_approve, _approve),
     "complete": ActionSpec(EmptyPayload, _guard_complete, _complete),
     "cancel": ActionSpec(CancelPayload, _guard_cancel, _cancel),
-    "add_review_task": ActionSpec(AddReviewTaskPayload, _guard_work, _add_review_task),
-    "resolve_review_task": ActionSpec(ResolveReviewTaskPayload, _guard_work, _resolve_review_task),
-    "add_action": ActionSpec(AddActionPayload, _guard_work, _add_action),
-    "update_action": ActionSpec(UpdateActionPayload, _guard_work, _update_action),
-    "propose_commitment": ActionSpec(ProposeCommitmentPayload, _guard_propose, _propose_commitment),
-    "refresh_source": ActionSpec(RefreshSourcePayload, _guard_propose, _refresh_source),
-    "decide_commitment": ActionSpec(
-        DecideCommitmentPayload, _guard_decide_commitment, _decide_commitment
-    ),
+    "add_review_task": ActionSpec(AddReviewTaskPayload, need_open, _add_review_task),
+    "resolve_review_task": ActionSpec(ResolveReviewTaskPayload, need_open, _resolve_review_task),
+    "add_action": ActionSpec(AddActionPayload, need_open, _add_action),
+    "update_action": ActionSpec(UpdateActionPayload, need_open, _update_action),
+    "propose_commitment": ActionSpec(ProposeCommitmentPayload, need_open, _propose_commitment),
+    "refresh_source": ActionSpec(RefreshSourcePayload, need_open, _refresh_source),
+    "decide_commitment": ActionSpec(DecideCommitmentPayload, need_open, _decide_commitment),
 }
 
 
@@ -567,7 +459,6 @@ async def _ctx(
         session=session,
         access=access,
         case=case,
-        roles=roles_on(case, access),
         children=children,
         fingerprint=case_fingerprint(case, children),
         blockers=_blockers(children),
@@ -591,9 +482,7 @@ async def create_case(
     session: AsyncSession, access: PodAccess, body: CaseCreate, ctx: RequestContext
 ) -> CaseDetail:
     spec = WORKFLOWS[body.workflow]
-    access.require(spec.key, Capacity.PREPARER, "open cases")
-    snapshot = await snapshots.get_visible(session, access, body.snapshot_id)
-    access.require_entity(snapshot.entity_id)
+    snapshot = await snapshots.load_snapshot(session, body.snapshot_id)
     missing = sorted(spec.required - {Collection(c) for c in snapshot.coverage})
     if missing:
         raise SourceCoverageError(
@@ -609,7 +498,6 @@ async def create_case(
         owner_id=access.user.id,
         title=body.title,
         status=CaseStatus.DRAFT,
-        stage="start",
         selection=bounded(body.selection, "selection"),
         state={},
     )
@@ -640,9 +528,7 @@ async def run_action(
     body: CaseAction,
     request: RequestContext,
 ) -> CaseDetail:
-    case = await load_case(
-        session, access, case_id, lock=True, expected_version=body.expected_version
-    )
+    case = await load_case(session, case_id, lock=True, expected_version=body.expected_version)
     action = actions_for(case).get(body.action)
     if action is None:
         raise InvalidActionPayloadError(f"Unknown action {body.action!r}.")
@@ -658,9 +544,9 @@ async def run_action(
         raise CaseActionError(reason)
 
     summary, changed = await action.handler(c, payload)
-    reopened = changed and case.status in REVIEWED
+    reopened = changed and case.status == CaseStatus.APPROVED
     if reopened:
-        case.status = CaseStatus.IN_REVIEW
+        case.status = CaseStatus.DRAFT
     case.version += 1
     record_event(
         session,
@@ -681,7 +567,7 @@ async def run_action(
             actor_id=access.user.id,
             run=case.reference,
             case_id=str(case.id),
-            summary=f"{case.reference}: content changed after review, back to review",
+            summary=f"{case.reference}: content changed after approval, back to draft",
         )
     await session.commit()
     return await get_case(session, access, case.id)
@@ -707,6 +593,15 @@ async def _summaries(session: AsyncSession, cases: list[PodCase]) -> list[CaseSu
         .group_by(PodReviewTask.case_id)
     )
     open_counts = dict(count_rows.all())
+    stages: dict[uuid.UUID, str | None] = {}
+    for c in cases:
+        stage = hooks_for(c.workflow).stage
+        if c.status in LOCKED_STATUSES:
+            stages[c.id] = "done"
+        elif stage is not None:
+            stages[c.id] = await stage(session, c)
+        else:
+            stages[c.id] = None
     return [
         CaseSummary(
             id=c.id,
@@ -714,7 +609,7 @@ async def _summaries(session: AsyncSession, cases: list[PodCase]) -> list[CaseSu
             workflow=c.workflow,
             title=c.title,
             status=c.status,
-            stage=c.stage,
+            stage=stages[c.id],
             version=c.version,
             entity=entity_refs[c.entity_id],
             owner=PersonRef(id=c.owner_id, name=owners.get(c.owner_id, DELETED)),
@@ -730,17 +625,11 @@ async def _summaries(session: AsyncSession, cases: list[PodCase]) -> list[CaseSu
 
 async def list_cases(
     session: AsyncSession,
-    access: PodAccess,
     workflow: str | None,
     status: CaseStatus | None,
     entity_id: uuid.UUID | None,
 ) -> list[CaseSummary]:
-    query = (
-        select(PodCase)
-        .where(visible_cases_clause(access))
-        .order_by(PodCase.updated_at.desc())
-        .limit(300)
-    )
+    query = select(PodCase).order_by(PodCase.updated_at.desc()).limit(300)
     if workflow is not None:
         query = query.where(PodCase.workflow == workflow)
     if status is not None:
@@ -751,7 +640,7 @@ async def list_cases(
 
 
 async def get_case(session: AsyncSession, access: PodAccess, case_id: uuid.UUID) -> CaseDetail:
-    case = await load_case(session, access, case_id)
+    case = await load_case(session, case_id)
     c = await _ctx(session, access, case)
     ch = c.children
     people = await names(
@@ -775,16 +664,11 @@ async def get_case(session: AsyncSession, access: PodAccess, case_id: uuid.UUID)
         state=case.state,
         completed_at=case.completed_at,
         fingerprint=c.fingerprint,
-        my_roles=sorted(r.value for r in c.roles),
         approvals=[
             ApprovalOut(
                 id=a.id,
-                gate=a.gate,
-                decision=a.decision,
                 user=PersonRef(id=a.user_id, name=people.get(a.user_id, DELETED)),
-                comment=a.comment,
                 content_hash=a.content_hash,
-                policy_version=a.policy_version,
                 valid=a.content_hash == c.fingerprint,
                 created_at=a.created_at,
             )
@@ -825,18 +709,16 @@ async def get_case(session: AsyncSession, access: PodAccess, case_id: uuid.UUID)
         ],
         messages=await messaging.messages_for_case(session, case),
         artifacts=await messaging.artifacts_for_case(session, case),
-        posting_tasks=await tasks.tasks_for_case(session, access, case),
-        related_cases=await related_cases(session, access, case),
+        posting_tasks=await tasks.tasks_for_case(session, case),
+        related_cases=await related_cases(session, case),
         blockers=c.blockers,
         completion_blockers=c.completion_blockers,
         allowed_actions={name: a.guard(c) for name, a in actions_for(case).items()},
     )
 
 
-async def related_cases(
-    session: AsyncSession, access: PodAccess, case: PodCase
-) -> list[RelatedCase]:
-    """Other workflows' cases about the same customer that the viewer may see."""
+async def related_cases(session: AsyncSession, case: PodCase) -> list[RelatedCase]:
+    """Other workflows' cases about the same customer."""
     customer_id = case.selection.get("customer_id")
     if not customer_id:
         return []
@@ -844,12 +726,11 @@ async def related_cases(
         await session.scalars(
             select(PodCase)
             .where(
-                visible_cases_clause(access),
                 PodCase.entity_id == case.entity_id,
                 PodCase.id != case.id,
                 PodCase.workflow != case.workflow,
                 PodCase.selection["customer_id"].astext == str(customer_id),
-                PodCase.status.not_in([CaseStatus.CANCELLED, CaseStatus.REJECTED]),
+                PodCase.status != CaseStatus.CANCELLED,
             )
             .order_by(PodCase.created_at.desc())
             .limit(20)
@@ -888,14 +769,13 @@ def _task_out(t: PodReviewTask, people: dict[uuid.UUID, str]) -> ReviewTaskOut:
     )
 
 
-async def review_queue(session: AsyncSession, access: PodAccess) -> list[ReviewQueueItem]:
-    """Open review tasks on the cases the viewer works on, oldest first."""
+async def review_queue(session: AsyncSession) -> list[ReviewQueueItem]:
+    """Open review tasks on open cases, oldest first."""
     rows = (
         await session.execute(
             select(PodReviewTask, PodCase)
             .join(PodCase, PodCase.id == PodReviewTask.case_id)
             .where(
-                visible_cases_clause(access),
                 PodReviewTask.status == ReviewTaskStatus.OPEN,
                 PodCase.status.not_in(LOCKED_STATUSES),
             )

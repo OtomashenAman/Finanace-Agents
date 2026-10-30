@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, type ComponentType, type ReactNode } from "react"
 import { Bot, Download, Mail, Send, Sparkles } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -8,7 +8,6 @@ import { apiDownload } from "@/lib/api"
 
 import type { ApprovalChecks, ArtifactKind, CaseDetail, Message } from "../api"
 import {
-  useApproveMessage,
   useCompose,
   useCreateDraft,
   useDecideArtifact,
@@ -19,7 +18,6 @@ import {
   useUpdateMessage,
   useUploadArtifact,
 } from "../hooks"
-import { FLOW_UI } from "../flows"
 import { ARTIFACT_KIND, formatDateTime, MESSAGE_STATUS } from "../labels"
 import { Card, Empty, Field, Pill } from "./bits"
 import { attempt, selectClass } from "../ui"
@@ -64,8 +62,9 @@ export function Extraction({ m }: { m: Message }) {
   )
 }
 
-function ApproveBox({ m }: { m: Message }) {
-  const approve = useApproveMessage()
+/** The checklist, then one click: the exact message is approved and sent once. */
+function SendBox({ m }: { m: Message }) {
+  const send = useSendMessage()
   const [checks, setChecks] = useState<ApprovalChecks>({ recipient: false, mapping: false, tone: false })
   const customer = m.audience === "customer"
   const ready = !customer || (checks.recipient && checks.mapping && checks.tone)
@@ -80,17 +79,18 @@ function ApproveBox({ m }: { m: Message }) {
         ))}
       <Button
         size="sm"
-        disabled={approve.isPending || !ready}
-        onClick={() => void attempt(() => approve.mutateAsync({ id: m.id, version: m.version, checks }), "Message approved.")}
+        disabled={send.isPending || !ready}
+        onClick={() => void attempt(() => send.mutateAsync({ id: m.id, version: m.version, checks }), (r) => MESSAGE_STATUS[r.status][0])}
       >
-        Approve message
+        <Send /> Check &amp; send
       </Button>
     </div>
   )
 }
 
-function MessageItem({ m, c }: { m: Message; c: CaseDetail }) {
-  const send = useSendMessage()
+type ReplyPanelType = ComponentType<{ c: CaseDetail; m: Message }>
+
+function MessageItem({ m, c, ReplyPanel }: { m: Message; c: CaseDetail; ReplyPanel?: ReplyPanelType }) {
   const update = useUpdateMessage()
   const reconcile = useReconcile()
   const [editing, setEditing] = useState(false)
@@ -98,10 +98,8 @@ function MessageItem({ m, c }: { m: Message; c: CaseDetail }) {
   const [body, setBody] = useState(m.body)
   const [note, setNote] = useState("")
   const [label, tone] = MESSAGE_STATUS[m.status]
-  const owner = c.my_roles.includes("owner")
-  const reviewer = c.my_roles.includes("reviewer")
-  const pending = send.isPending || update.isPending || reconcile.isPending
-  const ReplyPanel = FLOW_UI[c.workflow]?.ReplyPanel
+  const pending = update.isPending || reconcile.isPending
+  const unsent = m.status === "draft" || m.status === "send_failed"
 
   return (
     <li className="py-3 text-sm">
@@ -124,7 +122,7 @@ function MessageItem({ m, c }: { m: Message; c: CaseDetail }) {
               onClick={() =>
                 void attempt(
                   () => update.mutateAsync({ id: m.id, version: m.version, subject, body }),
-                  "Saved: it needs approval again.",
+                  "Saved.",
                 ).then((r) => r && setEditing(false))
               }
             >
@@ -147,29 +145,20 @@ function MessageItem({ m, c }: { m: Message; c: CaseDetail }) {
       <p className="mt-1 text-xs text-muted-foreground">
         {m.direction === "inbound" ? `Received ${formatDateTime(m.received_at)}` : `Drafted by ${m.created_by}`}
         {m.fact_block && " · figures locked to the source"}
-        {m.approved_by && ` · approved by ${m.approved_by} (${m.provider})`}
+        {m.approved_by && ` · checked by ${m.approved_by} (${m.provider})`}
         {m.sent_at && ` · sent ${formatDateTime(m.sent_at)}`}
         {m.artifact_ids.length > 0 && ` · ${m.artifact_ids.length} attachment(s)`}
       </p>
       {m.error && <p className="text-xs text-red-800">{m.error}</p>}
       {m.direction === "outbound" && !editing && (
         <div className="mt-2 flex flex-wrap gap-2">
-          {owner && ["draft", "approved", "send_failed"].includes(m.status) && (
+          {unsent && (
             <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
               Edit
             </Button>
           )}
-          {reviewer && m.status === "draft" && <ApproveBox m={m} />}
-          {(owner || reviewer) && m.status === "approved" && (
-            <Button
-              size="sm"
-              disabled={pending}
-              onClick={() => void attempt(() => send.mutateAsync({ id: m.id, version: m.version }), (r) => MESSAGE_STATUS[r.status][0])}
-            >
-              <Send /> Send
-            </Button>
-          )}
-          {reviewer && m.status === "send_unknown" && (
+          {unsent && <SendBox m={m} />}
+          {m.status === "send_unknown" && (
             <span className="flex w-full flex-wrap gap-2">
               <Input className="max-w-sm" placeholder="What the provider log shows" value={note} onChange={(e) => setNote(e.target.value)} />
               {(["sent", "send_failed"] as const).map((outcome) => (
@@ -191,13 +180,20 @@ function MessageItem({ m, c }: { m: Message; c: CaseDetail }) {
   )
 }
 
-function DraftForm({ c }: { c: CaseDetail }) {
+function DraftForm({
+  c,
+  purposes,
+  defaultPurpose,
+}: {
+  c: CaseDetail
+  purposes: Record<string, string>
+  defaultPurpose?: string
+}) {
   const create = useCreateDraft()
   const compose = useCompose()
   const email = useEmailStatus()
-  const purposes = FLOW_UI[c.workflow]?.purposes ?? {}
   const approved = c.artifacts.filter((a) => a.status === "approved")
-  const [purpose, setPurpose] = useState(Object.keys(purposes)[0] ?? "case_message")
+  const [purpose, setPurpose] = useState(defaultPurpose ?? Object.keys(purposes)[0] ?? "case_message")
   const [audience, setAudience] = useState<"customer" | "internal">("customer")
   const [to, setTo] = useState("")
   const [subject, setSubject] = useState("")
@@ -216,7 +212,7 @@ function DraftForm({ c }: { c: CaseDetail }) {
               caseId: c.id,
               draft: { audience, purpose, to_email: to, subject, body, artifact_ids: attach },
             }),
-          "Draft saved. A reviewer approves it before it can be sent.",
+          "Draft saved: check it and send it when ready.",
         ).then((r) => {
           if (r) {
             setSubject("")
@@ -359,20 +355,48 @@ function ReplyForm({ c }: { c: CaseDetail }) {
   )
 }
 
-export function Messages({ c }: { c: CaseDetail }) {
-  const owner = c.my_roles.includes("owner")
-  const canImport = owner || c.my_roles.includes("reviewer")
-  const locked = ["completed", "rejected", "cancelled"].includes(c.status)
+interface MessagesProps {
+  c: CaseDetail
+  title?: string
+  hint?: ReactNode
+  /** Which messages this view shows (default: all) */
+  filter?: (m: Message) => boolean
+  /** Show the draft composer */
+  compose?: boolean
+  /** Show the reply import */
+  importReplies?: boolean
+  /** The workflow's message purposes (purpose -> label) */
+  purposes?: Record<string, string>
+  defaultPurpose?: string
+  /** How a reply is reviewed next to the raw email (default: the AI reading box) */
+  ReplyPanel?: ReplyPanelType
+  empty?: string
+}
+
+export function Messages({
+  c,
+  title = "Messages",
+  hint = "Drafted, checked and approved, then sent once. Replies only from the address it went to.",
+  filter = () => true,
+  compose = true,
+  importReplies = true,
+  purposes = {},
+  defaultPurpose,
+  ReplyPanel,
+  empty = "No messages.",
+}: MessagesProps) {
+  const locked = ["completed", "cancelled"].includes(c.status)
+  const shown = c.messages.filter(filter)
   return (
-    <Card title="Messages" hint="Drafted by the preparer, approved by a reviewer, sent once. Replies only from the address it went to.">
-      {c.messages.length === 0 && <Empty>No messages.</Empty>}
+    <Card title={title} hint={hint}>
+      {shown.length === 0 && <Empty>{empty}</Empty>}
       <ul className="divide-y">
-        {c.messages.map((m) => (
-          <MessageItem key={m.id} m={m} c={c} />
+        {shown.map((m) => (
+          <MessageItem key={m.id} m={m} c={c} ReplyPanel={ReplyPanel} />
         ))}
       </ul>
-      {!locked && owner && <DraftForm c={c} />}
-      {!locked && canImport && <ReplyForm c={c} />}
+      {!locked && compose && <DraftForm c={c} purposes={purposes} defaultPurpose={defaultPurpose} />}
+      {!locked && importReplies && <ReplyForm c={c} />}
     </Card>
   )
 }
@@ -383,8 +407,6 @@ export function Artifacts({ c }: { c: CaseDetail }) {
   const [kind, setKind] = useState<ArtifactKind>("timesheet")
   const [refs, setRefs] = useState("")
   const [file, setFile] = useState<File | null>(null)
-  const owner = c.my_roles.includes("owner")
-  const reviewer = c.my_roles.includes("reviewer")
   return (
     <Card title="Supporting documents" hint="Tied to invoices of this case; attachable only once approved.">
       {c.artifacts.length === 0 && <Empty>No documents.</Empty>}
@@ -399,7 +421,7 @@ export function Artifacts({ c }: { c: CaseDetail }) {
             <Button size="sm" variant="ghost" onClick={() => void apiDownload(`/pod/artifacts/${a.id}/content`, a.filename)} aria-label={`Download ${a.filename}`}>
               <Download />
             </Button>
-            {reviewer && a.status === "pending" && (
+            {a.status === "pending" && (
               <>
                 <Button size="sm" disabled={decide.isPending} onClick={() => void attempt(() => decide.mutateAsync({ id: a.id, decision: "approved" }), "Document approved.")}>
                   Approve
@@ -412,28 +434,26 @@ export function Artifacts({ c }: { c: CaseDetail }) {
           </li>
         ))}
       </ul>
-      {owner && (
-        <form
-          className="mt-3 grid gap-2 border-t pt-3 sm:grid-cols-[150px_1fr_1fr_auto]"
-          onSubmit={(e) => {
-            e.preventDefault()
-            if (file) void attempt(() => upload.mutateAsync({ caseId: c.id, file, kind, invoiceRefs: refs }), "Document added.")
-          }}
-        >
-          <select className={selectClass} value={kind} onChange={(e) => setKind(e.target.value as ArtifactKind)} aria-label="Kind">
-            {Object.entries(ARTIFACT_KIND).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v}
-              </option>
-            ))}
-          </select>
-          <Input placeholder="Invoices, e.g. INV-101, INV-102" value={refs} onChange={(e) => setRefs(e.target.value)} />
-          <Input type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-          <Button type="submit" size="sm" variant="outline" disabled={!file || upload.isPending}>
-            Upload
-          </Button>
-        </form>
-      )}
+      <form
+        className="mt-3 grid gap-2 border-t pt-3 sm:grid-cols-[150px_1fr_1fr_auto]"
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (file) void attempt(() => upload.mutateAsync({ caseId: c.id, file, kind, invoiceRefs: refs }), "Document added.")
+        }}
+      >
+        <select className={selectClass} value={kind} onChange={(e) => setKind(e.target.value as ArtifactKind)} aria-label="Kind">
+          {Object.entries(ARTIFACT_KIND).map(([k, v]) => (
+            <option key={k} value={k}>
+              {v}
+            </option>
+          ))}
+        </select>
+        <Input placeholder="Invoices, e.g. INV-101, INV-102" value={refs} onChange={(e) => setRefs(e.target.value)} />
+        <Input type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+        <Button type="submit" size="sm" variant="outline" disabled={!file || upload.isPending}>
+          Upload
+        </Button>
+      </form>
     </Card>
   )
 }

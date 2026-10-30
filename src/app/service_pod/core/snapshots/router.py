@@ -135,12 +135,12 @@ async def import_bank_statement(
 @router.get("", response_model=list[SnapshotSummary])
 async def list_snapshots(
     session: SessionDep,
-    access: PodAccessDep,
+    _: PodAccessDep,
     entity_id: uuid.UUID | None = None,
     include_archived: bool = False,
 ) -> list[SnapshotSummary]:
     """Newest first; archived snapshots only when asked for."""
-    return await service.list_snapshots(session, access, entity_id, include_archived)
+    return await service.list_snapshots(session, entity_id, include_archived)
 
 
 @router.post("/{snapshot_id}/archive", response_model=SnapshotSummary, responses=_ERRORS)
@@ -182,14 +182,14 @@ async def delete_snapshot(
 
 @router.get("/{snapshot_id}", response_model=SnapshotSummary, responses=_ERRORS)
 async def get_snapshot(
-    snapshot_id: uuid.UUID, session: SessionDep, access: PodAccessDep
+    snapshot_id: uuid.UUID, session: SessionDep, _: PodAccessDep
 ) -> SnapshotSummary:
-    return await service.get_snapshot(session, access, snapshot_id)
+    return await service.get_snapshot(session, snapshot_id)
 
 
 @router.get("/{snapshot_id}/rows", response_model=SnapshotRows, responses=_ERRORS)
 async def get_rows(
-    snapshot_id: uuid.UUID, collection: Collection, session: SessionDep, access: PodAccessDep
+    snapshot_id: uuid.UUID, collection: Collection, session: SessionDep, _: PodAccessDep
 ) -> SnapshotRows:
-    """One collection's rows, if your roles include it."""
-    return await service.get_rows(session, access, snapshot_id, collection)
+    """One collection's rows."""
+    return await service.get_rows(session, snapshot_id, collection)

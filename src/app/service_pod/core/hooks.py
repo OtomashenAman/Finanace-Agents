@@ -62,6 +62,8 @@ class WorkflowHooks:
     ) = None
     # One line about a case, shown on related cases of other workflows (same customer)
     summary: Callable[[AsyncSession, PodCase], Awaitable[str | None]] | None = None
+    # The step an open case is on (the frontend's step keys), for the workflow's worklists
+    stage: Callable[[AsyncSession, PodCase], Awaitable[str]] | None = None
     # Extra problems verifying a posting: (task, case, source it started from, fresh source)
     verify_posting: (
         Callable[[PodPostingTask, PodCase, SnapshotDocument, SnapshotDocument], list[str]] | None

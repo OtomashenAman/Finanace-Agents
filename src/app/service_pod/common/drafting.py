@@ -19,6 +19,11 @@ def table(rows: Sequence[Sequence[str]]) -> str:
     return "\n".join(line.rstrip() for line in lines)
 
 
+def _unescape(text: str) -> str:
+    """Models sometimes return line breaks as the two characters backslash-n."""
+    return text.replace("\\r\\n", "\n").replace("\\n", "\n").strip()
+
+
 class Wording(BaseModel):
     opening: str = Field(description="Greeting and one or two sentences of request; no figures")
     closing: str = Field(description="One or two closing sentences and a sign-off; no figures")
@@ -62,8 +67,8 @@ async def compose(
             validate=_wording_problems,
         )
         opening, closing, drafted, note = (
-            result.output.opening.strip(),
-            result.output.closing.strip(),
+            _unescape(result.output.opening),
+            _unescape(result.output.closing),
             True,
             None,
         )

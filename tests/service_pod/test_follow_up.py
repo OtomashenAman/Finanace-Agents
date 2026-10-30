@@ -9,10 +9,8 @@ from httpx import AsyncClient
 
 from src.app.common import clock
 from src.app.entities.models import LegalEntity
-from src.app.service_pod.core.workflows import Capacity, WorkflowKey
-from tests.service_pod.conftest import PodUser, act, import_snapshot, snapshot_payload
+from tests.service_pod.conftest import act, import_snapshot, snapshot_payload
 
-AR, BANK = WorkflowKey.AR_COLLECTIONS, WorkflowKey.BANK_RECON
 RECEIPT = {
     "reference": "WIRE-2901",
     "payer": "Harbor Distribution",
@@ -24,22 +22,18 @@ RECEIPT = {
 
 
 @pytest.fixture
-async def team(pod_user: PodUser, entity: LegalEntity) -> dict[str, Any]:
-    _, poster = await pod_user("fa@example.com", (AR, Capacity.POSTER), (BANK, Capacity.POSTER))
-    _, prep = await pod_user("prep@example.com", (AR, Capacity.PREPARER), (BANK, Capacity.PREPARER))
-    _, rev = await pod_user("rev@example.com", (AR, Capacity.REVIEWER), (BANK, Capacity.REVIEWER))
-    snap = (await import_snapshot(poster, entity, snapshot_payload(bank_receipts=[RECEIPT]))).json()
-    return {"poster": poster, "prep": prep, "rev": rev, "snapshot": snap["snapshot"]}
+async def snap(pod: AsyncClient, entity: LegalEntity) -> dict[str, Any]:
+    r = await import_snapshot(pod, entity, snapshot_payload(bank_receipts=[RECEIPT]))
+    return r.json()["snapshot"]  # type: ignore[no-any-return]
 
 
-async def _ar_case(team: dict[str, Any]) -> dict[str, Any]:
-    prep, rev = team["prep"], team["rev"]
+async def _ar_case(pod: AsyncClient, snap: dict[str, Any]) -> dict[str, Any]:
     case = (
-        await prep.post(
+        await pod.post(
             "/api/v1/pod/cases",
             json={
                 "workflow": "ar_collections",
-                "snapshot_id": team["snapshot"]["id"],
+                "snapshot_id": snap["id"],
                 "title": "Harbor",
                 "selection": {"customer_id": "C1", "invoice_ids": ["I101", "I102"]},
             },
@@ -52,7 +46,7 @@ async def _ar_case(team: dict[str, Any]) -> dict[str, Any]:
     ):
         case = (
             await act(
-                prep,
+                pod,
                 case,
                 "propose_commitment",
                 invoice_id=invoice,
@@ -62,7 +56,7 @@ async def _ar_case(team: dict[str, Any]) -> dict[str, Any]:
         ).json()
     for c in case["commitments"]:
         case = (
-            await act(rev, case, "decide_commitment", commitment_id=c["id"], decision="approved")
+            await act(pod, case, "decide_commitment", commitment_id=c["id"], decision="approved")
         ).json()
     return case
 
@@ -73,11 +67,10 @@ def _today(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 async def test_promises_are_watched_until_cash_shows(
-    team: dict[str, Any], entity: LegalEntity
+    pod: AsyncClient, snap: dict[str, Any], entity: LegalEntity
 ) -> None:
-    case = await _ar_case(team)
-    rev: AsyncClient = team["rev"]
-    p = (await rev.get("/api/v1/pod/ar/portfolio")).json()
+    case = await _ar_case(pod, snap)
+    p = (await pod.get("/api/v1/pod/ar/portfolio")).json()
     states = [
         (r["invoice_number"], r["amount"], r["state"], r["days_until"]) for r in p["promises"]
     ]
@@ -93,34 +86,43 @@ async def test_promises_are_watched_until_cash_shows(
     # A newer export shows 6,000 paid on INV-101: that promise is kept, the others aren't yet
     fresh = snapshot_payload(bank_receipts=[RECEIPT], source_reference="later")
     fresh["invoices"][0]["balance"] = "9000.00"
-    await import_snapshot(team["poster"], entity, fresh)
-    p = (await rev.get("/api/v1/pod/ar/portfolio")).json()
+    await import_snapshot(pod, entity, fresh)
+    p = (await pod.get("/api/v1/pod/ar/portfolio")).json()
     kept = [r for r in p["promises"] if r["state"] == "received"]
     assert [(r["amount"], r["received_by"]) for r in kept] == [("6000.00", "a newer source")]
     harbor = next(c for c in p["customers"] if c["name"] == "Harbor Distribution")
     assert harbor["next_action"] != "Follow up on the missed promise"
 
 
-async def test_ar_and_bank_cases_of_a_customer_are_linked(team: dict[str, Any]) -> None:
-    ar_case = await _ar_case(team)
+async def test_ar_and_bank_cases_of_a_customer_are_linked(
+    pod: AsyncClient, snap: dict[str, Any]
+) -> None:
+    ar_case = await _ar_case(pod, snap)
     bank_case = (
-        await team["prep"].post(
+        await pod.post(
             "/api/v1/pod/cases",
             json={
                 "workflow": "bank_recon",
-                "snapshot_id": team["snapshot"]["id"],
+                "snapshot_id": snap["id"],
                 "title": "WIRE-2901",
                 "selection": {"receipt_reference": "WIRE-2901", "customer_id": "C1"},
             },
         )
     ).json()
 
+    # Worklists know the step each case is on
+    listed = (await pod.get("/api/v1/pod/cases")).json()
+    assert {c["reference"]: c["stage"] for c in listed} == {
+        ar_case["reference"]: "email",
+        bank_case["reference"]: "request",
+    }
+
     (related,) = bank_case["related_cases"]
     assert related["reference"] == ar_case["reference"]
     assert related["summary"] == (
         "INV-101, INV-102 · open USD 25,000.00 · approved promises USD 25,000.00"
     )
-    ar = (await team["rev"].get(f"/api/v1/pod/cases/{ar_case['id']}")).json()
+    ar = (await pod.get(f"/api/v1/pod/cases/{ar_case['id']}")).json()
     (related,) = ar["related_cases"]
     assert related["reference"] == bank_case["reference"]
     assert related["summary"] == "WIRE-2901 USD 9,000.00 · waiting for the customer's allocation"

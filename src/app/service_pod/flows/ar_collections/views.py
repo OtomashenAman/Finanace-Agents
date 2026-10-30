@@ -12,9 +12,7 @@ from src.app.service_pod.common.worklists import (
     InvoiceRow,
     latest_snapshot,
     open_cases,
-    require_workflow_role,
 )
-from src.app.service_pod.core.access.service import PodAccess
 from src.app.service_pod.core.cases.models import (
     CommitmentStatus,
     PodCase,
@@ -98,18 +96,13 @@ async def _next_action(
     )
     if MessageStatus.SENT in statuses:
         return "Wait for the reply / follow up"
-    if statuses & {MessageStatus.DRAFT, MessageStatus.APPROVED}:
-        return "Approve and send the draft"
+    if MessageStatus.DRAFT in statuses:
+        return "Check and send the draft"
     return "Draft the payment schedule request"
 
 
-async def ar_portfolio(
-    session: AsyncSession, access: PodAccess, snapshot_id: uuid.UUID | None
-) -> ArPortfolio:
-    require_workflow_role(access, WorkflowKey.AR_COLLECTIONS)
-    snap = await latest_snapshot(
-        session, access, snapshot_id, {Collection.CUSTOMERS, Collection.INVOICES}
-    )
+async def ar_portfolio(session: AsyncSession, snapshot_id: uuid.UUID | None) -> ArPortfolio:
+    snap = await latest_snapshot(session, snapshot_id, {Collection.CUSTOMERS, Collection.INVOICES})
     empty = [AgingBucket(label=b[0], amount=Decimal(0), count=0) for b in BUCKETS]
     if snap is None:
         return ArPortfolio(
@@ -143,7 +136,7 @@ async def ar_portfolio(
             )
         )
 
-    cases = await open_cases(session, access, WorkflowKey.AR_COLLECTIONS, snap.entity_id)
+    cases = await open_cases(session, WorkflowKey.AR_COLLECTIONS, snap.entity_id)
     case_ids = [c.id for c in cases]
     by_customer = {str(c.selection.get("customer_id")): c for c in cases}
     promises = (

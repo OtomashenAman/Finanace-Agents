@@ -1,7 +1,6 @@
 import { apiRequest } from "@/lib/api"
 
 export type WorkflowKey = "ar_collections" | "bank_recon" | "fpa_trend" | "treasury" | "reporting"
-export type Capacity = "preparer" | "reviewer" | "final_approver" | "poster"
 export type Collection =
   | "customers"
   | "invoices"
@@ -15,17 +14,9 @@ export type Collection =
   | "cash_position"
   | "balance_sheets"
   | "close_status"
-export type CaseStatus =
-  | "draft"
-  | "in_review"
-  | "awaiting_final"
-  | "approved"
-  | "changes_requested"
-  | "rejected"
-  | "completed"
-  | "cancelled"
-export type MessageStatus = "draft" | "approved" | "sending" | "sent" | "send_failed" | "send_unknown" | "received"
-export type TaskStatus = "proposed" | "approved" | "recorded_unverified" | "verified" | "cancelled"
+export type CaseStatus = "draft" | "approved" | "completed" | "cancelled"
+export type MessageStatus = "draft" | "sending" | "sent" | "send_failed" | "send_unknown" | "received"
+export type TaskStatus = "proposed" | "recorded_unverified" | "verified" | "cancelled"
 export type ReviewTaskKind = "unknown_date" | "dispute" | "missing_document" | "ambiguity" | "scope" | "other"
 export type ArtifactKind = "timesheet" | "invoice_copy" | "msa" | "supporting" | "other"
 
@@ -45,10 +36,7 @@ export interface Workflow {
   name: string
   prefix: string
   description: string
-  labels: Partial<Record<Capacity, string>>
   required: Collection[]
-  final_gate: boolean
-  my_capacities: Capacity[]
 }
 
 export interface Snapshot {
@@ -89,7 +77,8 @@ export interface CaseSummary {
   workflow: WorkflowKey
   title: string
   status: CaseStatus
-  stage: string
+  /** The step an open case is on (workflows with steps), "done" when closed */
+  stage: string | null
   version: number
   entity: EntityRef
   owner: PersonRef
@@ -102,12 +91,8 @@ export interface CaseSummary {
 
 export interface Approval {
   id: string
-  gate: "review" | "final"
-  decision: "approved" | "changes_requested" | "rejected"
   user: PersonRef
-  comment: string | null
   content_hash: string
-  policy_version: string | null
   valid: boolean
   created_at: string
 }
@@ -305,7 +290,7 @@ export interface Artifact {
   created_at: string
 }
 
-export type TaskActionName = "approve" | "record" | "verify" | "cancel"
+export type TaskActionName = "record" | "verify" | "cancel"
 
 export interface PostingTask {
   id: string
@@ -319,8 +304,6 @@ export interface PostingTask {
   instructions: Record<string, unknown>
   note: string | null
   proposed_by: string
-  approved_by: string | null
-  approved_at: string | null
   external_txn_id: string | null
   recorded_by: string | null
   recorded_at: string | null
@@ -334,9 +317,7 @@ export interface PostingTask {
 
 export type CaseActionName =
   | "edit"
-  | "submit"
-  | "review"
-  | "final_review"
+  | "approve"
   | "complete"
   | "cancel"
   | "add_review_task"
@@ -355,7 +336,6 @@ export interface CaseDetail extends CaseSummary {
   state: Record<string, unknown>
   completed_at: string | null
   fingerprint: string
-  my_roles: ("owner" | "reviewer" | "final_approver")[]
   approvals: Approval[]
   review_tasks: ReviewTask[]
   owned_actions: OwnedAction[]
@@ -367,7 +347,7 @@ export interface CaseDetail extends CaseSummary {
   related_cases: RelatedCase[]
   blockers: string[]
   completion_blockers: string[]
-  /** null: the viewer may do it now; otherwise why not */
+  /** null: it can be done now; otherwise why not */
   allowed_actions: Record<CaseActionName, string | null>
 }
 
@@ -386,14 +366,6 @@ export interface EmailStatus {
   ready: boolean
   problem: string | null
   internal_recipients: string[]
-}
-
-export interface PodUserAccess {
-  user_id: string
-  email: string
-  full_name: string
-  role: "finance_admin" | "user"
-  assignments: { workflow: WorkflowKey; capacity: Capacity }[]
 }
 
 export interface MessageDraft {
@@ -492,10 +464,9 @@ export const podApi = {
     apiRequest<Message>(`/pod/cases/${caseId}/messages`, { method: "POST", json: draft }),
   updateMessage: ({ id, version, ...changes }: { id: string; version: number } & Partial<MessageDraft>) =>
     apiRequest<Message>(`/pod/messages/${id}`, { method: "PATCH", json: { expected_version: version, ...changes } }),
-  approveMessage: ({ id, version, checks }: { id: string; version: number; checks: ApprovalChecks }) =>
-    apiRequest<Message>(`/pod/messages/${id}/approve`, { method: "POST", json: { expected_version: version, checks } }),
-  sendMessage: ({ id, version }: { id: string; version: number }) =>
-    apiRequest<Message>(`/pod/messages/${id}/send`, { method: "POST", json: { expected_version: version } }),
+  /** Approves the exact message (customer mail needs the checks) and sends it once */
+  sendMessage: ({ id, version, checks }: { id: string; version: number; checks: ApprovalChecks }) =>
+    apiRequest<Message>(`/pod/messages/${id}/send`, { method: "POST", json: { expected_version: version, checks } }),
   compose: ({ caseId, purpose }: { caseId: string; purpose: string }) =>
     apiRequest<Composed>(`/pod/cases/${caseId}/messages/compose`, { method: "POST", json: { purpose } }),
   arPortfolio: () => apiRequest<ArPortfolio>("/pod/ar/portfolio"),
@@ -577,8 +548,4 @@ export const podApi = {
       method: "POST",
       json: { action, expected_version: version, ...extra },
     }),
-
-  assignments: () => apiRequest<PodUserAccess[]>("/pod/assignments"),
-  setAssignments: ({ userId, assignments }: { userId: string; assignments: PodUserAccess["assignments"] }) =>
-    apiRequest<PodUserAccess>(`/pod/assignments/${userId}`, { method: "PUT", json: { assignments } }),
 }

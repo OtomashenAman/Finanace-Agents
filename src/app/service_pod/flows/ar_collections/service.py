@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.app.core.llm.base import LLMProvider
 from src.app.service_pod.common import drafting, reading, selection
 from src.app.service_pod.common.canonical import plain
-from src.app.service_pod.core.cases import system
+from src.app.service_pod.core.cases import progress, system
 from src.app.service_pod.core.cases.exceptions import CaseSelectionError
 from src.app.service_pod.core.cases.models import (
     CaseStatus,
@@ -57,8 +57,20 @@ async def on_create(
                 "original_amount": inv.original_amount,
                 "balance": inv.balance,
                 "days_overdue": max(0, (doc.as_of - inv.due_date).days),
+                "terms": inv.terms,
             }
         )
+    # The agreement the invoices fall under (the MSA), for the email and its attachment
+    contract = next(
+        (
+            k
+            for k in doc.contracts or []
+            if k.customer_id == customer.id
+            and k.status.lower() == "active"
+            and (not k.invoice_ids or set(k.invoice_ids) & set(sel.invoice_ids))
+        ),
+        None,
+    )
     case.state = plain(
         {
             **case.state,
@@ -71,6 +83,7 @@ async def on_create(
             "currency": doc.currency,
             "as_of": doc.as_of,
             "invoices": rows,
+            "contract": {"id": contract.id, "terms": contract.terms} if contract else None,
             "total_open": sum((by_id[i].balance for i in sel.invoice_ids), Decimal(0)),
         }
     )
@@ -116,13 +129,25 @@ async def blockers(c: Ctx) -> list[str]:
 
 async def facts(session: AsyncSession, case: PodCase, purpose: str) -> str | None:
     currency = str(case.state["currency"])
-    rows = [("Invoice", "Due date", "Open balance")]
+    invoices = case.state.get("invoices", [])
+    # Payment terms as the source states them; the column only when the source has any
+    with_terms = any(r.get("terms") for r in invoices)
+    rows = [("Invoice", "Due date", "Open balance", *(("Terms",) if with_terms else ()))]
     rows += [
-        (str(r["number"]), str(r["due_date"]), reading.money(reading.dec(r["balance"]), currency))
-        for r in case.state.get("invoices", [])
+        (
+            str(r["number"]),
+            str(r["due_date"]),
+            reading.money(reading.dec(r["balance"]), currency),
+            *((str(r.get("terms") or "-"),) if with_terms else ()),
+        )
+        for r in invoices
     ]
     total = reading.money(reading.dec(case.state["total_open"]), currency)
-    return f"{drafting.table(rows)}\nTotal open: {total}"
+    block = f"{drafting.table(rows)}\nTotal open: {total}"
+    if contract := case.state.get("contract"):
+        terms = f": {contract['terms']}" if contract.get("terms") else ""
+        block += f"\nAgreement: {contract['id']}{terms}"
+    return block
 
 
 async def compose(session: AsyncSession, case: PodCase, purpose: str, llm: LLMProvider) -> Composed:
@@ -152,6 +177,16 @@ async def compose(session: AsyncSession, case: PodCase, purpose: str, llm: LLMPr
         ),
         template_closing="Thank you,",
     )
+
+
+async def stage(session: AsyncSession, case: PodCase) -> str:
+    """email -> reply -> close, as the case page's steps."""
+    p = await progress.progress(session, case, "payment_schedule_request")
+    if not p.request_sent:
+        return "email"
+    if not p.replied or p.open_tasks:
+        return "reply"
+    return "close"
 
 
 async def summary(session: AsyncSession, case: PodCase) -> str | None:

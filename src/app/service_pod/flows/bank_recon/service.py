@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.app.core.llm.base import LLMProvider
 from src.app.service_pod.common import drafting, matching, reading, selection
 from src.app.service_pod.common.canonical import plain
-from src.app.service_pod.core.cases import system
+from src.app.service_pod.core.cases import progress, system
 from src.app.service_pod.core.cases.exceptions import CaseSelectionError
 from src.app.service_pod.core.cases.models import CaseStatus, PodCase
 from src.app.service_pod.core.cases.service import (
@@ -29,9 +29,6 @@ PURPOSES = {
     "allocation_request": "Ask which invoices the payment covers",
     "acknowledgement": "Confirm how the payment was applied",
 }
-
-
-CLOSED = (CaseStatus.CANCELLED, CaseStatus.REJECTED)
 
 
 def receipt_of(case: PodCase) -> dict[str, Any]:
@@ -73,7 +70,7 @@ async def on_create(
                 PodCase.workflow == WorkflowKey.BANK_RECON,
                 PodCase.entity_id == case.entity_id,
                 PodCase.selection["receipt_reference"].astext == sel.receipt_reference,
-                PodCase.status.not_in(CLOSED),
+                PodCase.status != CaseStatus.CANCELLED,
             )
         )
         if other is not None:
@@ -245,6 +242,16 @@ async def compose(session: AsyncSession, case: PodCase, purpose: str, llm: LLMPr
         ),
         template_closing="Thank you,",
     )
+
+
+async def stage(session: AsyncSession, case: PodCase) -> str:
+    """request -> allocation -> posting, as the case page's steps."""
+    p = await progress.progress(session, case, "allocation_request")
+    if not p.request_sent:
+        return "request"
+    if not p.replied or not case.state.get("allocation") or p.open_tasks:
+        return "allocation"
+    return "posting"
 
 
 async def summary(session: AsyncSession, case: PodCase) -> str | None:

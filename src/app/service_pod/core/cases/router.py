@@ -28,12 +28,12 @@ _ERRORS: dict[int | str, dict[str, Any]] = {
 @router.get("/cases", response_model=list[CaseSummary])
 async def list_cases(
     session: SessionDep,
-    access: PodAccessDep,
+    _: PodAccessDep,
     workflow: WorkflowKey | None = None,
     status: CaseStatus | None = None,
     entity_id: uuid.UUID | None = None,
 ) -> list[CaseSummary]:
-    return await service.list_cases(session, access, workflow, status, entity_id)
+    return await service.list_cases(session, workflow, status, entity_id)
 
 
 @router.post(
@@ -65,6 +65,6 @@ async def case_action(
 
 
 @router.get("/review-queue", response_model=list[ReviewQueueItem])
-async def review_queue(session: SessionDep, access: PodAccessDep) -> list[ReviewQueueItem]:
-    """Open review tasks (ambiguities, disputes, missing documents) on your cases."""
-    return await service.review_queue(session, access)
+async def review_queue(session: SessionDep, _: PodAccessDep) -> list[ReviewQueueItem]:
+    """Open review tasks (ambiguities, disputes, missing documents) on open cases."""
+    return await service.review_queue(session)

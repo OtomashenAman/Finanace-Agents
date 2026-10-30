@@ -20,10 +20,10 @@ _ERRORS: dict[int | str, dict[str, Any]] = {
 
 @router.get("/tasks", response_model=list[TaskOut])
 async def list_tasks(
-    session: SessionDep, access: PodAccessDep, status: TaskStatus | None = None
+    session: SessionDep, _: PodAccessDep, status: TaskStatus | None = None
 ) -> list[TaskOut]:
-    """The manual QuickBooks task queue (Finance Admins with posting rights)."""
-    return await service.list_tasks(session, access, status)
+    """The manual QuickBooks task queue."""
+    return await service.list_tasks(session, status)
 
 
 @router.post(
@@ -50,6 +50,5 @@ async def task_action(
     access: PodAccessDep,
     ctx: RequestContextDep,
 ) -> TaskOut:
-    """approve / record (with the QuickBooks transaction ID) / verify (with a fresh snapshot)
-    / cancel."""
+    """record (with the QuickBooks transaction ID) / verify (with a fresh snapshot) / cancel."""
     return await service.run_action(session, access, task_id, body, ctx)

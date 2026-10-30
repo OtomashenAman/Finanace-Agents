@@ -21,27 +21,12 @@ from src.app.service_pod.core.workflows import WORKFLOWS, WorkflowKey
 
 class CaseStatus(StrEnum):
     DRAFT = "draft"
-    IN_REVIEW = "in_review"
-    AWAITING_FINAL = "awaiting_final"  # reviewed; the independent final approver is next
-    APPROVED = "approved"
-    CHANGES_REQUESTED = "changes_requested"
-    REJECTED = "rejected"
+    APPROVED = "approved"  # back to draft when its content changes
     COMPLETED = "completed"
     CANCELLED = "cancelled"
 
 
-LOCKED_STATUSES = frozenset({CaseStatus.REJECTED, CaseStatus.COMPLETED, CaseStatus.CANCELLED})
-
-
-class Gate(StrEnum):
-    REVIEW = "review"
-    FINAL = "final"
-
-
-class Decision(StrEnum):
-    APPROVED = "approved"
-    CHANGES_REQUESTED = "changes_requested"
-    REJECTED = "rejected"
+LOCKED_STATUSES = frozenset({CaseStatus.COMPLETED, CaseStatus.CANCELLED})
 
 
 class PodCase(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -69,7 +54,6 @@ class PodCase(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     title: Mapped[str] = mapped_column(String(200))
     status: Mapped[CaseStatus] = mapped_column(string_enum(CaseStatus, 32), index=True)
-    stage: Mapped[str] = mapped_column(String(50))  # the workflow's own step
     version: Mapped[int] = mapped_column(default=1)
     selection: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     state: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
@@ -81,22 +65,17 @@ class PodCase(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 
 class PodApproval(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
-    """A decision on the case's content as it was: valid only while the case's fingerprint
-    still equals content_hash. Rows are never changed; history stays."""
+    """The case's content as it was approved: valid only while the case's fingerprint still
+    equals content_hash. Rows are never changed; history stays."""
 
     __tablename__ = "pod_approvals"
     __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012 - SQLAlchemy class config
-    __table_args__ = (enum_check("gate", Gate), enum_check("decision", Decision))
 
     case_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("pod_cases.id", ondelete="CASCADE"), index=True
     )
-    gate: Mapped[Gate] = mapped_column(string_enum(Gate, 16))
-    decision: Mapped[Decision] = mapped_column(string_enum(Decision, 32))
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
     content_hash: Mapped[str] = mapped_column(String(64))
-    policy_version: Mapped[str | None] = mapped_column(String(50))
-    comment: Mapped[str | None] = mapped_column(Text)
 
 
 class ReviewTaskKind(StrEnum):

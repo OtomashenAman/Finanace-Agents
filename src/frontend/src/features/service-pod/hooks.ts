@@ -55,10 +55,6 @@ export function useBankWorklist() {
   return useQuery({ queryKey: [POD_TAG, "bank-worklist"], queryFn: podApi.bankWorklist })
 }
 
-export function usePodAssignments() {
-  return useQuery({ queryKey: [POD_TAG, "assignments"], queryFn: podApi.assignments, meta: { dependsOn: ["users"] } })
-}
-
 function usePodMutation<TArgs, TResult>(fn: (args: TArgs) => Promise<TResult>) {
   return useMutation({ mutationFn: fn, meta: { invalidates } })
 }
@@ -70,7 +66,6 @@ export const useCreateCase = () => usePodMutation(podApi.createCase)
 export const useCaseAction = () => usePodMutation(podApi.caseAction)
 export const useCreateDraft = () => usePodMutation(podApi.createDraft)
 export const useUpdateMessage = () => usePodMutation(podApi.updateMessage)
-export const useApproveMessage = () => usePodMutation(podApi.approveMessage)
 export const useSendMessage = () => usePodMutation(podApi.sendMessage)
 export const useImportQbxml = () => usePodMutation(podApi.importQbxml)
 export const useArchiveSnapshot = () => usePodMutation(podApi.archiveSnapshot)
@@ -84,4 +79,3 @@ export const useUploadArtifact = () => usePodMutation(podApi.uploadArtifact)
 export const useDecideArtifact = () => usePodMutation(podApi.decideArtifact)
 export const useProposeTask = () => usePodMutation(podApi.proposeTask)
 export const useTaskAction = () => usePodMutation(podApi.taskAction)
-export const useSetPodAssignments = () => usePodMutation(podApi.setAssignments)

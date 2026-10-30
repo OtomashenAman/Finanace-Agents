@@ -2,6 +2,11 @@ import type { PromiseRow } from "../../api"
 
 export const HOME_LABEL = "Portfolio"
 
+export const PURPOSES: Record<string, string> = {
+  payment_schedule_request: "Ask for amounts and payment dates",
+  follow_up: "Follow-up reply",
+}
+
 /** "Overdue 2 d", "Due tomorrow", "In 10 d", "Received" */
 export function promiseLabel(p: Pick<PromiseRow, "state" | "days_until">): string {
   if (p.state === "received") return "Received"

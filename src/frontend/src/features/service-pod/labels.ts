@@ -41,18 +41,13 @@ export function workflowFromSlug(slug: string | undefined): WorkflowKey | undefi
 
 export const CASE_STATUS: Record<CaseStatus, [string, Tone]> = {
   draft: ["Draft", "neutral"],
-  in_review: ["In review", "info"],
-  awaiting_final: ["Awaiting final approval", "info"],
   approved: ["Approved", "good"],
-  changes_requested: ["Changes requested", "warn"],
-  rejected: ["Rejected", "bad"],
   completed: ["Completed", "good"],
   cancelled: ["Cancelled", "neutral"],
 }
 
 export const MESSAGE_STATUS: Record<MessageStatus, [string, Tone]> = {
   draft: ["Draft", "neutral"],
-  approved: ["Approved, not sent", "info"],
   sending: ["Sending…", "info"],
   sent: ["Sent", "good"],
   send_failed: ["Send failed", "bad"],
@@ -61,8 +56,7 @@ export const MESSAGE_STATUS: Record<MessageStatus, [string, Tone]> = {
 }
 
 export const TASK_STATUS: Record<TaskStatus, [string, Tone]> = {
-  proposed: ["Proposed", "neutral"],
-  approved: ["Approved: post in QuickBooks", "info"],
+  proposed: ["To post in QuickBooks", "info"],
   recorded_unverified: ["Recorded, not verified", "warn"],
   verified: ["Verified", "good"],
   cancelled: ["Cancelled", "neutral"],

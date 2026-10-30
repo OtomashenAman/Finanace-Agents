@@ -1,5 +1,3 @@
-import { useWorkflows } from "../hooks"
-
 /** A case's invoice rows as the workflows keep them in its state */
 export interface InvoiceState {
   id: string
@@ -14,9 +12,3 @@ export const money = (value: unknown, currency: unknown) =>
 
 export const fmt = (value: string | number, currency?: string | null) =>
   `${currency ?? ""} ${Number(value).toLocaleString(undefined, { maximumFractionDigits: 0 })}`.trim()
-
-/** Whether the viewer may open cases of this workflow */
-export function useCanPrepare(workflow: string) {
-  const { data = [] } = useWorkflows()
-  return data.some((w) => w.key === workflow && w.my_capacities.includes("preparer"))
-}

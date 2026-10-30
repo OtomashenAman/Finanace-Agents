@@ -22,8 +22,7 @@ class TaskKind(StrEnum):
 
 
 class TaskStatus(StrEnum):
-    PROPOSED = "proposed"
-    APPROVED = "approved"  # the Finance Admin may post it in QuickBooks
+    PROPOSED = "proposed"  # the Finance Admin posts it in QuickBooks
     RECORDED_UNVERIFIED = "recorded_unverified"  # posted outside, transaction ID noted
     VERIFIED = "verified"  # a fresh snapshot proves the posting
     CANCELLED = "cancelled"
@@ -51,10 +50,6 @@ class PodPostingTask(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     note: Mapped[str | None] = mapped_column(Text)
 
     proposed_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
-    approved_by: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("users.id", ondelete="RESTRICT")
-    )
-    approved_at: Mapped[datetime | None]
     external_txn_id: Mapped[str | None] = mapped_column(String(100))
     recorded_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT")

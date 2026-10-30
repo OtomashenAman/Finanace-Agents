@@ -1,20 +1,20 @@
 from typing import Any
 
 import pytest
+from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.core.config import get_settings
 from src.app.entities.models import LegalEntity
-from src.app.service_pod.core.workflows import Capacity
-from tests.service_pod.conftest import AR, PodUser, import_snapshot, snapshot_payload
+from tests.service_pod.conftest import import_snapshot, snapshot_payload
 
 
 async def test_import_is_immutable_and_deduplicated(
-    ar_team: dict[str, Any], entity: LegalEntity, db: AsyncSession
+    pod: AsyncClient, snapshot: dict[str, Any], entity: LegalEntity, db: AsyncSession
 ) -> None:
-    first = ar_team["snapshot"]
+    first = snapshot
     assert first["coverage"] == [
         "customers",
         "invoices",
@@ -28,7 +28,7 @@ async def test_import_is_immutable_and_deduplicated(
     # Same content in another key order / number format: same snapshot, not a new one
     payload = snapshot_payload()
     payload["invoices"][0]["balance"] = "15000"
-    again = await import_snapshot(ar_team["poster"], entity, dict(reversed(payload.items())))
+    again = await import_snapshot(pod, entity, dict(reversed(payload.items())))
     assert again.status_code == 200
     assert again.json()["snapshot"]["id"] == first["id"]
 
@@ -40,12 +40,6 @@ async def test_import_is_immutable_and_deduplicated(
     await db.rollback()
 
 
-async def test_only_posters_import(pod_user: PodUser, entity: LegalEntity) -> None:
-    _, client = await pod_user("ar.user@example.com", (AR, Capacity.PREPARER))
-    r = await import_snapshot(client, entity)
-    assert r.status_code == 403
-
-
 @pytest.mark.parametrize(
     ("change", "message"),
     [
@@ -55,17 +49,17 @@ async def test_only_posters_import(pod_user: PodUser, entity: LegalEntity) -> No
     ],
 )
 async def test_contract_violations_are_refused(
-    ar_team: dict[str, Any], entity: LegalEntity, change: dict[str, Any], message: str
+    pod: AsyncClient, entity: LegalEntity, change: dict[str, Any], message: str
 ) -> None:
-    r = await import_snapshot(ar_team["poster"], entity, snapshot_payload(**change))
+    r = await import_snapshot(pod, entity, snapshot_payload(**change))
     assert r.status_code == 422
     assert message in r.json()["detail"]["message"]
 
 
-async def test_broken_links_are_refused(ar_team: dict[str, Any], entity: LegalEntity) -> None:
+async def test_broken_links_are_refused(pod: AsyncClient, entity: LegalEntity) -> None:
     payload = snapshot_payload()
     payload["invoices"][0]["customer_id"] = "C9"
-    r = await import_snapshot(ar_team["poster"], entity, payload)
+    r = await import_snapshot(pod, entity, payload)
     assert r.status_code == 422
     assert "unknown customer C9" in r.json()["detail"]["message"]
 
@@ -94,22 +88,22 @@ async def test_broken_links_are_refused(ar_team: dict[str, Any], entity: LegalEn
             }
         ],
     )
-    r = await import_snapshot(ar_team["poster"], entity, gl)
+    r = await import_snapshot(pod, entity, gl)
     assert r.status_code == 422
     assert "doesn't cite it" in r.json()["detail"]["message"]
 
 
 async def test_demo_data_can_be_switched_off(
-    ar_team: dict[str, Any], entity: LegalEntity, monkeypatch: pytest.MonkeyPatch
+    pod: AsyncClient, entity: LegalEntity, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     demo = snapshot_payload(provenance="SYNTHETIC_DEMO", source_reference="deck fixture")
     monkeypatch.setattr(get_settings(), "pod_allow_demo_snapshots", False)
-    r = await import_snapshot(ar_team["poster"], entity, demo)
+    r = await import_snapshot(pod, entity, demo)
     assert r.status_code == 422
     assert r.json()["detail"]["code"] == "demo_snapshot_not_allowed"
 
     monkeypatch.setattr(get_settings(), "pod_allow_demo_snapshots", True)
-    r = await import_snapshot(ar_team["poster"], entity, demo)
+    r = await import_snapshot(pod, entity, demo)
     assert r.status_code == 201
     assert r.json()["snapshot"]["is_demo"] is True
 
@@ -119,37 +113,32 @@ def _csv(*rows: str) -> dict[str, Any]:
     return {"file": ("statement.csv", body.encode(), "text/csv")}
 
 
-async def test_bank_statement_makes_a_new_snapshot(ar_team: dict[str, Any]) -> None:
-    parent = ar_team["snapshot"]
+async def test_bank_statement_makes_a_new_snapshot(
+    pod: AsyncClient, snapshot: dict[str, Any]
+) -> None:
+    parent = snapshot
     url = f"/api/v1/pod/snapshots/{parent['id']}/bank-statement"
-    r = await ar_team["poster"].post(
-        url, files=_csv("WIRE-2901,Harbor Distribution,2026-11-05,9000,USD,yes")
-    )
+    r = await pod.post(url, files=_csv("WIRE-2901,Harbor Distribution,2026-11-05,9000,USD,yes"))
     assert r.status_code == 201, r.text
     child = r.json()["snapshot"]
     assert child["parent_id"] == parent["id"]
     assert child["source_type"] == "bank_csv"
     assert "bank_receipts" in child["coverage"]
 
-    still = await ar_team["poster"].get(f"/api/v1/pod/snapshots/{parent['id']}")
+    still = await pod.get(f"/api/v1/pod/snapshots/{parent['id']}")
     assert "bank_receipts" not in still.json()["coverage"]
 
     # A later statement can't silently change a receipt already recorded
     url = f"/api/v1/pod/snapshots/{child['id']}/bank-statement"
-    r = await ar_team["poster"].post(
-        url, files=_csv("WIRE-2901,Harbor Distribution,2026-11-05,9500,USD,yes")
-    )
+    r = await pod.post(url, files=_csv("WIRE-2901,Harbor Distribution,2026-11-05,9500,USD,yes"))
     assert r.status_code == 422
-    r = await ar_team["poster"].post(url, files=_csv("WIRE-3000,Harbor,2026-11-06,10,EUR,yes"))
+    r = await pod.post(url, files=_csv("WIRE-3000,Harbor,2026-11-06,10,EUR,yes"))
     assert r.status_code == 422
     assert "EUR" in r.json()["detail"]["message"]
 
 
-async def test_rows_follow_the_readers_roles(ar_team: dict[str, Any]) -> None:
-    sid = ar_team["snapshot"]["id"]
-    r = await ar_team["prep"].get(f"/api/v1/pod/snapshots/{sid}/rows?collection=invoices")
+async def test_rows(pod: AsyncClient, snapshot: dict[str, Any]) -> None:
+    sid = snapshot["id"]
+    r = await pod.get(f"/api/v1/pod/snapshots/{sid}/rows?collection=invoices")
     assert r.status_code == 200
     assert [i["number"] for i in r.json()["rows"]] == ["INV-101", "INV-102"]
-
-    r = await ar_team["prep"].get(f"/api/v1/pod/snapshots/{sid}/rows?collection=cash_position")
-    assert r.status_code == 403  # treasury data isn't part of the AR role

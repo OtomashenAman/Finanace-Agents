@@ -3,17 +3,10 @@
 from pydantic import BaseModel
 
 from src.app.service_pod.common import reading
-from src.app.service_pod.core.cases.access import CaseRole
 from src.app.service_pod.core.cases.exceptions import CaseActionError
 from src.app.service_pod.core.cases.models import CaseStatus
 from src.app.service_pod.core.cases.schemas import EmptyPayload
-from src.app.service_pod.core.cases.service import (
-    OPEN_FOR_EDIT,
-    ActionSpec,
-    Ctx,
-    need_role,
-    need_status,
-)
+from src.app.service_pod.core.cases.service import DRAFT, ActionSpec, Ctx, need_status
 from src.app.service_pod.core.messaging.models import Direction, PodMessage
 from src.app.service_pod.core.tasks import service as tasks
 from src.app.service_pod.core.tasks.models import TaskKind
@@ -27,7 +20,7 @@ from src.app.service_pod.flows.bank_recon.service import (
 
 
 def _guard_set_allocation(c: Ctx) -> str | None:
-    return need_role(c, CaseRole.OWNER) or need_status(c, OPEN_FOR_EDIT, "change the allocation")
+    return need_status(c, DRAFT, "change the allocation")
 
 
 async def _set_allocation(c: Ctx, p: BaseModel) -> tuple[str, bool]:
@@ -44,16 +37,14 @@ async def _set_allocation(c: Ctx, p: BaseModel) -> tuple[str, bool]:
         if line.invoice_id not in invoices:
             raise CaseActionError(f"{line.invoice_id} isn't an open invoice of this customer.")
     store_allocation(
-        c.case, [(line.invoice_id, line.amount) for line in p.lines], reply, p.quote, "preparer"
+        c.case, [(line.invoice_id, line.amount) for line in p.lines], reply, p.quote, "hand"
     )
     return "Recorded the customer's allocation", True
 
 
 def _guard_create_task(c: Ctx) -> str | None:
     # A second request for the same receipt is refused by the task's unique key
-    return need_role(c, CaseRole.OWNER) or need_status(
-        c, frozenset({CaseStatus.APPROVED}), "queue the posting"
-    )
+    return need_status(c, frozenset({CaseStatus.APPROVED}), "queue the posting")
 
 
 async def _create_task(c: Ctx, _: BaseModel) -> tuple[str, bool]:

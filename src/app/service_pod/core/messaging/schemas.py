@@ -76,7 +76,7 @@ class MessageVersion(BaseModel):
 
 
 class ApprovalChecks(BaseModel):
-    """What the reviewer confirms before approving customer mail."""
+    """What is confirmed before customer mail is sent."""
 
     recipient: bool = False  # the address is the customer's verified contact
     mapping: bool = False  # the invoices and amounts are the right ones for this customer
@@ -87,7 +87,7 @@ class ApprovalChecks(BaseModel):
         return self.recipient and self.mapping and self.tone
 
 
-class MessageApprove(MessageVersion):
+class MessageSend(MessageVersion):
     checks: ApprovalChecks = ApprovalChecks()
 
 

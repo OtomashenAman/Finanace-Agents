@@ -1,6 +1,6 @@
 """Changes the system makes to a case (reading a reply, approving a document, a newer
-source): same rules as a person's action. The version grows, a reviewed case goes back to
-review, and the audit trail says so."""
+source): same rules as a person's action. The version grows, an approved case goes back to
+draft, and the audit trail says so."""
 
 import uuid
 from typing import Any
@@ -21,7 +21,6 @@ from src.app.service_pod.core.cases.models import (
 from src.app.service_pod.core.snapshots.models import PodSnapshot, PodSnapshotArchive
 
 SYSTEM = RequestContext(ip=None, user_agent="service pod")
-REVIEWED = frozenset({CaseStatus.AWAITING_FINAL, CaseStatus.APPROVED})
 
 
 def bump_case(
@@ -35,9 +34,9 @@ def bump_case(
     content_changed: bool = True,
 ) -> None:
     """Record a change made outside run_action (caller commits)."""
-    reopened = content_changed and case.status in REVIEWED
+    reopened = content_changed and case.status == CaseStatus.APPROVED
     if reopened:
-        case.status = CaseStatus.IN_REVIEW
+        case.status = CaseStatus.DRAFT
     case.version += 1
     record_event(
         session,
@@ -57,7 +56,7 @@ def bump_case(
             actor_id=actor_id,
             run=case.reference,
             case_id=str(case.id),
-            summary=f"{case.reference}: content changed after review, back to review",
+            summary=f"{case.reference}: content changed after approval, back to draft",
         )
 
 

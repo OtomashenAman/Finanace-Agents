@@ -16,7 +16,7 @@ _ERRORS: dict[int | str, dict[str, Any]] = {code: {"model": ErrorResponse} for c
 
 @router.get("/portfolio", response_model=ArPortfolio, responses=_ERRORS)
 async def ar_portfolio(
-    session: SessionDep, access: PodAccessDep, snapshot_id: uuid.UUID | None = None
+    session: SessionDep, _: PodAccessDep, snapshot_id: uuid.UUID | None = None
 ) -> ArPortfolio:
     """Open AR, aging and priority customers of a snapshot (default: the latest with AR)."""
-    return await views.ar_portfolio(session, access, snapshot_id)
+    return await views.ar_portfolio(session, snapshot_id)

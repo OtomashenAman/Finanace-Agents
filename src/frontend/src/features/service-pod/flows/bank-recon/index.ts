@@ -1,15 +1,13 @@
 import type { FlowUi } from "../types"
-import { BankPanel } from "./case-panel"
-import { HOME_LABEL } from "./meta"
+import { HOME_LABEL, PURPOSES } from "./meta"
 import { BankStats } from "./stats"
+import { BANK_STEPS, bankNextAction } from "./steps"
 import { UnappliedCashPage } from "./unapplied-page"
 
 export const bankRecon: FlowUi = {
-  purposes: {
-    allocation_request: "Ask which invoices the payment covers",
-    acknowledgement: "Confirm how the payment was applied",
-  },
-  CasePanel: BankPanel,
+  purposes: PURPOSES,
+  steps: BANK_STEPS,
+  nextAction: bankNextAction,
   showsCommitments: false,
   ownsPosting: true,
   home: { label: HOME_LABEL, Page: UnappliedCashPage },

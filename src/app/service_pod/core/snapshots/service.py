@@ -16,7 +16,6 @@ from src.app.entities.models import LegalEntity
 from src.app.entities.schemas import EntityRef
 from src.app.service_pod.common.canonical import fingerprint, plain
 from src.app.service_pod.common.people import DELETED, names
-from src.app.service_pod.core.access.exceptions import PodForbiddenError
 from src.app.service_pod.core.access.service import PodAccess
 from src.app.service_pod.core.cases.models import PodCase
 from src.app.service_pod.core.snapshots import importers
@@ -112,8 +111,7 @@ async def summary(session: AsyncSession, snapshot: PodSnapshot) -> SnapshotSumma
     return (await _summaries(session, [snapshot]))[0]
 
 
-async def _entity(session: AsyncSession, access: PodAccess, entity_id: uuid.UUID) -> LegalEntity:
-    access.require_entity(entity_id)
+async def _entity(session: AsyncSession, entity_id: uuid.UUID) -> LegalEntity:
     entity = await session.get(LegalEntity, entity_id)
     if entity is None or not entity.is_active:
         raise SnapshotInvalidError("Unknown or inactive legal entity.")
@@ -194,8 +192,7 @@ async def import_json(
     data: bytes,
     ctx: RequestContext,
 ) -> SnapshotImportResult:
-    access.require_poster("import source data")
-    entity = await _entity(session, access, entity_id)
+    entity = await _entity(session, entity_id)
     doc = importers.parse_json_export(data)
     return await _store(session, access, entity, doc, SourceType.JSON_EXPORT, ctx)
 
@@ -210,8 +207,7 @@ async def import_workbook(
 ) -> SnapshotImportResult:
     """The same normalized export as JSON, as an Excel workbook (same source type, so a
     later export in either form can verify a posting)."""
-    access.require_poster("import source data")
-    entity = await _entity(session, access, entity_id)
+    entity = await _entity(session, entity_id)
     doc = importers.parse_workbook(data, filename)
     return await _store(session, access, entity, doc, SourceType.JSON_EXPORT, ctx)
 
@@ -228,8 +224,7 @@ async def import_qbxml(
     provenance: Provenance,
     ctx: RequestContext,
 ) -> SnapshotImportResult:
-    access.require_poster("import source data")
-    entity = await _entity(session, access, entity_id)
+    entity = await _entity(session, entity_id)
     doc = importers.parse_qbxml(
         data,
         entity_code=entity.code,
@@ -246,8 +241,7 @@ async def import_qbxml(
 async def import_quickbooks(
     session: AsyncSession, access: PodAccess, body: QuickBooksSnapshotRequest, ctx: RequestContext
 ) -> SnapshotImportResult:
-    access.require_poster("import source data")
-    entity = await _entity(session, access, body.entity_id)
+    entity = await _entity(session, body.entity_id)
     source = await session.get(DataSource, body.data_source_id)
     # Data sources are private to their owner, so only your own connection can be copied
     if source is None or source.owner_id != access.user.id:
@@ -258,13 +252,9 @@ async def import_quickbooks(
     return await _store(session, access, entity, doc, SourceType.QUICKBOOKS_ONLINE, ctx)
 
 
-async def get_visible(
-    session: AsyncSession, access: PodAccess, snapshot_id: uuid.UUID
-) -> PodSnapshot:
+async def load_snapshot(session: AsyncSession, snapshot_id: uuid.UUID) -> PodSnapshot:
     snapshot = await session.get(PodSnapshot, snapshot_id)
-    if snapshot is None or not access.can_see_entity(snapshot.entity_id):
-        raise SnapshotNotFoundError
-    if not (access.is_admin or access.is_poster or access.case_workflows):
+    if snapshot is None:
         raise SnapshotNotFoundError
     return snapshot
 
@@ -278,9 +268,8 @@ async def import_bank_statement(
 ) -> SnapshotImportResult:
     """A new snapshot: the parent's content plus the statement's receipts. The parent stays
     exactly as it was."""
-    access.require_poster("import bank statements")
-    parent = await get_visible(session, access, snapshot_id)
-    entity = await _entity(session, access, parent.entity_id)
+    parent = await load_snapshot(session, snapshot_id)
+    entity = await _entity(session, parent.entity_id)
     receipts = importers.parse_bank_csv(data)
     doc = importers.with_bank_receipts(document(parent), receipts)
     return await _store(session, access, entity, doc, SourceType.BANK_CSV, ctx, parent=parent)
@@ -291,35 +280,24 @@ def archived_ids() -> Select[tuple[uuid.UUID]]:
 
 
 async def list_snapshots(
-    session: AsyncSession,
-    access: PodAccess,
-    entity_id: uuid.UUID | None,
-    include_archived: bool = False,
+    session: AsyncSession, entity_id: uuid.UUID | None, include_archived: bool = False
 ) -> list[SnapshotSummary]:
-    if not (access.is_admin or access.is_poster or access.case_workflows):
-        return []
     query = select(PodSnapshot).order_by(PodSnapshot.created_at.desc()).limit(200)
     if not include_archived:
         query = query.where(PodSnapshot.id.not_in(archived_ids()))
-    if access.entity_ids is not None:
-        query = query.where(PodSnapshot.entity_id.in_(access.entity_ids))
     if entity_id is not None:
         query = query.where(PodSnapshot.entity_id == entity_id)
     return await _summaries(session, list(await session.scalars(query)))
 
 
-async def get_snapshot(
-    session: AsyncSession, access: PodAccess, snapshot_id: uuid.UUID
-) -> SnapshotSummary:
-    return await summary(session, await get_visible(session, access, snapshot_id))
+async def get_snapshot(session: AsyncSession, snapshot_id: uuid.UUID) -> SnapshotSummary:
+    return await summary(session, await load_snapshot(session, snapshot_id))
 
 
 async def get_rows(
-    session: AsyncSession, access: PodAccess, snapshot_id: uuid.UUID, collection: Collection
+    session: AsyncSession, snapshot_id: uuid.UUID, collection: Collection
 ) -> SnapshotRows:
-    snapshot = await get_visible(session, access, snapshot_id)
-    if collection not in access.visible_collections:
-        raise PodForbiddenError(f"Your roles don't include {collection.value} data.")
+    snapshot = await load_snapshot(session, snapshot_id)
     value: Any = snapshot.payload.get(collection.value)
     rows = [] if value is None else value if isinstance(value, list) else [value]
     return SnapshotRows(collection=collection, rows=rows)
@@ -348,8 +326,7 @@ async def archive_snapshot(
     ctx: RequestContext,
 ) -> SnapshotSummary:
     """Hide a snapshot from lists and pickers; it stays as evidence and can be restored."""
-    access.require_poster("archive source data")
-    snapshot = await get_visible(session, access, snapshot_id)
+    snapshot = await load_snapshot(session, snapshot_id)
     if await session.get(PodSnapshotArchive, snapshot.id) is not None:
         raise SnapshotConflictError("This snapshot is already archived.")
     session.add(
@@ -371,8 +348,7 @@ async def archive_snapshot(
 async def restore_snapshot(
     session: AsyncSession, access: PodAccess, snapshot_id: uuid.UUID, ctx: RequestContext
 ) -> SnapshotSummary:
-    access.require_poster("restore source data")
-    snapshot = await get_visible(session, access, snapshot_id)
+    snapshot = await load_snapshot(session, snapshot_id)
     archive = await session.get(PodSnapshotArchive, snapshot.id)
     if archive is None:
         raise SnapshotConflictError("This snapshot isn't archived.")
@@ -398,8 +374,7 @@ async def delete_snapshot(
 ) -> None:
     """Remove a snapshot nothing depends on (no case, no verification, no later snapshot
     built on it), e.g. a wrong import. Anything used is evidence: archive it instead."""
-    access.require_poster("delete source data")
-    snapshot = await get_visible(session, access, snapshot_id)
+    snapshot = await load_snapshot(session, snapshot_id)
     in_use = (await summary(session, snapshot)).in_use
     if in_use:
         raise SnapshotConflictError(

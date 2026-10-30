@@ -1,9 +1,9 @@
-"""Outbound email (draft -> approved -> sent), imported replies and supporting documents.
+"""Outbound email (draft -> sent), imported replies and supporting documents.
 
-- The preparer drafts; a reviewer (not the author) approves the exact message. The approval
-  hash binds subject, body, recipient, attachments, purpose and transport; any edit clears it.
-- Sending is a separate action, once: the idempotency key comes from the approval, and an
-  unclear outcome becomes send_unknown for a person to reconcile, never an automatic retry.
+- Sending approves the exact message first: the approval hash binds subject, body,
+  recipient, attachments, purpose and transport, and customer mail needs the checklist.
+- A message is sent once: the idempotency key comes from the approval, and an unclear
+  outcome becomes send_unknown to reconcile, never an automatic retry.
 - Customer mail goes only to the verified contact imported with the source; internal mail
   only to the configured recipients.
 - A reply is accepted only from the address the message went to, on a provable thread.
@@ -28,12 +28,7 @@ from src.app.service_pod.common.canonical import fingerprint
 from src.app.service_pod.common.people import DELETED, name_of, names
 from src.app.service_pod.core.access.service import PodAccess
 from src.app.service_pod.core.cases import system
-from src.app.service_pod.core.cases.access import (
-    CaseRole,
-    load_case,
-    roles_on,
-    visible_cases_clause,
-)
+from src.app.service_pod.core.cases.access import load_case
 from src.app.service_pod.core.cases.exceptions import CaseActionError, StaleVersionError
 from src.app.service_pod.core.cases.models import LOCKED_STATUSES, PodCase
 from src.app.service_pod.core.hooks import Composed, hooks_for
@@ -51,10 +46,10 @@ from src.app.service_pod.core.messaging.models import (
 from src.app.service_pod.core.messaging.schemas import (
     ArtifactOut,
     EmailStatus,
-    MessageApprove,
     MessageDraftIn,
     MessageOut,
     MessageReconcile,
+    MessageSend,
     MessageUpdate,
     ReplyImport,
 )
@@ -63,7 +58,7 @@ from src.app.service_pod.core.snapshots.models import PodSnapshot
 
 SEND_JOB = "pod.send_message"
 EXTRACT_JOB = "pod.extract_reply"
-EDITABLE = frozenset({MessageStatus.DRAFT, MessageStatus.APPROVED, MessageStatus.SEND_FAILED})
+EDITABLE = frozenset({MessageStatus.DRAFT, MessageStatus.SEND_FAILED})
 ARTIFACT_TYPES = {
     "application/pdf",
     "image/png",
@@ -150,17 +145,9 @@ async def messages_for_case(session: AsyncSession, case: PodCase) -> list[Messag
     return await _message_outs(session, list(rows))
 
 
-async def list_messages(
-    session: AsyncSession, access: PodAccess, status: MessageStatus | None
-) -> list[MessageOut]:
-    """The inbox: messages on every case the viewer works on, newest first."""
-    query = (
-        select(PodMessage)
-        .join(PodCase, PodCase.id == PodMessage.case_id)
-        .where(visible_cases_clause(access))
-        .order_by(PodMessage.updated_at.desc())
-        .limit(300)
-    )
+async def list_messages(session: AsyncSession, status: MessageStatus | None) -> list[MessageOut]:
+    """The inbox: messages on every case, newest first."""
+    query = select(PodMessage).order_by(PodMessage.updated_at.desc()).limit(300)
     if status is not None:
         query = query.where(PodMessage.status == status)
     return await _message_outs(session, list(await session.scalars(query)))
@@ -213,11 +200,9 @@ async def email_status() -> EmailStatus:
 # --- checks ----------------------------------------------------------------------------
 
 
-def _require(case: PodCase, access: PodAccess, *roles: CaseRole, to: str) -> None:
+def _require_open(case: PodCase) -> None:
     if case.status in LOCKED_STATUSES:
         raise CaseActionError(f"{case.reference} is {case.status.value}; it can't change any more.")
-    if not roles_on(case, access) & set(roles):
-        raise CaseActionError(f"You can't {to} on {case.reference}.")
 
 
 async def _check_recipient(
@@ -311,12 +296,12 @@ def _require_facts(fact_block: str | None, body: str) -> None:
 
 
 async def _load_message(
-    session: AsyncSession, access: PodAccess, message_id: uuid.UUID, expected_version: int
+    session: AsyncSession, message_id: uuid.UUID, expected_version: int
 ) -> tuple[PodMessage, PodCase]:
     message = await session.get(PodMessage, message_id, with_for_update=True)
     if message is None:
         raise MessageNotFoundError
-    case = await load_case(session, access, message.case_id)
+    case = await load_case(session, message.case_id)
     if message.version != expected_version:
         raise StaleVersionError("This message was changed by someone else. Refresh and retry.")
     return message, case
@@ -355,8 +340,8 @@ async def create_draft(
     body: MessageDraftIn,
     ctx: RequestContext,
 ) -> MessageOut:
-    case = await load_case(session, access, case_id)
-    _require(case, access, CaseRole.OWNER, to="draft messages")
+    case = await load_case(session, case_id)
+    _require_open(case)
     await _check_recipient(session, case, body.audience, body.to_email)
     await _approved_artifacts(session, case, body.artifact_ids)
     fact_block = await _facts_for(session, case, body.purpose)
@@ -398,8 +383,8 @@ async def update_message(
     body: MessageUpdate,
     ctx: RequestContext,
 ) -> MessageOut:
-    message, case = await _load_message(session, access, message_id, body.expected_version)
-    _require(case, access, CaseRole.OWNER, to="edit messages")
+    message, case = await _load_message(session, message_id, body.expected_version)
+    _require_open(case)
     if message.direction != Direction.OUTBOUND or message.status not in EDITABLE:
         raise MessageRefusedError(f"A {message.status.value} message can't be edited.")
     if body.to_email is not None:
@@ -416,7 +401,6 @@ async def update_message(
     assert message.audience is not None  # noqa: S101 - outbound messages have one
     await _check_recipient(session, case, message.audience, message.to_email)
     _require_facts(message.fact_block, message.body)
-    was_approved = message.status == MessageStatus.APPROVED
     message.status = MessageStatus.DRAFT  # an edit always needs a fresh approval
     message.approval_hash = message.approved_by = message.approved_at = None
     message.provider = message.sender = message.error = message.approval_checks = None
@@ -428,29 +412,29 @@ async def update_message(
         access.user.id,
         case,
         message,
-        "Edited a message" + (" (its approval was withdrawn)" if was_approved else ""),
+        "Edited a message",
     )
     await session.commit()
     return (await _message_outs(session, [message]))[0]
 
 
-async def approve_message(
+async def send_message(
     session: AsyncSession,
     access: PodAccess,
     message_id: uuid.UUID,
-    body: MessageApprove,
+    body: MessageSend,
     ctx: RequestContext,
 ) -> MessageOut:
-    message, case = await _load_message(session, access, message_id, body.expected_version)
-    _require(case, access, CaseRole.REVIEWER, to="approve messages")
-    if message.status != MessageStatus.DRAFT:
-        raise MessageRefusedError("Only a draft can be approved.")
-    if message.created_by == access.user.id:
-        raise MessageRefusedError("Someone other than the author must approve a message.")
+    """Approve the exact message (its hash binds subject, body, recipient, attachments,
+    purpose and transport) and send it once."""
+    message, case = await _load_message(session, message_id, body.expected_version)
+    _require_open(case)
+    if message.direction != Direction.OUTBOUND or message.status not in EDITABLE:
+        raise MessageRefusedError(f"A {message.status.value} message can't be sent.")
     assert message.audience is not None  # noqa: S101
     if message.audience == Audience.CUSTOMER and not body.checks.all_confirmed:
         raise MessageRefusedError(
-            "Confirm the recipient, the invoice mapping and the tone before approving."
+            "Confirm the recipient, the invoice mapping and the tone before sending."
         )
     await _check_recipient(session, case, message.audience, message.to_email)
     if message.fact_block is not None:
@@ -473,43 +457,6 @@ async def approve_message(
     message.approved_by = access.user.id
     message.approved_at = utcnow()
     message.approval_checks = body.checks.model_dump()
-    message.status = MessageStatus.APPROVED
-    message.version += 1
-    _event(
-        session,
-        "pod.message_approved",
-        ctx,
-        access.user.id,
-        case,
-        message,
-        f"Approved '{message.subject}' to {message.to_email} via {provider.name}",
-        approval_hash=message.approval_hash,
-    )
-    await session.commit()
-    return (await _message_outs(session, [message]))[0]
-
-
-async def send_message(
-    session: AsyncSession,
-    access: PodAccess,
-    message_id: uuid.UUID,
-    expected_version: int,
-    ctx: RequestContext,
-) -> MessageOut:
-    message, case = await _load_message(session, access, message_id, expected_version)
-    _require(case, access, CaseRole.OWNER, CaseRole.REVIEWER, to="send messages")
-    if message.status != MessageStatus.APPROVED or message.approval_hash is None:
-        raise MessageRefusedError("Only an approved message can be sent.")
-    artifacts = await _approved_artifacts(
-        session, case, [uuid.UUID(a) for a in message.artifact_ids]
-    )
-    provider = providers.get_email_provider()
-    if (provider.name, provider.sender) != (message.provider, message.sender):
-        raise MessageRefusedError(
-            "The email transport changed since approval: the message must be approved again."
-        )
-    if _approval_hash(message, artifacts, provider.name, provider.sender) != message.approval_hash:
-        raise MessageRefusedError("The message no longer matches its approval.")
     key = hashlib.sha256(f"{case.id}:{message.id}:{message.approval_hash}".encode()).hexdigest()
     message.idempotency_key = key
     message.status = MessageStatus.SENDING
@@ -521,7 +468,8 @@ async def send_message(
         access.user.id,
         case,
         message,
-        f"Asked to send '{message.subject}'",
+        f"Approved and sent '{message.subject}' to {message.to_email} via {provider.name}",
+        approval_hash=message.approval_hash,
     )
     job = await queue.enqueue(
         session, SEND_JOB, {"message_id": str(message.id)}, dedupe_key=key, max_attempts=1
@@ -534,15 +482,14 @@ async def send_message(
 
 async def compose(
     session: AsyncSession,
-    access: PodAccess,
     case_id: uuid.UUID,
     purpose: str,
     llm: LLMProvider,
 ) -> Composed:
     """A suggested draft for a workflow purpose: the source's figures plus wording. Nothing
-    is saved; the preparer edits and saves it as a draft."""
-    case = await load_case(session, access, case_id)
-    _require(case, access, CaseRole.OWNER, to="draft messages")
+    is saved; it is edited and saved as a draft."""
+    case = await load_case(session, case_id)
+    _require_open(case)
     compose_hook = hooks_for(case.workflow).compose
     if compose_hook is None or purpose == GENERIC_PURPOSE:
         raise MessageRefusedError("This workflow has no suggested draft for that purpose.")
@@ -558,8 +505,8 @@ async def reconcile_message(
     ctx: RequestContext,
 ) -> MessageOut:
     """Settle a send whose outcome was unknown, after checking the provider's own log."""
-    message, case = await _load_message(session, access, message_id, body.expected_version)
-    _require(case, access, CaseRole.REVIEWER, to="reconcile sends")
+    message, case = await _load_message(session, message_id, body.expected_version)
+    _require_open(case)
     if message.status != MessageStatus.SEND_UNKNOWN:
         raise MessageRefusedError("Only a send with an unknown outcome needs reconciling.")
     message.status = MessageStatus(body.outcome)
@@ -594,8 +541,8 @@ async def import_reply(
 ) -> tuple[MessageOut, bool]:
     """(reply, created). Re-importing the same email returns the existing one. A workflow
     that reads replies gets it read in the background (see flows.extraction)."""
-    case = await load_case(session, access, case_id, lock=True)
-    _require(case, access, CaseRole.OWNER, CaseRole.REVIEWER, to="import replies")
+    case = await load_case(session, case_id, lock=True)
+    _require_open(case)
     sent = list(
         await session.scalars(
             select(PodMessage).where(
@@ -710,8 +657,8 @@ async def upload_artifact(
     data: bytes,
     ctx: RequestContext,
 ) -> ArtifactOut:
-    case = await load_case(session, access, case_id)
-    _require(case, access, CaseRole.OWNER, to="add documents")
+    case = await load_case(session, case_id)
+    _require_open(case)
     content_type = content_type.split(";")[0].strip().lower()
     if content_type not in ARTIFACT_TYPES:
         raise ArtifactInvalidError("Allowed: PDF, PNG, JPEG, CSV, TXT, XLSX or DOCX.")
@@ -769,17 +716,15 @@ async def decide_artifact(
     artifact = await session.get(PodArtifact, artifact_id, with_for_update=True)
     if artifact is None:
         raise ArtifactNotFoundError
-    case = await load_case(session, access, artifact.case_id)
-    _require(case, access, CaseRole.REVIEWER, to="approve documents")
+    case = await load_case(session, artifact.case_id)
+    _require_open(case)
     if artifact.status != ArtifactStatus.PENDING:
         raise ArtifactInvalidError("This document was already decided.")
-    if artifact.uploaded_by == access.user.id:
-        raise ArtifactInvalidError("Someone other than the uploader must approve a document.")
     artifact.status = ArtifactStatus(decision)
     artifact.decided_by = access.user.id
     artifact.decided_at = utcnow()
     if artifact.status == ArtifactStatus.APPROVED:
-        locked_case = await load_case(session, access, case.id, lock=True)
+        locked_case = await load_case(session, case.id, lock=True)
         settled = await system.satisfy_document_requests(
             session, locked_case, artifact.kind.value, artifact.invoice_refs, artifact.filename
         )
@@ -807,11 +752,10 @@ async def decide_artifact(
 
 
 async def artifact_content(
-    session: AsyncSession, access: PodAccess, artifact_id: uuid.UUID
+    session: AsyncSession, artifact_id: uuid.UUID
 ) -> tuple[PodArtifact, bytes]:
     artifact = await session.get(PodArtifact, artifact_id)
     if artifact is None:
         raise ArtifactNotFoundError
-    await load_case(session, access, artifact.case_id)  # visibility
     content = await session.scalar(select(PodArtifact.content).where(PodArtifact.id == artifact.id))
     return artifact, content or b""

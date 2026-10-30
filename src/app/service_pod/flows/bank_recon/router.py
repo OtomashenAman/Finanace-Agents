@@ -16,7 +16,7 @@ _ERRORS: dict[int | str, dict[str, Any]] = {code: {"model": ErrorResponse} for c
 
 @router.get("/unapplied", response_model=BankWorklist, responses=_ERRORS)
 async def bank_unapplied(
-    session: SessionDep, access: PodAccessDep, snapshot_id: uuid.UUID | None = None
+    session: SessionDep, _: PodAccessDep, snapshot_id: uuid.UUID | None = None
 ) -> BankWorklist:
     """Bank receipts not yet recorded in QuickBooks (default: the latest with receipts)."""
-    return await views.bank_worklist(session, access, snapshot_id)
+    return await views.bank_worklist(session, snapshot_id)

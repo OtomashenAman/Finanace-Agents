@@ -2,8 +2,8 @@
 
 from datetime import date
 from decimal import Decimal
-from typing import Any
 
+from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.auth.models import User
@@ -65,12 +65,11 @@ def _invoice(n: str, total: str, balance: str) -> Invoice:
 
 
 async def test_zero_payments_are_left_out(
-    ar_team: dict[str, Any], entity: LegalEntity, db: AsyncSession
+    pod: AsyncClient, admin_user: User, entity: LegalEntity, db: AsyncSession
 ) -> None:
-    poster = ar_team["users"]["poster"]
     source = await _connection(
         db,
-        poster,
+        admin_user,
         {
             RecordType.CUSTOMER: [
                 Customer(
@@ -104,7 +103,7 @@ async def test_zero_payments_are_left_out(
             ],
         },
     )
-    r = await ar_team["poster"].post(
+    r = await pod.post(
         "/api/v1/pod/snapshots/quickbooks",
         json={
             "data_source_id": str(source.id),
@@ -120,12 +119,11 @@ async def test_zero_payments_are_left_out(
 
 
 async def test_a_bad_record_is_named_not_a_crash(
-    ar_team: dict[str, Any], entity: LegalEntity, db: AsyncSession
+    pod: AsyncClient, admin_user: User, entity: LegalEntity, db: AsyncSession
 ) -> None:
-    poster = ar_team["users"]["poster"]
     source = await _connection(
         db,
-        poster,
+        admin_user,
         {
             RecordType.CUSTOMER: [Customer(external_id="c1", name="Amy's Bird Sanctuary")],
             # balance above the invoice amount: refused by the contract
@@ -133,7 +131,7 @@ async def test_a_bad_record_is_named_not_a_crash(
             RecordType.PAYMENT: [],
         },
     )
-    r = await ar_team["poster"].post(
+    r = await pod.post(
         "/api/v1/pod/snapshots/quickbooks",
         json={
             "data_source_id": str(source.id),

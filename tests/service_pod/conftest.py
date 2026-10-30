@@ -3,7 +3,6 @@ INV-101 / INV-102, WIRE-2901): test fixtures, never client accounting."""
 
 import copy
 import json
-from collections.abc import Awaitable, Callable
 from typing import Any
 
 import pytest
@@ -11,14 +10,8 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.auth.models import User, UserRole
-from src.app.entities.models import EntityAssignment, LegalEntity
-from src.app.service_pod.core.access.models import PodAssignment
-from src.app.service_pod.core.workflows import Capacity, WorkflowKey
+from src.app.entities.models import LegalEntity
 from tests.conftest import ClientFactory, MakeUser
-
-AR = WorkflowKey.AR_COLLECTIONS
-BANK = WorkflowKey.BANK_RECON
-TRS = WorkflowKey.TREASURY
 
 CUSTOMER_EMAIL = "ap@harbor.example"
 
@@ -82,9 +75,6 @@ def snapshot_payload(**changes: Any) -> dict[str, Any]:
     return data
 
 
-PodUser = Callable[..., Awaitable[tuple[User, AsyncClient]]]
-
-
 @pytest.fixture
 async def entity(db: AsyncSession) -> LegalEntity:
     e = LegalEntity(code="US01", name="US Operations")
@@ -94,21 +84,14 @@ async def entity(db: AsyncSession) -> LegalEntity:
 
 
 @pytest.fixture
-def pod_user(
-    db: AsyncSession, make_user: MakeUser, signed_in_client: ClientFactory, entity: LegalEntity
-) -> PodUser:
-    """`await pod_user("x@example.com", (AR, Capacity.PREPARER), ...)` -> (user, client)."""
+async def admin_user(make_user: MakeUser) -> User:
+    return await make_user("fa@example.com", UserRole.FINANCE_ADMIN)
 
-    async def _make(
-        email: str, *roles: tuple[WorkflowKey, Capacity], role: UserRole = UserRole.USER
-    ) -> tuple[User, AsyncClient]:
-        user = await make_user(email, role)
-        db.add(EntityAssignment(user_id=user.id, entity_id=entity.id))
-        db.add_all(PodAssignment(user_id=user.id, workflow=w, capacity=c) for w, c in roles)
-        await db.commit()
-        return user, await signed_in_client(user)
 
-    return _make
+@pytest.fixture
+async def pod(admin_user: User, signed_in_client: ClientFactory) -> AsyncClient:
+    """The Finance Admin, who runs the Service POD alone."""
+    return await signed_in_client(admin_user)
 
 
 async def import_snapshot(
@@ -130,35 +113,30 @@ async def act(client: AsyncClient, case: dict[str, Any], action: str, **payload:
 
 
 @pytest.fixture
-async def ar_team(pod_user: PodUser, entity: LegalEntity) -> dict[str, Any]:
-    """An AR preparer, an AR reviewer, a Finance Admin poster and an imported snapshot."""
-    poster, poster_client = await pod_user(
-        "fa@example.com", (AR, Capacity.POSTER), (BANK, Capacity.POSTER)
-    )
-    prep, prep_client = await pod_user("ar.user@example.com", (AR, Capacity.PREPARER))
-    rev, rev_client = await pod_user("ar.reviewer@example.com", (AR, Capacity.REVIEWER))
-    r = await import_snapshot(poster_client, entity)
+async def snapshot(pod: AsyncClient, entity: LegalEntity) -> dict[str, Any]:
+    r = await import_snapshot(pod, entity)
     assert r.status_code == 201, r.text
-    return {
-        "poster": poster_client,
-        "prep": prep_client,
-        "rev": rev_client,
-        "users": {"poster": poster, "prep": prep, "rev": rev},
-        "snapshot": r.json()["snapshot"],
-    }
+    snap: dict[str, Any] = r.json()["snapshot"]
+    return snap
 
 
-@pytest.fixture
-async def ar_case(ar_team: dict[str, Any]) -> dict[str, Any]:
-    r = await ar_team["prep"].post(
+async def open_ar_case(
+    pod: AsyncClient, snapshot: dict[str, Any], invoice_ids: tuple[str, ...] = ("I101", "I102")
+) -> dict[str, Any]:
+    r = await pod.post(
         "/api/v1/pod/cases",
         json={
             "workflow": "ar_collections",
-            "snapshot_id": ar_team["snapshot"]["id"],
+            "snapshot_id": snapshot["id"],
             "title": "Harbor Distribution",
-            "selection": {"customer_id": "C1", "invoice_ids": ["I101", "I102"]},
+            "selection": {"customer_id": "C1", "invoice_ids": list(invoice_ids)},
         },
     )
     assert r.status_code == 201, r.text
     case: dict[str, Any] = r.json()
     return case
+
+
+@pytest.fixture
+async def ar_case(pod: AsyncClient, snapshot: dict[str, Any]) -> dict[str, Any]:
+    return await open_ar_case(pod, snapshot)

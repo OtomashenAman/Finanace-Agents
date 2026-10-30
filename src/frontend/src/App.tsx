@@ -20,7 +20,6 @@ import { GuestOnly, RequireAdmin, RequireAuth } from "@/features/auth/route-guar
 import { DataSourcesPage } from "@/features/data-sources/data-sources-page"
 import { AiMonitoringPage } from "@/features/monitoring/ai-monitoring-page"
 import { OverviewPage } from "@/features/overview/overview-page"
-import { PodAssignmentsPage } from "@/features/service-pod/assignments-page"
 import { CasePage } from "@/features/service-pod/case-page"
 import { WorkflowCasesPage } from "@/features/service-pod/cases-page"
 import { InboxPage, ReviewQueuePage, TasksPage } from "@/features/service-pod/queue-pages"
@@ -66,7 +65,6 @@ const router = createBrowserRouter([
               { path: "/admin/governance", element: <GovernancePage /> },
               { path: "/admin/data-sources", element: <AdminDataSourcesPage /> },
               { path: "/admin/ai-monitoring", element: <AiMonitoringPage /> },
-              { path: "/admin/service-pod", element: <PodAssignmentsPage /> },
             ],
           },
         ],

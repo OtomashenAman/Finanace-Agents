@@ -21,7 +21,6 @@ import {
   useRestoreSnapshot,
   useSnapshotRows,
   useSnapshots,
-  useWorkflows,
 } from "./hooks"
 import { COLLECTION_LABEL, formatDateTime, shortHash } from "./labels"
 
@@ -166,7 +165,7 @@ function Rows({ snapshot }: { snapshot: Snapshot }) {
           </button>
         ))}
       </div>
-      {rows.isError && <LoadError what="these rows (your roles may not include them)" />}
+      {rows.isError && <LoadError what="these rows" />}
       {rows.isPending && collection && <Loading what="rows" />}
       {data.length > 0 && (
         <div className="max-h-80 overflow-auto rounded border">
@@ -267,8 +266,6 @@ function Removal({ snapshot }: { snapshot: Snapshot }) {
 
 /** Immutable source snapshots: what every case calculates from. */
 export function SourcesPage() {
-  const { data: workflows = [] } = useWorkflows()
-  const canImport = workflows.some((w) => w.my_capacities.includes("poster"))
   const [showArchived, setShowArchived] = useState(false)
   const snapshots = useSnapshots(showArchived)
   const [openId, setOpenId] = useState<string | null>(null)
@@ -316,28 +313,22 @@ export function SourcesPage() {
                   <div className="mt-3 space-y-4 rounded-md bg-secondary/30 p-3">
                     <p className="text-xs break-all text-muted-foreground">Source: {s.source_reference}</p>
                     <Rows snapshot={s} />
-                    {canImport && !s.archived && <BankStatement snapshot={s} />}
-                    {canImport && <Removal snapshot={s} />}
+                    {!s.archived && <BankStatement snapshot={s} />}
+                    <Removal snapshot={s} />
                   </div>
                 )}
               </li>
             ))}
           </ul>
         </Card>
-        {canImport ? (
-          <div className="space-y-6">
-            <Card title="Import an export">
-              <JsonImport />
-            </Card>
-            <Card title="From QuickBooks Online">
-              <QuickBooksImport />
-            </Card>
-          </div>
-        ) : (
-          <Card title="Importing">
-            <p className="text-sm text-muted-foreground">A Finance Admin with posting rights imports source data.</p>
+        <div className="space-y-6">
+          <Card title="Import an export">
+            <JsonImport />
           </Card>
-        )}
+          <Card title="From QuickBooks Online">
+            <QuickBooksImport />
+          </Card>
+        </div>
       </div>
     </AppPage>
   )

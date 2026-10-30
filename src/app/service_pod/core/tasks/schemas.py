@@ -20,8 +20,6 @@ class TaskOut(BaseModel):
     instructions: dict[str, Any]
     note: str | None
     proposed_by: str
-    approved_by: str | None
-    approved_at: datetime | None
     external_txn_id: str | None
     recorded_by: str | None
     recorded_at: datetime | None
@@ -30,7 +28,7 @@ class TaskOut(BaseModel):
     verification_snapshot_id: uuid.UUID | None
     verification: dict[str, Any] | None
     created_at: datetime
-    # action -> None when the viewer may do it now, else the reason they can't
+    # action -> None when it can be done now, else the reason it can't
     allowed_actions: dict[str, str | None]
 
 
@@ -42,7 +40,7 @@ class TaskCreate(BaseModel):
 
 
 class TaskAction(BaseModel):
-    action: Literal["approve", "record", "verify", "cancel"]
+    action: Literal["record", "verify", "cancel"]
     expected_version: int = Field(ge=1)
     external_txn_id: str | None = Field(default=None, min_length=1, max_length=100)
     snapshot_id: uuid.UUID | None = None  # the fresh snapshot that proves the posting

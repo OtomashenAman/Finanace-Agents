@@ -20,12 +20,11 @@ from src.app.service_pod.core.messaging.schemas import (
     ArtifactOut,
     ComposeRequest,
     EmailStatus,
-    MessageApprove,
     MessageDraftIn,
     MessageOut,
     MessageReconcile,
+    MessageSend,
     MessageUpdate,
-    MessageVersion,
     ReplyImport,
 )
 from src.app.service_pod.core.snapshots.exceptions import SnapshotTooLargeError
@@ -47,9 +46,9 @@ async def email_status(_: PodAccessDep) -> EmailStatus:
 
 @router.get("/messages", response_model=list[MessageOut])
 async def list_messages(
-    session: SessionDep, access: PodAccessDep, status: MessageStatus | None = None
+    session: SessionDep, _: PodAccessDep, status: MessageStatus | None = None
 ) -> list[MessageOut]:
-    return await service.list_messages(session, access, status)
+    return await service.list_messages(session, status)
 
 
 @router.post(
@@ -73,11 +72,11 @@ async def compose_message(
     case_id: uuid.UUID,
     body: ComposeRequest,
     session: SessionDep,
-    access: PodAccessDep,
+    _: PodAccessDep,
     llm: LLM,
 ) -> Composed:
     """A suggested draft for a workflow purpose (verified figures + wording). Not saved."""
-    return await service.compose(session, access, case_id, body.purpose, llm)
+    return await service.compose(session, case_id, body.purpose, llm)
 
 
 @router.patch("/messages/{message_id}", response_model=MessageOut, responses=_ERRORS)
@@ -88,32 +87,21 @@ async def update_message(
     access: PodAccessDep,
     ctx: RequestContextDep,
 ) -> MessageOut:
-    """Edit a draft (an approved message goes back to draft and needs approval again)."""
+    """Edit a draft or a send that failed (sending approves it again)."""
     return await service.update_message(session, access, message_id, body, ctx)
-
-
-@router.post("/messages/{message_id}/approve", response_model=MessageOut, responses=_ERRORS)
-async def approve_message(
-    message_id: uuid.UUID,
-    body: MessageApprove,
-    session: SessionDep,
-    access: PodAccessDep,
-    ctx: RequestContextDep,
-) -> MessageOut:
-    """Approve the exact message. Customer mail needs the recipient, mapping and tone checks."""
-    return await service.approve_message(session, access, message_id, body, ctx)
 
 
 @router.post("/messages/{message_id}/send", response_model=MessageOut, responses=_ERRORS)
 async def send_message(
     message_id: uuid.UUID,
-    body: MessageVersion,
+    body: MessageSend,
     session: SessionDep,
     access: PodAccessDep,
     ctx: RequestContextDep,
 ) -> MessageOut:
-    """Send an approved message once (a repeated click never sends it twice)."""
-    return await service.send_message(session, access, message_id, body.expected_version, ctx)
+    """Approve the exact message and send it once (a repeated click never sends it twice).
+    Customer mail needs the recipient, mapping and tone checks."""
+    return await service.send_message(session, access, message_id, body, ctx)
 
 
 @router.post("/messages/{message_id}/reconcile", response_model=MessageOut, responses=_ERRORS)
@@ -190,9 +178,9 @@ async def decide_artifact(
 
 @router.get("/artifacts/{artifact_id}/content", responses=_ERRORS)
 async def artifact_content(
-    artifact_id: uuid.UUID, session: SessionDep, access: PodAccessDep
+    artifact_id: uuid.UUID, session: SessionDep, _: PodAccessDep
 ) -> Response:
-    artifact, content = await service.artifact_content(session, access, artifact_id)
+    artifact, content = await service.artifact_content(session, artifact_id)
     return Response(
         content,
         media_type=artifact.content_type,

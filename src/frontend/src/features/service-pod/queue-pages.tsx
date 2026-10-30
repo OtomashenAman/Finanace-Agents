@@ -2,17 +2,16 @@ import { useState } from "react"
 import { Link } from "react-router"
 
 import { AppPage } from "@/components/layout/app-page"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 
-import type { MessageStatus, PostingTask, TaskStatus } from "./api"
-import { TaskRow } from "./case-page"
-import { Card, Empty, GuardedButton, LoadError, Loading, Pill, PodTabs } from "./components/bits"
-import { attempt, selectClass } from "./ui"
-import { useMessages, useReviewQueue, useSnapshots, useTaskAction, useTasks } from "./hooks"
+import type { MessageStatus, TaskStatus } from "./api"
+import { TaskRow } from "./components/case-extras"
+import { TaskActions } from "./components/task-actions"
+import { Card, Empty, LoadError, Loading, Pill, PodTabs } from "./components/bits"
+import { selectClass } from "./ui"
+import { useMessages, useReviewQueue, useTasks } from "./hooks"
 import { formatDateTime, MESSAGE_STATUS, REVIEW_KIND, WORKFLOW_SHORT } from "./labels"
 
-/** Every message on the viewer's cases: drafts to approve, sends to reconcile, replies. */
+/** Every message on the cases: drafts to send, sends to reconcile, replies. */
 export function InboxPage() {
   const [status, setStatus] = useState<MessageStatus | "">("")
   const messages = useMessages(status || null)
@@ -92,54 +91,7 @@ export function ReviewQueuePage() {
   )
 }
 
-function TaskActions({ t }: { t: PostingTask }) {
-  const act = useTaskAction()
-  const { data: snapshots = [] } = useSnapshots()
-  const [txn, setTxn] = useState("")
-  const [snapshotId, setSnapshotId] = useState("")
-  const a = t.allowed_actions
-  const run = (action: "approve" | "record" | "verify" | "cancel", extra = {}) =>
-    attempt(() => act.mutateAsync({ id: t.id, version: t.version, action, ...extra }), (r) => `Task ${r.status.replace("_", " ")}.`)
-  return (
-    <div className="mt-2 flex flex-wrap items-center gap-2">
-      {t.status === "proposed" && (
-        <GuardedButton reason={a.approve} disabled={act.isPending} onClick={() => void run("approve")}>
-          Approve for posting
-        </GuardedButton>
-      )}
-      {t.status === "approved" && (
-        <>
-          <Input className="max-w-[220px]" placeholder="QuickBooks transaction ID" value={txn} onChange={(e) => setTxn(e.target.value)} />
-          <GuardedButton reason={a.record} disabled={act.isPending || !txn.trim()} onClick={() => void run("record", { external_txn_id: txn })}>
-            I posted it
-          </GuardedButton>
-        </>
-      )}
-      {t.status === "recorded_unverified" && (
-        <>
-          <select className={`${selectClass} max-w-xs`} value={snapshotId} onChange={(e) => setSnapshotId(e.target.value)} aria-label="Fresh snapshot">
-            <option value="">Fresh snapshot that shows it…</option>
-            {snapshots.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.company_name} · as of {s.as_of} · imported {formatDateTime(s.imported_at)}
-              </option>
-            ))}
-          </select>
-          <GuardedButton reason={a.verify} disabled={act.isPending || !snapshotId} onClick={() => void run("verify", { snapshot_id: snapshotId })}>
-            Verify
-          </GuardedButton>
-        </>
-      )}
-      {(t.status === "proposed" || t.status === "approved") && a.cancel === null && (
-        <Button size="sm" variant="ghost" disabled={act.isPending} onClick={() => void run("cancel")}>
-          Cancel
-        </Button>
-      )}
-    </div>
-  )
-}
-
-/** The Finance Admin's manual QuickBooks queue: approve, post outside, record, verify. */
+/** The manual QuickBooks queue: post outside the application, record, verify. */
 export function TasksPage() {
   const [status, setStatus] = useState<TaskStatus | "">("")
   const tasks = useTasks(status || null)
@@ -163,7 +115,7 @@ export function TasksPage() {
       >
         {tasks.isPending && <Loading what="tasks" />}
         {tasks.isError && <LoadError what="tasks" />}
-        {tasks.data?.length === 0 && <Empty>No posting tasks (only Finance Admins with posting rights see this queue).</Empty>}
+        {tasks.data?.length === 0 && <Empty>No posting tasks.</Empty>}
         <ul className="divide-y">
           {tasks.data?.map((t) => (
             <li key={t.id} className="py-3 text-sm">

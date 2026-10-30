@@ -2,14 +2,13 @@ import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
 import { useCurrentUser } from "@/features/auth/hooks"
 
 import type { CaseDetail, ReviewTaskKind } from "../api"
 import { useSnapshotRows } from "../hooks"
 import { useRunAction } from "../use-run-action"
 import { formatDateTime, REVIEW_KIND } from "../labels"
-import { Card, Empty, Field, GuardedButton, Pill } from "./bits"
+import { Card, Empty, GuardedButton, Pill } from "./bits"
 import { selectClass } from "../ui"
 
 export function ReviewTasks({ c }: { c: CaseDetail }) {
@@ -247,14 +246,9 @@ export function OwnedActions({ c }: { c: CaseDetail }) {
 
 export function Decisions({ c }: { c: CaseDetail }) {
   const { run, pending } = useRunAction(c)
-  const [comment, setComment] = useState("")
   const a = c.allowed_actions
-  const decide = (name: "review" | "final_review", decision: string) =>
-    run(name, { decision, comment: comment || null }, "Decision recorded.").then((r) => r && setComment(""))
-  const reviewing = a.review === null ? "review" : a.final_review === null ? "final_review" : null
-
   return (
-    <Card title="Decision" hint={`Content fingerprint ${c.fingerprint.slice(0, 12)}…: approvals bind exactly this.`}>
+    <Card title="Decision" hint={`Content fingerprint ${c.fingerprint.slice(0, 12)}…: an approval binds exactly this.`}>
       {c.blockers.length > 0 && (
         <ul className="mb-3 list-disc pl-5 text-sm text-amber-800">
           {c.blockers.map((b) => (
@@ -263,31 +257,17 @@ export function Decisions({ c }: { c: CaseDetail }) {
         </ul>
       )}
       <div className="flex flex-wrap gap-2">
-        <GuardedButton reason={a.submit} disabled={pending} onClick={() => void run("submit", {}, "Submitted for review.")}>
-          Submit for review
-        </GuardedButton>
-        <GuardedButton reason={a.complete} disabled={pending} variant="outline" onClick={() => void run("complete", {}, "Case completed.")}>
-          Complete case
-        </GuardedButton>
+        {c.status === "draft" && (
+          <GuardedButton reason={a.approve} disabled={pending} onClick={() => void run("approve", {}, "Case approved.")}>
+            Approve case
+          </GuardedButton>
+        )}
+        {c.status === "approved" && (
+          <GuardedButton reason={a.complete} disabled={pending} variant="outline" onClick={() => void run("complete", {}, "Case completed.")}>
+            Complete case
+          </GuardedButton>
+        )}
       </div>
-      {reviewing && (
-        <div className="mt-4 space-y-2 border-t pt-4">
-          <Field label={reviewing === "final_review" ? "Final decision (independent approver)" : "Review decision"}>
-            <Textarea rows={2} placeholder="Comment (required unless you approve)" value={comment} onChange={(e) => setComment(e.target.value)} />
-          </Field>
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" disabled={pending} onClick={() => void decide(reviewing, "approved")}>
-              Approve
-            </Button>
-            <Button size="sm" variant="outline" disabled={pending || !comment.trim()} onClick={() => void decide(reviewing, "changes_requested")}>
-              Request changes
-            </Button>
-            <Button size="sm" variant="destructive" disabled={pending || !comment.trim()} onClick={() => void decide(reviewing, "rejected")}>
-              Reject
-            </Button>
-          </div>
-        </div>
-      )}
       {c.completion_blockers.length > 0 && c.status === "approved" && (
         <ul className="mt-3 list-disc pl-5 text-xs text-muted-foreground">
           {c.completion_blockers.map((b) => (
@@ -299,9 +279,7 @@ export function Decisions({ c }: { c: CaseDetail }) {
         <ul className="mt-4 space-y-1 border-t pt-3 text-xs">
           {c.approvals.map((ap) => (
             <li key={ap.id} className={ap.valid ? "" : "text-muted-foreground line-through"}>
-              {ap.gate === "final" ? "Final" : "Review"}: <strong>{ap.decision.replace("_", " ")}</strong> by {ap.user.name} ·{" "}
-              {formatDateTime(ap.created_at)}
-              {ap.comment && <> · “{ap.comment}”</>}
+              Approved by {ap.user.name} · {formatDateTime(ap.created_at)}
               {!ap.valid && " (content changed since)"}
             </li>
           ))}

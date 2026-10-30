@@ -13,9 +13,7 @@ from src.app.service_pod.common.worklists import (
     case_ref,
     latest_snapshot,
     open_cases,
-    require_workflow_role,
 )
-from src.app.service_pod.core.access.service import PodAccess
 from src.app.service_pod.core.cases.models import (
     PodCase,
 )
@@ -27,11 +25,8 @@ from src.app.service_pod.core.workflows import WorkflowKey
 from src.app.service_pod.flows.bank_recon.schemas import BankWorklist, ReceiptRow
 
 
-async def bank_worklist(
-    session: AsyncSession, access: PodAccess, snapshot_id: uuid.UUID | None
-) -> BankWorklist:
-    require_workflow_role(access, WorkflowKey.BANK_RECON)
-    snap = await latest_snapshot(session, access, snapshot_id, {Collection.BANK_RECEIPTS})
+async def bank_worklist(session: AsyncSession, snapshot_id: uuid.UUID | None) -> BankWorklist:
+    snap = await latest_snapshot(session, snapshot_id, {Collection.BANK_RECEIPTS})
     if snap is None:
         return BankWorklist(
             snapshot=None,
@@ -46,7 +41,7 @@ async def bank_worklist(
         raise SnapshotNotFoundError("That snapshot has no bank receipts.")
     recorded = {p.reference.lower() for p in doc.payments or []}
     customers = {customer_key(c.name): c for c in doc.customers or []}
-    cases = await open_cases(session, access, WorkflowKey.BANK_RECON, snap.entity_id)
+    cases = await open_cases(session, WorkflowKey.BANK_RECON, snap.entity_id)
     by_receipt = {str(c.selection.get("receipt_reference", "")).lower(): c for c in cases}
 
     rows = []
@@ -94,9 +89,7 @@ async def bank_worklist(
         .where(
             PodCase.entity_id == snap.entity_id,
             PodCase.workflow == WorkflowKey.BANK_RECON,
-            PodPostingTask.status.in_(
-                [TaskStatus.PROPOSED, TaskStatus.APPROVED, TaskStatus.RECORDED_UNVERIFIED]
-            ),
+            PodPostingTask.status.in_([TaskStatus.PROPOSED, TaskStatus.RECORDED_UNVERIFIED]),
         )
     )
     return BankWorklist(

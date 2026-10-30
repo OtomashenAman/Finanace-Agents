@@ -10,8 +10,6 @@ from src.app.service_pod.core.cases.models import (
     ActionStatus,
     CaseStatus,
     CommitmentStatus,
-    Decision,
-    Gate,
     ReviewTaskKind,
     ReviewTaskStatus,
 )
@@ -41,7 +39,7 @@ class CaseSummary(BaseModel):
     workflow: WorkflowKey
     title: str
     status: CaseStatus
-    stage: str
+    stage: str | None  # the step an open case is on (workflows with steps), "done" when closed
     version: int
     entity: EntityRef
     owner: PersonRef
@@ -54,12 +52,8 @@ class CaseSummary(BaseModel):
 
 class ApprovalOut(BaseModel):
     id: uuid.UUID
-    gate: Gate
-    decision: Decision
     user: PersonRef
-    comment: str | None
     content_hash: str
-    policy_version: str | None
     valid: bool  # still matches the case's current content
     created_at: datetime
 
@@ -125,7 +119,6 @@ class CaseDetail(CaseSummary):
     state: JsonObject
     completed_at: datetime | None
     fingerprint: str
-    my_roles: list[str]
     approvals: list[ApprovalOut]
     review_tasks: list[ReviewTaskOut]
     owned_actions: list[OwnedActionOut]
@@ -134,9 +127,9 @@ class CaseDetail(CaseSummary):
     artifacts: list[ArtifactOut]
     posting_tasks: list[TaskOut]
     related_cases: list[RelatedCase]
-    blockers: list[str]  # what stops submission / approval now
+    blockers: list[str]  # what stops approval now
     completion_blockers: list[str]
-    # action -> None when the viewer may do it now, else the reason they can't
+    # action -> None when it can be done now, else the reason it can't
     allowed_actions: dict[str, str | None]
 
 
@@ -167,17 +160,6 @@ class EditPayload(BaseModel):
 
 class EmptyPayload(BaseModel):
     pass
-
-
-class DecisionPayload(BaseModel):
-    decision: Decision
-    comment: str | None = Field(default=None, max_length=2000)
-
-    @model_validator(mode="after")
-    def _comment_unless_approved(self) -> "DecisionPayload":
-        if self.decision != Decision.APPROVED and not (self.comment and self.comment.strip()):
-            raise ValueError("Say why: a comment is required unless you approve.")
-        return self
 
 
 class CancelPayload(BaseModel):

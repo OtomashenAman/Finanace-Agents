@@ -1,7 +1,7 @@
-"""Manual posting tasks: proposed -> approved -> recorded_unverified -> verified.
+"""Manual posting tasks: proposed -> recorded_unverified -> verified.
 
-The preparer proposes from an approved case; a Finance Admin (poster) who didn't propose it
-approves, posts it in QuickBooks outside the application and records the transaction ID.
+An approved case proposes the posting; the Finance Admin posts it in QuickBooks outside the
+application and records the transaction ID.
 Verification needs a fresh snapshot of the same company/entity/currency/basis/source type,
 imported after the posting was recorded, that actually contains the transaction.
 """
@@ -19,7 +19,7 @@ from src.app.core.errors import AppError
 from src.app.service_pod.common.canonical import plain
 from src.app.service_pod.common.people import DELETED, name_of, names
 from src.app.service_pod.core.access.service import PodAccess
-from src.app.service_pod.core.cases.access import CaseRole, load_case, roles_on
+from src.app.service_pod.core.cases.access import load_case
 from src.app.service_pod.core.cases.exceptions import StaleVersionError
 from src.app.service_pod.core.cases.models import LOCKED_STATUSES, CaseStatus, PodCase
 from src.app.service_pod.core.hooks import hooks_for
@@ -28,7 +28,7 @@ from src.app.service_pod.core.snapshots.models import PodSnapshot
 from src.app.service_pod.core.tasks.models import PodPostingTask, TaskStatus
 from src.app.service_pod.core.tasks.schemas import TaskAction, TaskCreate, TaskOut
 
-ACTIONS = ("approve", "record", "verify", "cancel")
+ACTIONS = ("record", "verify", "cancel")
 
 
 class TaskNotFoundError(AppError):
@@ -42,35 +42,24 @@ class TaskRefusedError(AppError):
     code = "posting_task_refused"
 
 
-def _guard(task: PodPostingTask, access: PodAccess, action: str) -> str | None:
-    """None when the viewer may do `action` on the task now, else why not."""
-    if not access.is_poster:
-        return "Only a Finance Admin with posting rights handles posting tasks."
+def _guard(task: PodPostingTask, action: str) -> str | None:
+    """None when `action` can be done on the task now, else why not."""
     match action:
-        case "approve":
-            if task.status != TaskStatus.PROPOSED:
-                return "Only a proposed task can be approved."
-            if task.proposed_by == access.user.id:
-                return "Someone other than the proposer must approve it."
         case "record":
-            if task.status != TaskStatus.APPROVED:
-                return "Record the posting once the task is approved."
-            if task.proposed_by == access.user.id:
-                return "The proposer can't record the posting."
+            if task.status != TaskStatus.PROPOSED:
+                return "Only a proposed posting can be recorded."
         case "verify":
             if task.status != TaskStatus.RECORDED_UNVERIFIED:
                 return "Verify after the posting is recorded."
         case "cancel":
-            if task.status not in (TaskStatus.PROPOSED, TaskStatus.APPROVED):
+            if task.status != TaskStatus.PROPOSED:
                 return (
                     "A recorded posting can't be cancelled; verify it or correct it in QuickBooks."
                 )
     return None
 
 
-async def _outs(
-    session: AsyncSession, access: PodAccess, tasks: list[PodPostingTask]
-) -> list[TaskOut]:
+async def _outs(session: AsyncSession, tasks: list[PodPostingTask]) -> list[TaskOut]:
     if not tasks:
         return []
     cases = {
@@ -83,7 +72,6 @@ async def _outs(
         session,
         [
             *(t.proposed_by for t in tasks),
-            *(t.approved_by for t in tasks),
             *(t.recorded_by for t in tasks),
             *(t.verified_by for t in tasks),
         ],
@@ -101,8 +89,6 @@ async def _outs(
             instructions=t.instructions,
             note=t.note,
             proposed_by=people.get(t.proposed_by, DELETED),
-            approved_by=name_of(people, t.approved_by),
-            approved_at=t.approved_at,
             external_txn_id=t.external_txn_id,
             recorded_by=name_of(people, t.recorded_by),
             recorded_at=t.recorded_at,
@@ -111,38 +97,27 @@ async def _outs(
             verification_snapshot_id=t.verification_snapshot_id,
             verification=t.verification,
             created_at=t.created_at,
-            allowed_actions={a: _guard(t, access, a) for a in ACTIONS},
+            allowed_actions={a: _guard(t, a) for a in ACTIONS},
         )
         for t in tasks
     ]
 
 
-async def tasks_for_case(session: AsyncSession, access: PodAccess, case: PodCase) -> list[TaskOut]:
+async def tasks_for_case(session: AsyncSession, case: PodCase) -> list[TaskOut]:
     rows = await session.scalars(
         select(PodPostingTask)
         .where(PodPostingTask.case_id == case.id)
         .order_by(PodPostingTask.created_at)
     )
-    return await _outs(session, access, list(rows))
+    return await _outs(session, list(rows))
 
 
-async def list_tasks(
-    session: AsyncSession, access: PodAccess, status: TaskStatus | None
-) -> list[TaskOut]:
-    """The Finance Admin's queue. Posters see the tasks, not the whole case behind them."""
-    if not (access.is_poster or access.is_admin):
-        return []
-    query = (
-        select(PodPostingTask)
-        .join(PodCase, PodCase.id == PodPostingTask.case_id)
-        .order_by(PodPostingTask.updated_at.desc())
-        .limit(300)
-    )
-    if access.entity_ids is not None:
-        query = query.where(PodCase.entity_id.in_(access.entity_ids))
+async def list_tasks(session: AsyncSession, status: TaskStatus | None) -> list[TaskOut]:
+    """The manual QuickBooks queue, newest first."""
+    query = select(PodPostingTask).order_by(PodPostingTask.updated_at.desc()).limit(300)
     if status is not None:
         query = query.where(PodPostingTask.status == status)
-    return await _outs(session, access, list(await session.scalars(query)))
+    return await _outs(session, list(await session.scalars(query)))
 
 
 async def propose_task(
@@ -152,19 +127,17 @@ async def propose_task(
     body: TaskCreate,
     ctx: RequestContext,
 ) -> TaskOut:
-    case = await load_case(session, access, case_id, lock=True)
-    if CaseRole.OWNER not in roles_on(case, access):
-        raise TaskRefusedError("Only the case's preparer proposes posting tasks.")
+    case = await load_case(session, case_id, lock=True)
     task = await add_task(session, case, body, access.user.id)
     _event(session, ctx, access, case, task, f"proposed manual posting for {task.reference}")
     await session.commit()
-    return (await _outs(session, access, [task]))[0]
+    return (await _outs(session, [task]))[0]
 
 
 async def add_task(
     session: AsyncSession, case: PodCase, body: TaskCreate, proposed_by: uuid.UUID
 ) -> PodPostingTask:
-    """Queue a posting for the Finance Admin (caller checks who may, records and commits)."""
+    """Queue a posting for the Finance Admin (caller records and commits)."""
     if case.status != CaseStatus.APPROVED:
         raise TaskRefusedError("A posting task can only come from an approved case.")
     snapshot = await session.get(PodSnapshot, case.snapshot_id)
@@ -259,21 +232,16 @@ async def run_action(
         raise TaskNotFoundError
     case = await session.get(PodCase, task.case_id)
     assert case is not None  # noqa: S101
-    if not (access.is_poster and access.can_see_entity(case.entity_id)):
-        raise TaskNotFoundError
     if task.version != body.expected_version:
         raise StaleVersionError("This task was changed by someone else. Refresh and retry.")
     if case.status in LOCKED_STATUSES - {CaseStatus.COMPLETED}:
         raise TaskRefusedError(f"{case.reference} is {case.status.value}.")
-    reason = _guard(task, access, body.action)
+    reason = _guard(task, body.action)
     if reason is not None:
         raise TaskRefusedError(reason)
 
     now = utcnow()
-    if body.action == "approve":
-        task.status, task.approved_by, task.approved_at = TaskStatus.APPROVED, access.user.id, now
-        summary = f"approved manual posting for {task.reference}"
-    elif body.action == "record":
+    if body.action == "record":
         if not body.external_txn_id:
             raise TaskRefusedError("Enter the QuickBooks transaction ID of the posting.")
         task.status = TaskStatus.RECORDED_UNVERIFIED
@@ -283,7 +251,7 @@ async def run_action(
     elif body.action == "verify":
         if body.snapshot_id is None:
             raise TaskRefusedError("Choose the fresh snapshot that shows the posting.")
-        fresh = await snapshots.get_visible(session, access, body.snapshot_id)
+        fresh = await snapshots.load_snapshot(session, body.snapshot_id)
         problems = await _verification(session, task, case, fresh)
         if problems:
             raise TaskRefusedError(" ".join(problems))
@@ -310,4 +278,4 @@ async def run_action(
     task.version += 1
     _event(session, ctx, access, case, task, summary)
     await session.commit()
-    return (await _outs(session, access, [task]))[0]
+    return (await _outs(session, [task]))[0]

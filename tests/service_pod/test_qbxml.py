@@ -1,5 +1,7 @@
 from typing import Any
 
+from httpx import AsyncClient
+
 from src.app.entities.models import LegalEntity
 
 QBXML = """<?xml version="1.0"?>
@@ -43,38 +45,34 @@ async def _post(client: Any, entity: LegalEntity, xml: str) -> Any:
     )
 
 
-async def test_qbxml_import(ar_team: dict[str, Any], entity: LegalEntity) -> None:
-    r = await _post(ar_team["poster"], entity, QBXML.format(remaining=0))
+async def test_qbxml_import(pod: AsyncClient, entity: LegalEntity) -> None:
+    r = await _post(pod, entity, QBXML.format(remaining=0))
     assert r.status_code == 201, r.text
     snap = r.json()["snapshot"]
     assert snap["source_type"] == "qbxml"
     assert snap["company_name"] == "E-Solutions Inc"
     assert snap["coverage"] == ["customers", "invoices", "payments", "accounts"]
-    rows = await ar_team["poster"].get(
-        f"/api/v1/pod/snapshots/{snap['id']}/rows?collection=payments"
-    )
+    rows = await pod.get(f"/api/v1/pod/snapshots/{snap['id']}/rows?collection=payments")
     (payment,) = rows.json()["rows"]
     assert payment["reference"] == "WIRE-2901"
     assert payment["allocations"] == [{"invoice_id": "1A-1", "amount": "6000"}]
-    accounts = await ar_team["poster"].get(
-        f"/api/v1/pod/snapshots/{snap['id']}/rows?collection=accounts"
-    )
+    accounts = await pod.get(f"/api/v1/pod/snapshots/{snap['id']}/rows?collection=accounts")
     assert [a["name"] for a in accounts.json()["rows"]] == ["Consulting Revenue"]
 
 
 async def test_incomplete_or_unsafe_exports_are_refused(
-    ar_team: dict[str, Any], entity: LegalEntity
+    pod: AsyncClient, entity: LegalEntity
 ) -> None:
-    r = await _post(ar_team["poster"], entity, QBXML.format(remaining=12))
+    r = await _post(pod, entity, QBXML.format(remaining=12))
     assert r.status_code == 422
     assert "incomplete" in r.json()["detail"]["message"]
 
     evil = '<?xml version="1.0"?><!DOCTYPE x [<!ENTITY a "aaaa">]><QBXML/>'
-    r = await _post(ar_team["poster"], entity, evil)
+    r = await _post(pod, entity, evil)
     assert r.status_code == 422
 
     failed = QBXML.format(remaining=0).replace(
         '<InvoiceQueryRs statusCode="0">', '<InvoiceQueryRs statusCode="3100" statusMessage="bad">'
     )
-    r = await _post(ar_team["poster"], entity, failed)
+    r = await _post(pod, entity, failed)
     assert "Invoice query failed" in r.json()["detail"]["message"]

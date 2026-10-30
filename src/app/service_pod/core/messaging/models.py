@@ -29,7 +29,6 @@ class Audience(StrEnum):
 
 class MessageStatus(StrEnum):
     DRAFT = "draft"
-    APPROVED = "approved"
     SENDING = "sending"
     SENT = "sent"  # the provider accepted it (queued), not proof of inbox delivery
     SEND_FAILED = "send_failed"  # the provider refused it; nothing went out
@@ -68,7 +67,7 @@ class PodMessage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     artifact_ids: Mapped[list[str]] = mapped_column(JSONB, default=list)
     # Verified figures from the source that must appear unchanged in the body
     fact_block: Mapped[str | None] = mapped_column(Text)
-    # The reviewer's confirmed checks at approval (recipient, invoice mapping, tone)
+    # The checks confirmed when it was sent (recipient, invoice mapping, tone)
     approval_checks: Mapped[dict[str, bool] | None] = mapped_column(JSONB)
     # Replies: what the AI read (output, provenance, problems) and how that went
     extraction: Mapped[dict[str, Any] | None] = mapped_column(JSONB)

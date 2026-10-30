@@ -25,6 +25,7 @@ from src.app.service_pod.flows.ar_collections.service import (
     compose,
     facts,
     on_create,
+    stage,
     summary,
 )
 from src.app.service_pod.flows.ar_collections.spec import SPEC
@@ -38,6 +39,7 @@ register(
         facts=facts,
         compose=compose,
         extract_reply=extract_reply,
+        stage=stage,
         summary=summary,
     ),
     router,

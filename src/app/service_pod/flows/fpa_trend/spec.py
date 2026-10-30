@@ -1,5 +1,5 @@
 from src.app.service_pod.core.snapshots.contract import Collection
-from src.app.service_pod.core.workflows import Capacity, WorkflowKey, WorkflowSpec
+from src.app.service_pod.core.workflows import WorkflowKey, WorkflowSpec
 
 SPEC = WorkflowSpec(
     key=WorkflowKey.FPA_TREND,
@@ -9,11 +9,6 @@ SPEC = WorkflowSpec(
         "Month-by-month P&L trends reconciled to posted transactions, with cited "
         "drivers and Finance Head commentary."
     ),
-    labels={
-        Capacity.PREPARER: "FP&A Analyst",
-        Capacity.REVIEWER: "Finance Head",
-        Capacity.POSTER: "Finance Admin",
-    },
     required=frozenset(
         {
             Collection.ACCOUNTS,
@@ -21,8 +16,4 @@ SPEC = WorkflowSpec(
             Collection.TRANSACTIONS,
         }
     ),
-    visible=frozenset(
-        {Collection.ACCOUNTS, Collection.GL_LINES, Collection.TRANSACTIONS, Collection.INVOICES}
-    ),
-    final_gate=False,
 )

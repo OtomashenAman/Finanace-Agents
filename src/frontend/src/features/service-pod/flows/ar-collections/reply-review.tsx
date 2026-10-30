@@ -33,8 +33,8 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-/** Approve the requested document: the preparer uploads it, a reviewer approves it, and the
- *  matching review task then settles itself. */
+/** The requested document: upload it, approve it, and the matching review task then settles
+ *  itself. */
 function DocumentButton({ c, task }: { c: CaseDetail; task: ReviewTask }) {
   const upload = useUploadArtifact()
   const decide = useDecideArtifact()
@@ -42,7 +42,7 @@ function DocumentButton({ c, task }: { c: CaseDetail; task: ReviewTask }) {
   const invoice = task.requirement?.invoice ?? ""
   const label = ARTIFACT_KIND[kind] ?? kind
   const pending = c.artifacts.find((a) => a.kind === kind && a.status === "pending" && (!invoice || a.invoice_refs.includes(invoice)))
-  if (c.my_roles.includes("reviewer") && pending) {
+  if (pending) {
     return (
       <Button
         size="sm"
@@ -53,27 +53,20 @@ function DocumentButton({ c, task }: { c: CaseDetail; task: ReviewTask }) {
       </Button>
     )
   }
-  if (c.my_roles.includes("owner")) {
-    return (
-      <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-secondary">
-        <FileCheck2 className="size-4" aria-hidden /> Upload {label.toLowerCase()}
-        {invoice && ` for ${invoice}`}
-        <input
-          type="file"
-          className="sr-only"
-          onChange={(e) => {
-            const file = e.target.files?.[0]
-            if (file) void attempt(() => upload.mutateAsync({ caseId: c.id, file, kind, invoiceRefs: invoice }), "Uploaded: a reviewer approves it.")
-            e.target.value = ""
-          }}
-        />
-      </label>
-    )
-  }
   return (
-    <span className="text-xs text-muted-foreground" title="The preparer uploads it, a reviewer approves it">
-      {pending ? `${label} waiting for a reviewer` : `${label} not uploaded yet`}
-    </span>
+    <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-secondary">
+      <FileCheck2 className="size-4" aria-hidden /> Upload {label.toLowerCase()}
+      {invoice && ` for ${invoice}`}
+      <input
+        type="file"
+        className="sr-only"
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          if (file) void attempt(() => upload.mutateAsync({ caseId: c.id, file, kind, invoiceRefs: invoice }), "Uploaded: approve it to attach it.")
+          e.target.value = ""
+        }}
+      />
+    </label>
   )
 }
 
@@ -100,7 +93,7 @@ function AskForDate({ c, tasks }: { c: CaseDetail; tasks: ReviewTask[] }) {
             caseId: c.id,
             draft: { audience: "customer", purpose: "follow_up", to_email: d.to_email ?? "", to_name: d.to_name, subject: d.subject, body, artifact_ids: [] },
           })
-        }, "Follow-up drafted below: a reviewer approves it before it's sent.")
+        }, "Follow-up drafted below: check it before it's sent.")
       }
     >
       <CalendarClock /> Ask for date
@@ -120,12 +113,12 @@ function Escalate({ c }: { c: CaseDetail }) {
     )
   return (
     <span className="flex w-full gap-2">
-      <Input className="h-9" placeholder="What the reviewer must decide" value={why} onChange={(e) => setWhy(e.target.value)} />
+      <Input className="h-9" placeholder="What needs settling" value={why} onChange={(e) => setWhy(e.target.value)} />
       <Button
         size="sm"
         disabled={pending || why.trim().length < 3}
         onClick={() =>
-          void run("add_review_task", { kind: "ambiguity", subject: "Escalated", detail: why, blocking: true }, "Escalated to the reviewer.").then(
+          void run("add_review_task", { kind: "ambiguity", subject: "Escalated", detail: why, blocking: true }, "Escalated: it blocks approval until settled.").then(
             (r) => r && setOpen(false),
           )
         }
@@ -148,8 +141,7 @@ export function ArReplyReview({ c, m }: { c: CaseDetail; m: Message }) {
   const unsure = reading.tranches.some((t) => t.confidence < MIN_CONFIDENCE) || open.some((t) => t.kind === "ambiguity")
   // A later reply can date a promise this one made, so match on the case's commitments
   const promises = c.commitments.filter((x) => x.status !== "rejected")
-  const caseOpen = !["completed", "rejected", "cancelled"].includes(c.status)
-  const canAct = caseOpen && c.my_roles.length > 0
+  const canAct = !["completed", "cancelled"].includes(c.status)
 
   // Validation is arithmetic on the case's own figures, never the model's
   const validation = (state.invoices ?? [])
@@ -239,7 +231,7 @@ export function ArReplyReview({ c, m }: { c: CaseDetail; m: Message }) {
           {docTasks.map((t) => (
             <DocumentButton key={t.id} c={c} task={t} />
           ))}
-          {dateTasks.length > 0 && c.my_roles.includes("owner") && <AskForDate c={c} tasks={dateTasks} />}
+          {dateTasks.length > 0 && <AskForDate c={c} tasks={dateTasks} />}
           <Escalate c={c} />
         </div>
       )}
