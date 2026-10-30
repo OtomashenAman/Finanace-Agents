@@ -61,6 +61,7 @@ function NarrativeBody({ narrative, fields, documents }: NarrativeCardProps & { 
     return documents[index]?.filename ?? id
   }
   const seconds = narrative.latency_ms !== null ? ` · ${(narrative.latency_ms / 1000).toFixed(1)}s` : ""
+  const evidence = output.evidence_ids ?? []
 
   return (
     <div className="mt-3 space-y-4">
@@ -78,6 +79,14 @@ function NarrativeBody({ narrative, fields, documents }: NarrativeCardProps & { 
         </div>
       )}
       <p className="text-[15px] leading-relaxed">{output.summary}</p>
+      {output.suggested_action && (
+        <div>
+          <h4 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+            Suggested next step · for the reviewer to decide
+          </h4>
+          <p className="mt-1.5 text-sm">{output.suggested_action}</p>
+        </div>
+      )}
       <List title="Key points" items={output.key_points} />
       <List title="Missing evidence" items={output.missing_evidence} />
       <List title="Ambiguities" items={output.ambiguities} />
@@ -91,7 +100,7 @@ function NarrativeBody({ narrative, fields, documents }: NarrativeCardProps & { 
           </p>
         </div>
       )}
-      {(output.cited_fields.length > 0 || output.cited_documents.length > 0) && (
+      {(output.cited_fields.length > 0 || output.cited_documents.length > 0 || evidence.length > 0) && (
         <div className="flex flex-wrap gap-1.5">
           {output.cited_fields.map((f) => (
             <span key={f} className="rounded bg-secondary px-2 py-0.5 text-xs text-brand-navy">
@@ -103,6 +112,11 @@ function NarrativeBody({ narrative, fields, documents }: NarrativeCardProps & { 
               {documentName(d)}
             </span>
           ))}
+          {evidence.map((id) => (
+            <span key={id} className="rounded bg-emerald-50 px-2 py-0.5 text-xs text-emerald-800">
+              {narrative.source_records[id] ?? id}
+            </span>
+          ))}
         </div>
       )}
       <p className="text-xs text-muted-foreground">
@@ -110,8 +124,14 @@ function NarrativeBody({ narrative, fields, documents }: NarrativeCardProps & { 
         <span className="whitespace-nowrap">
           {" "}
           ({narrative.prompt_version}
+          {narrative.policy_version ? ` · rules ${narrative.policy_version}` : ""}
           {seconds})
         </span>
+        {narrative.prompt_hash && (
+          <span className="block font-mono" title={narrative.prompt_hash}>
+            Prompt hash {narrative.prompt_hash.slice(0, 12)}…
+          </span>
+        )}
       </p>
     </div>
   )

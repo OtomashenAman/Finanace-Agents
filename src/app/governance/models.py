@@ -22,7 +22,7 @@ class OrgSettings(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(primary_key=True, default=SETTINGS_ROW)
     # Maker-checker: off means nobody, not even a Finance Admin, approves their own run
     allow_admin_self_approval: Mapped[bool] = mapped_column(
-        default=True, server_default=text("true")
+        default=False, server_default=text("false")
     )
     updated_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")

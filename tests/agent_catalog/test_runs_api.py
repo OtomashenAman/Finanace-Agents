@@ -348,13 +348,15 @@ async def test_admin_can_view_prepare_and_review_without_assignment(
     assert (await c.get(f"{RUNS}/{users_run['id']}")).json()["permissions"]["can_review"] is True
 
     run = await act(c, await analyzed_run(c, invoice_number="INV-9001"), "submit")
-    assert run["permissions"]["can_review"] is True
+    assert run["permissions"]["can_review"] is False  # maker-checker: not their own run
 
 
-async def test_admin_may_approve_own_run_and_it_is_audited(
+async def test_admin_may_approve_own_run_when_allowed_and_it_is_audited(
     admin: User, signed_in_client: ClientFactory, db: AsyncSession, fake_llm: FakeLLM
 ) -> None:
     c = await signed_in_client(admin)
+    r = await c.put("/api/v1/admin/governance/settings", json={"allow_admin_self_approval": True})
+    assert r.status_code == 200
     run = await act(c, await analyzed_run(c), "submit")
     run = await act(c, run, "reviews", decision="approved", comment="Checked myself.")
     assert run["status"] == "approved"

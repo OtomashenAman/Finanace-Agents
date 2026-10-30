@@ -17,6 +17,8 @@ class SoxControlsRun(AgentRunDetail, Base):
     # --- input ---
     control_id: Mapped[str | None] = mapped_column(String(100), index=True)
     control_owner: Mapped[str | None] = mapped_column(String(200))
+    test_period: Mapped[str | None] = mapped_column(String(20))
+    population_threshold: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
     population_count: Mapped[int | None]
     items_tested: Mapped[int | None]
     exceptions_found: Mapped[int | None]

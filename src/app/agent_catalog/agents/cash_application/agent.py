@@ -41,9 +41,9 @@ def _mentions(text: str, number: str) -> bool:
 async def candidate_invoice(payment: Payment, data: FinanceData) -> tuple[Invoice | None, bool]:
     """The invoice this payment is most likely for, and whether that is verified.
 
-    In order: the invoice it is applied to in the source (verified); the one open invoice of
-    the customer its reference or memo names (verified); the one open invoice of the customer
-    for exactly this amount (not verified). Otherwise none: the preparer picks.
+    In order: the invoice it is applied to in the source; the one open invoice of the customer
+    its reference or memo names. Never on amount alone (an invoice for the same amount is not
+    evidence the payment is for it): otherwise none, and the preparer picks.
     """
     if payment.invoice_number:
         linked = await data.find(Invoice, RecordType.INVOICE, payment.invoice_number)
@@ -55,9 +55,6 @@ async def candidate_invoice(payment: Payment, data: FinanceData) -> tuple[Invoic
     named = [i for i in open_invoices if _mentions(text, i.doc_number)]
     if len(named) == 1:
         return named[0], True
-    same_amount = [i for i in open_invoices if i.open_amount == payment.total]
-    if len(same_amount) == 1:
-        return same_amount[0], False
     return None, False
 
 
@@ -83,6 +80,7 @@ class CashApplicationAgent(BaseAgent):
     narrative_guidance = prompt.GUIDANCE
     prompt_version = prompt.PROMPT_VERSION
     source_record_type = RecordType.PAYMENT
+    lookup_field = "payment_reference"
     policy_schema = CashApplicationPolicy
     approval_amount_label = "Payment amount"
 

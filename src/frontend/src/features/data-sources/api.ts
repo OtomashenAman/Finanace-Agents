@@ -14,6 +14,10 @@ export type RecordType =
   | "account_balance"
   | "subledger_total"
   | "period_result"
+  | "bill_payment"
+  | "credit_memo"
+  | "vendor_credit"
+  | "journal_line"
 export type IntegrationEnvironment = "sandbox" | "production"
 
 export interface DataSource {
@@ -21,6 +25,8 @@ export interface DataSource {
   kind: SourceKind
   name: string
   status: SourceStatus
+  /** The legal entity whose books these are (one QuickBooks company per entity) */
+  entity_id: string | null
   /** QuickBooks: the owner's own Intuit app (the secret is never returned) */
   client_id: string | null
   environment: IntegrationEnvironment | null
@@ -166,6 +172,9 @@ export const dataSourcesApi = {
   sync: (id: string) => apiRequest<DataSource>(`${source(id)}/sync`, { method: "POST" }),
   rename: ({ id, name }: { id: string; name: string }) =>
     apiRequest<DataSource>(source(id), { method: "PATCH", json: { name } }),
+  /** Link to the legal entity whose books it holds (null unlinks) */
+  setEntity: ({ id, entityId }: { id: string; entityId: string | null }) =>
+    apiRequest<DataSource>(source(id), { method: "PATCH", json: { entity_id: entityId } }),
   remove: (id: string) => apiRequest<void>(source(id), { method: "DELETE" }),
   records: (id: string, type: string, search: string) =>
     apiRequest<FinanceRecord[]>(

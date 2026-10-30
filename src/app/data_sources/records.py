@@ -4,7 +4,7 @@ these shapes, so agents read the same data whichever system it came from."""
 from datetime import date
 from decimal import Decimal
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     AfterValidator,
@@ -58,6 +58,10 @@ class RecordType(StrEnum):
     ACCOUNT_BALANCE = "account_balance"
     SUBLEDGER_TOTAL = "subledger_total"
     PERIOD_RESULT = "period_result"
+    BILL_PAYMENT = "bill_payment"
+    CREDIT_MEMO = "credit_memo"
+    VENDOR_CREDIT = "vendor_credit"
+    JOURNAL_LINE = "journal_line"
 
 
 class Record(BaseModel):
@@ -83,6 +87,22 @@ class Record(BaseModel):
         return None
 
 
+class DocLine(BaseModel):
+    """One line of a bill or purchase order: what was bought, how many, at what price."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    item: str = Field(min_length=1, max_length=200)  # the item, else the account or description
+    quantity: Decimal | None = None
+    unit_price: Decimal | None = None  # not rounded: prices can have more than two decimals
+    amount: Money
+    account: str | None = Field(default=None, max_length=200)  # GL account the line posts to
+
+
+def _lines() -> Any:
+    return Field(default_factory=list, max_length=500, json_schema_extra={"synced_only": True})
+
+
 class Vendor(Record):
     name: str = Field(min_length=1, max_length=200)
     email: str | None = Field(default=None, max_length=320)
@@ -106,6 +126,7 @@ class Bill(Record):
     po_number: str | None = Field(default=None, max_length=100)
     account: str | None = Field(default=None, max_length=100)
     balance: Money | None = None  # still to pay; None when the source doesn't say
+    lines: list[DocLine] = _lines()
 
     @property
     def reference(self) -> str:
@@ -136,6 +157,7 @@ class PurchaseOrder(Record):
     received_amount: Money | None = None
     status: str | None = Field(default=None, max_length=50)
     po_date: date | None = None
+    lines: list[DocLine] = _lines()
 
     @property
     def reference(self) -> str:
@@ -360,6 +382,124 @@ class PeriodResult(Record):
         return month_end(self.period)
 
 
+class BillPayment(Record):
+    """A payment made to a supplier (QuickBooks: BillPayment)."""
+
+    payment_number: str = Field(min_length=1, max_length=100)  # check / reference number
+    vendor_name: str = Field(min_length=1, max_length=200)
+    total: Money
+    payment_date: date | None = None
+    payment_type: str | None = Field(default=None, max_length=50)  # Check, CreditCard
+    bills_paid: str | None = Field(default=None, max_length=2000)  # bill numbers, comma-separated
+    memo: str | None = Field(default=None, max_length=4000)
+
+    @property
+    def reference(self) -> str:
+        return self.payment_number
+
+    @property
+    def counterparty(self) -> str | None:
+        return self.vendor_name
+
+    @property
+    def amount(self) -> Decimal | None:
+        return self.total
+
+    @property
+    def txn_date(self) -> date | None:
+        return self.payment_date
+
+    def pays(self, bill_number: str) -> bool:
+        wanted = bill_number.strip().lower()
+        return any(b.strip().lower() == wanted for b in (self.bills_paid or "").split(","))
+
+
+class CreditMemo(Record):
+    """A credit given to a customer; what's left of it can still be applied."""
+
+    doc_number: str = Field(min_length=1, max_length=100)
+    customer_name: str = Field(min_length=1, max_length=200)
+    total: Money
+    remaining_credit: Money | None = None  # None when the source doesn't say
+    credit_date: date | None = None
+
+    @property
+    def reference(self) -> str:
+        return self.doc_number
+
+    @property
+    def counterparty(self) -> str | None:
+        return self.customer_name
+
+    @property
+    def amount(self) -> Decimal | None:
+        return self.total
+
+    @property
+    def txn_date(self) -> date | None:
+        return self.credit_date
+
+    @property
+    def open_amount(self) -> Decimal:
+        return self.remaining_credit if self.remaining_credit is not None else self.total
+
+
+class VendorCredit(Record):
+    """A credit from a supplier (a refund or credit note) not yet used against a bill."""
+
+    doc_number: str = Field(min_length=1, max_length=100)
+    vendor_name: str = Field(min_length=1, max_length=200)
+    total: Money
+    remaining_credit: Money | None = None
+    credit_date: date | None = None
+
+    @property
+    def reference(self) -> str:
+        return self.doc_number
+
+    @property
+    def counterparty(self) -> str | None:
+        return self.vendor_name
+
+    @property
+    def amount(self) -> Decimal | None:
+        return self.total
+
+    @property
+    def txn_date(self) -> date | None:
+        return self.credit_date
+
+    @property
+    def open_amount(self) -> Decimal:
+        return self.remaining_credit if self.remaining_credit is not None else self.total
+
+
+class JournalLine(Record):
+    """One line of a manual journal entry: debits positive, credits negative."""
+
+    entry_number: str = Field(min_length=1, max_length=100)
+    account: str = Field(min_length=1, max_length=200)
+    amount_signed: Money
+    entry_date: date | None = None
+    memo: str | None = Field(default=None, max_length=4000)
+
+    @property
+    def reference(self) -> str:
+        return self.entry_number
+
+    @property
+    def counterparty(self) -> str | None:
+        return self.account  # records(counterparty=account): an account's manual postings
+
+    @property
+    def amount(self) -> Decimal | None:
+        return self.amount_signed
+
+    @property
+    def txn_date(self) -> date | None:
+        return self.entry_date
+
+
 RECORD_MODELS: dict[RecordType, type[Record]] = {
     RecordType.VENDOR: Vendor,
     RecordType.BILL: Bill,
@@ -372,6 +512,10 @@ RECORD_MODELS: dict[RecordType, type[Record]] = {
     RecordType.ACCOUNT_BALANCE: AccountBalance,
     RecordType.SUBLEDGER_TOTAL: SubledgerTotal,
     RecordType.PERIOD_RESULT: PeriodResult,
+    RecordType.BILL_PAYMENT: BillPayment,
+    RecordType.CREDIT_MEMO: CreditMemo,
+    RecordType.VENDOR_CREDIT: VendorCredit,
+    RecordType.JOURNAL_LINE: JournalLine,
 }
 
 RECORD_LABELS: dict[RecordType, str] = {
@@ -386,4 +530,8 @@ RECORD_LABELS: dict[RecordType, str] = {
     RecordType.ACCOUNT_BALANCE: "Account balances by month (trial balance)",
     RecordType.SUBLEDGER_TOTAL: "AR / AP subledger totals by month",
     RecordType.PERIOD_RESULT: "Profit and loss by month (actual or budget)",
+    RecordType.BILL_PAYMENT: "Supplier payments",
+    RecordType.CREDIT_MEMO: "Customer credit memos",
+    RecordType.VENDOR_CREDIT: "Supplier credits",
+    RecordType.JOURNAL_LINE: "Journal entry lines",
 }

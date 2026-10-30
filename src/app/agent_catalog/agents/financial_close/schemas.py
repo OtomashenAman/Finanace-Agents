@@ -1,4 +1,7 @@
 from decimal import Decimal
+from typing import Literal
+
+from pydantic import Field
 
 from src.app.agent_catalog.agents.fields import (
     AgentInput,
@@ -14,6 +17,19 @@ class FinancialCloseInput(AgentInput):
     gl_account: str = text_field("GL account", max_length=100)
     close_period: str = text_field(
         "Close period", max_length=7, pattern=r"^\d{4}-(0[1-9]|1[0-2])$", help="e.g. 2026-09"
+    )
+    accounting_basis: Literal["Accrual", "Cash"] | None = Field(
+        None,
+        title="Accounting basis",
+        description="Both balances must be on the same basis",
+        json_schema_extra={"ui": "choice", "options": ["Accrual", "Cash"]},
+    )
+    currency: str | None = text_field(
+        "Currency",
+        required=False,
+        max_length=3,
+        pattern=r"^[A-Za-z]{3}$",
+        help="Both balances in this currency, e.g. USD",
     )
     gl_balance: Decimal = signed_money_field("GL balance")
     subledger_balance: Decimal = signed_money_field("Subledger balance")

@@ -32,6 +32,7 @@ from src.app.data_sources.access import to_record
 from src.app.data_sources.exceptions import (
     AppCredentialsError,
     DataSourceNotFoundError,
+    EntityAlreadyLinkedError,
     RecordNotFoundError,
     SourceNotSyncableError,
     SyncFailedError,
@@ -60,10 +61,12 @@ from src.app.data_sources.schemas import (
     SheetChoice,
     SheetPreview,
     SourceOwner,
+    SourceUpdate,
     UploadPreview,
     UploadResult,
     WorkbookPreview,
 )
+from src.app.entities import service as entities
 from src.app.jobs import queue as jobs
 from src.app.jobs.queue import JobContext
 
@@ -145,11 +148,39 @@ async def health_summary(session: AsyncSession) -> str:
     return " · ".join(parts)
 
 
-async def rename_source(
-    session: AsyncSession, user: User, source_id: uuid.UUID, name: str
+async def update_source(
+    session: AsyncSession, user: User, source_id: uuid.UUID, body: SourceUpdate, ctx: RequestContext
 ) -> DataSourceOut:
+    """Rename, or link to the legal entity whose books it holds (one QuickBooks company each)."""
     source = await _owned(session, user, source_id, lock=True)
-    source.name = name.strip()
+    if body.name is not None:
+        source.name = body.name.strip()
+    if "entity_id" in body.model_fields_set and body.entity_id != source.entity_id:
+        if body.entity_id is not None:
+            entity = await entities.visible_entity(session, user, body.entity_id)
+            if source.kind == SourceKind.QUICKBOOKS:
+                taken = await session.scalar(
+                    select(DataSource.name).where(
+                        DataSource.owner_id == user.id,
+                        DataSource.kind == SourceKind.QUICKBOOKS,
+                        DataSource.entity_id == entity.id,
+                        DataSource.id != source.id,
+                    )
+                )
+                if taken is not None:
+                    raise EntityAlreadyLinkedError(
+                        f"{entity.code} already has its QuickBooks company ({taken}): "
+                        "unlink it first."
+                    )
+        source.entity_id = body.entity_id
+        record_event(
+            session,
+            "data_source.entity_linked",
+            ctx,
+            actor_id=user.id,
+            source_id=str(source.id),
+            entity_id=str(body.entity_id) if body.entity_id else None,
+        )
     await session.commit()
     return DataSourceOut.model_validate(source)
 

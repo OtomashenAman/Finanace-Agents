@@ -10,6 +10,7 @@ type Row = Record<string, unknown>
 function display(value: unknown): string {
   if (value === null || value === undefined || value === "") return "—"
   if (typeof value === "boolean") return value ? "Yes" : "No"
+  if (Array.isArray(value)) return `${value.length} line${value.length === 1 ? "" : "s"}`
   return String(value)
 }
 
@@ -22,12 +23,15 @@ function label(name: string): string {
 }
 
 function RecordCard({ title, record }: { title: string; record: Row }) {
+  const entries = Object.entries(record).filter(([name]) => name !== "external_id")
+  // Nested lists (e.g. a bill's item lines) get their own table under the fields
+  const nested = entries.filter(([, value]) => Array.isArray(value) && value.length > 0)
   return (
     <div className="rounded-md border bg-background p-3">
       <p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">{title}</p>
       <dl className="mt-2 space-y-1 text-sm">
-        {Object.entries(record)
-          .filter(([name]) => name !== "external_id")
+        {entries
+          .filter(([, value]) => !Array.isArray(value))
           .map(([name, value]) => (
             <div key={name} className="flex justify-between gap-3">
               <dt className="text-muted-foreground">{label(name)}</dt>
@@ -35,6 +39,11 @@ function RecordCard({ title, record }: { title: string; record: Row }) {
             </div>
           ))}
       </dl>
+      {nested.map(([name, value]) => (
+        <div key={name} className="mt-3">
+          <RecordTable title={label(name)} rows={value as Row[]} />
+        </div>
+      ))}
     </div>
   )
 }

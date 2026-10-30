@@ -34,7 +34,7 @@ def test_system_prompt_puts_shared_rules_before_the_agent_guidance() -> None:
 
 
 def test_prompt_version_combines_system_and_agent() -> None:
-    assert prompts.prompt_version("sox_controls/v3") == "narrative/v1+sox_controls/v3"
+    assert prompts.prompt_version("sox_controls/v3") == "narrative/v2+sox_controls/v3"
     # Fits RunNarrative.prompt_version (String(50)) for every agent
     assert all(len(prompts.prompt_version(a.prompt_version)) <= 50 for a in WORKSPACE_AGENTS)
 
@@ -76,9 +76,12 @@ async def test_narrative_records_the_combined_prompt_version(
     await assign(db, preparer, AgentCapacity.PREPARER)
     run = await analyzed_run(await signed_in_client(preparer))
 
-    assert run["narrative"]["prompt_version"] == "narrative/v1+ap_invoice/v1"
+    assert run["narrative"]["prompt_version"] == "narrative/v2+ap_invoice/v1"
     stored = await db.scalar(select(RunNarrative.prompt_version))
-    assert stored == "narrative/v1+ap_invoice/v1"
+    assert stored == "narrative/v2+ap_invoice/v1"
+    # Lineage: exactly what was sent, and the rules version it explains
+    assert len(run["narrative"]["prompt_hash"]) == 64
+    assert run["narrative"]["policy_version"] == run["policy_version"]
     system, _ = fake_llm.calls[0]
     assert system == prompts.system_prompt(ApInvoiceAgent.name, ApInvoiceAgent.narrative_guidance)
     assert "What the AP approver should verify" in system

@@ -120,6 +120,14 @@ _SYNONYMS: dict[str, tuple[str, ...]] = {
     "cogs": ("cogs", "costofsales", "costofgoodssold"),
     "operating_expenses": ("operatingexpenses", "opex", "expenses", "totalexpenses"),
     "operating_profit": ("operatingprofit", "operatingincome", "ebit", "netoperatingincome"),
+    # supplier payments, credits and journal lines
+    "payment_number": ("paymentnumber", "checkno", "checknumber", "reference", "paymentref"),
+    "bills_paid": ("billspaid", "bills", "appliedto", "billnumbers"),
+    "remaining_credit": ("remaining", "remainingcredit", "unapplied", "balance", "openamount"),
+    "credit_date": ("date", "creditdate", "txndate"),
+    "entry_number": ("entrynumber", "journalnumber", "journalno", "jeno", "docnumber"),
+    "amount_signed": ("amount", "signedamount", "net", "debitcredit"),
+    "entry_date": ("date", "entrydate", "postingdate", "txndate"),
 }
 
 _DATE_FORMATS = ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d-%b-%Y", "%d %b %Y", "%Y/%m/%d")
@@ -155,6 +163,10 @@ _SHEET_NAMES: dict[RecordType, tuple[str, ...]] = {
     RecordType.ACCOUNT_BALANCE: ("accountbalances", "trialbalance", "balances"),
     RecordType.SUBLEDGER_TOTAL: ("subledgertotals", "subledger", "agingtotals"),
     RecordType.PERIOD_RESULT: ("profitandloss", "pl", "pnl", "incomestatement"),
+    RecordType.BILL_PAYMENT: ("billpayments", "supplierpayments", "vendorpayments", "appayments"),
+    RecordType.CREDIT_MEMO: ("creditmemos", "customercredits", "creditnotes"),
+    RecordType.VENDOR_CREDIT: ("vendorcredits", "suppliercredits", "debitnotes"),
+    RecordType.JOURNAL_LINE: ("journalentries", "journals", "journallines", "manualjournals"),
 }
 
 
@@ -239,6 +251,10 @@ def fields_for(record_type: RecordType) -> dict[str, bool]:
     return {
         name: info.is_required() and name != "external_id"
         for name, info in model.model_fields.items()
+        # Nested data (e.g. a bill's lines) isn't a column: only a sync fills it
+        if not (
+            isinstance(info.json_schema_extra, dict) and info.json_schema_extra.get("synced_only")
+        )
     }
 
 

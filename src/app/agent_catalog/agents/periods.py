@@ -32,6 +32,32 @@ def same_period_last_year(period: str) -> str | None:
     return f"{int(text[:4]) - 1:04d}{text[4:].upper()}"
 
 
+def previous_period(period: str) -> str | None:
+    """The period just before: 2026-09 -> 2026-08, 2026-Q1 -> 2025-Q4, 2026 -> 2025."""
+    text = period.strip()
+    if match := _MONTH.match(text):
+        year, month = int(match[1]), int(match[2])
+        return f"{year - 1:04d}-12" if month == 1 else f"{year:04d}-{month - 1:02d}"
+    if match := _QUARTER.match(text):
+        year, quarter = int(match[1]), int(match[2])
+        return f"{year - 1:04d}-Q4" if quarter == 1 else f"{year:04d}-Q{quarter - 1}"
+    if match := _YEAR.match(text):
+        return f"{int(match[1]) - 1:04d}"
+    return None
+
+
+def comparison_basis(period: str, compared_with: str | None) -> str | None:
+    """How `compared_with` relates to `period`: "year on year", "period on period" or None."""
+    if not compared_with:
+        return None
+    other = compared_with.strip().upper()
+    if other == (same_period_last_year(period) or "").upper():
+        return "year on year"
+    if other == (previous_period(period) or "").upper():
+        return "period on period"
+    return None
+
+
 def period_end(period: str) -> date | None:
     """The last day of a month, quarter or year."""
     months = months_of(period)

@@ -103,6 +103,7 @@ async def draft_narrative(session: AsyncSession, payload: dict[str, Any], ctx: J
         )
     )
     entity = await session.get(LegalEntity, run.entity_id) if run.entity_id else None
+    snapshot = await session.get(RunSourceSnapshot, run.id)
 
     narrative = await narrative_service.generate(
         session,
@@ -113,6 +114,7 @@ async def draft_narrative(session: AsyncSession, payload: dict[str, Any], ctx: J
         documents,
         ctx.llm,
         entity.name if entity else None,
+        snapshot,
     )
     if narrative.status == NarrativeStatus.FAILED:
         # Keep the failed call on record (AI monitoring), then retry; after the last attempt

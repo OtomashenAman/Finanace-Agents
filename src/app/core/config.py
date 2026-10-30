@@ -37,9 +37,12 @@ class Settings(BaseSettings):
     review_sla_hours: int = 24
 
     # LLM (pluggable provider; "none" disables narratives but runs still work)
-    llm_provider: Literal["azure_openai", "none"] = "none"
+    llm_provider: Literal["anthropic", "azure_openai", "none"] = "none"
     llm_timeout_seconds: float = 60
     llm_max_output_tokens: int = 1500
+    anthropic_api_key: SecretStr | None = None
+    anthropic_model: str = "claude-opus-5-5"
+    anthropic_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
     azure_openai_api_key: SecretStr | None = None
     azure_openai_endpoint: str | None = None
     azure_openai_api_version: str = "2025-01-01-preview"
@@ -57,6 +60,11 @@ class Settings(BaseSettings):
     data_encryption_key: SecretStr | None = None
     data_sync_timeout_seconds: float = 30
     upload_max_rows: int = 20_000
+    # QuickBooks is read-only unless this is on: approved runs may then note or create the bill
+    # there (never automatically, always asked for by the preparer)
+    quickbooks_write_back: bool = False
+    # Basis every QuickBooks report is read on (trial balance, P&L); always sent explicitly
+    quickbooks_accounting_method: Literal["Accrual", "Cash"] = "Accrual"
 
     # Background jobs: "queue" = a worker process runs them (python -m src.app.cli.worker);
     # "inline" = run inside the request that queued them (tests, single-process setups)
@@ -127,6 +135,7 @@ class Settings(BaseSettings):
         "data_encryption_key",
         "metrics_token",
         "metrics_dir",
+        "anthropic_api_key",
         "brevo_api_key",
         "email_sender",
         "ms_tenant_id",
@@ -173,6 +182,8 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _check_llm_config(self) -> Self:
+        if self.llm_provider == "anthropic" and not self.anthropic_api_key:
+            raise ValueError("LLM_PROVIDER=anthropic requires ANTHROPIC_API_KEY")
         if self.llm_provider == "azure_openai":
             missing = [
                 name

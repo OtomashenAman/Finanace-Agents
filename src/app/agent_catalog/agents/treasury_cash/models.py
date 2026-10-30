@@ -21,6 +21,8 @@ class TreasuryCashRun(AgentRunDetail, Base):
     expected_outflows: Mapped[Decimal | None] = mapped_column(MONEY)
     minimum_liquidity_buffer: Mapped[Decimal | None] = mapped_column(MONEY)
     forecast_horizon_days: Mapped[int | None]
+    lowest_projected_cash: Mapped[Decimal | None] = mapped_column(MONEY)
+    lowest_cash_date: Mapped[str | None] = mapped_column(String(10))
     permitted_funding_options: Mapped[str | None] = mapped_column(Text)
 
     # --- computed by the engine ---

@@ -16,6 +16,12 @@ class RevenueRecognitionInput(AgentInput):
     contract_id: str = text_field("Contract ID", max_length=100, help="e.g. CTR-2026-091")
     contract_total: Decimal = money_field("Contract total", gt=Decimal(0))
     service_term_months: int = number_field("Service term (months)", ge=1, le=600)
+    months_delivered: int | None = number_field(
+        "Months delivered to date",
+        required=False,
+        le=600,
+        help="Service months already provided: splits earned from deferred revenue",
+    )
     performance_obligations: str = textarea_field(
         "Performance obligations",
         required=True,

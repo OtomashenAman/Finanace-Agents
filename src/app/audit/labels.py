@@ -98,6 +98,9 @@ _TEXT: dict[str, Describe] = {
     "run.created": lambda d, s: f"Created {d.get('run')}",
     "run.source_linked": lambda d, s: f"Prefilled {d.get('run')} from a data source",
     "run.source_unlinked": lambda d, s: f"Unlinked {d.get('run')} from its data source",
+    "run.autofilled": lambda d, s: (
+        f"Completed {', '.join(d.get('fields') or [])} on {d.get('run')} from your data"
+    ),
     "run.document_added": lambda d, s: f"Attached {d.get('filename')} to {d.get('run')}",
     "run.document_removed": lambda d, s: f"Removed {d.get('filename')} from {d.get('run')}",
     "run.validation_failed": lambda d, s: f"Validation failed for {d.get('run')}",
@@ -138,6 +141,11 @@ _TEXT: dict[str, Describe] = {
         f"Uploaded {d.get('filename')} ({d.get('imported')} {d.get('record_type', '')} records)"
     ),
     "data_source.deleted": lambda d, s: f"Removed data source {d.get('name')}",
+    "data_source.entity_linked": lambda d, s: (
+        "Linked a data source to a legal entity"
+        if d.get("entity_id")
+        else "Unlinked a data source from its legal entity"
+    ),
     "integration.quickbooks_updated": lambda d, s: "Updated the shared QuickBooks app",
     "agent.activated": lambda d, s: f"Enabled agent {d.get('agent_key')}",
     "agent.deactivated": lambda d, s: f"Disabled agent {d.get('agent_key')}",

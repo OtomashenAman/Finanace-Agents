@@ -24,11 +24,18 @@ class NarrativeOutput(BaseModel):
     cited_documents: list[str] = Field(description="Document ids (e.g. D1) relied on")
     missing_evidence: list[str] = Field(description="Evidence a reviewer needs but lacks")
     ambiguities: list[str] = Field(description="Conflicts or unclear points")
+    evidence_ids: list[str] = Field(description="Source record ids (e.g. S1) relied on")
+    suggested_action: str = Field(
+        description="One next step for the reviewer; never an approval, posting or payment"
+    )
 
 
 class NarrativeResult(NarrativeOutput):
     """A stored narrative: the output plus the draft, for agents that ask for one."""
 
+    # Narratives stored before narrative/v2 have neither
+    evidence_ids: list[str] = []
+    suggested_action: str = ""
     # e.g. a payment reminder email; only for agents with BaseAgent.draft_message, never sent
     draft_message: str | None = None
 
@@ -103,13 +110,17 @@ class NarrativeOut(BaseModel):
     provider: str
     model: str
     prompt_version: str
+    prompt_hash: str | None = None
+    policy_version: str | None = None
+    # Evidence ids the model may cite (S1...) -> "<record type> <id in the source>"
+    source_records: dict[str, str] = {}
     output: NarrativeResult | None
     guard_warnings: list[str]
     error: str | None
     input_tokens: int | None
     output_tokens: int | None
     latency_ms: int | None
-    created_at: datetime
+    created_at: datetime  # when the model was asked
 
 
 class ReviewOut(BaseModel):
@@ -160,6 +171,8 @@ class RunSourceOut(BaseModel):
     records: dict[str, Any]
     source_synced_at: datetime | None
     captured_at: datetime
+    # Input field -> the record its value came from, e.g. {"invoice_total": "bill INV-2048"}
+    field_sources: dict[str, str] = {}
 
 
 class RunApproval(BaseModel):

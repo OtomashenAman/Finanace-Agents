@@ -22,6 +22,19 @@ class TreasuryCashInput(AgentInput):
     expected_outflows: Decimal = money_field("Expected outflows")
     minimum_liquidity_buffer: Decimal = money_field("Minimum liquidity buffer")
     forecast_horizon_days: int = number_field("Forecast horizon (days)", ge=1, le=730)
+    lowest_projected_cash: Decimal | None = signed_money_field(
+        "Lowest daily cash",
+        required=False,
+        help="The day-by-day low point within the horizon: cash can dip below the buffer "
+        "before it recovers",
+    )
+    lowest_cash_date: str | None = text_field(
+        "Lowest cash date",
+        required=False,
+        max_length=10,
+        pattern=r"^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$",
+        help="e.g. 2026-11-14",
+    )
     permitted_funding_options: str | None = textarea_field(
         "Permitted funding options",
         help="e.g. revolver draw, intercompany loan: what may cover a shortfall",

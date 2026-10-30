@@ -1,4 +1,7 @@
 from decimal import Decimal
+from typing import Literal
+
+from pydantic import Field
 
 from src.app.agent_catalog.agents.fields import (
     AgentInput,
@@ -17,7 +20,17 @@ class BoardReportingInput(AgentInput):
     reporting_period: str = text_field("Reporting period", max_length=20, help="e.g. 2026-Q3")
     reported_revenue: Decimal = money_field("Reported revenue")
     prior_period_revenue: Decimal = money_field("Prior period revenue")
-    operating_profit: Decimal = signed_money_field("Operating profit")
+    comparison_period: str | None = text_field(
+        "Comparison period",
+        required=False,
+        max_length=20,
+        help="The period prior revenue is for: the previous one (month on month) or the same "
+        "one last year (year on year)",
+    )
+    operating_profit: Decimal = signed_money_field(
+        "Operating profit",
+        help="Operating income, before other income, interest and tax: not net income",
+    )
     source_dataset_id: str | None = text_field(
         "Source dataset / approval ID",
         required=False,
@@ -42,5 +55,11 @@ class BoardPrefillParams(AgentInput):
 
     reporting_period: str = choice_field(
         "Reporting period",
-        help="A month, quarter or year: compared with the same period last year",
+        help="A month, quarter or year",
+    )
+    compare_with: Literal["Same period last year", "Previous period"] = Field(
+        "Same period last year",
+        title="Compare with",
+        description="Year on year, or period on period (e.g. month on month)",
+        json_schema_extra={"ui": "choice", "options": ["Same period last year", "Previous period"]},
     )

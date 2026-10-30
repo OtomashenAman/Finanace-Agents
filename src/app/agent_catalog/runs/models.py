@@ -188,6 +188,10 @@ class RunNarrative(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     provider: Mapped[str] = mapped_column(String(50))
     model: Mapped[str] = mapped_column(String(100))
     prompt_version: Mapped[str] = mapped_column(String(50))
+    # SHA-256 of the instructions, payload and output schema sent (narrative.prompt_hash)
+    prompt_hash: Mapped[str | None] = mapped_column(String(64))
+    # The rules (policy) version the explained analysis ran under
+    policy_version: Mapped[str | None] = mapped_column(String(100))
     input_payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
     output: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     guard_warnings: Mapped[list[str]] = mapped_column(JSONB, default=list)
@@ -240,6 +244,11 @@ class RunSourceSnapshot(CreatedAtMixin, Base):
     # {"bill": {...}, "purchase_order": {...}}: the selected record and what it pulled in
     records: Mapped[dict[str, Any]] = mapped_column(JSONB)
     source_synced_at: Mapped[datetime | None]
+    # Data lineage per input field: field -> the record it came from (e.g. "bill INV-2048").
+    # A field the preparer then changes is dropped: its value is theirs, not the source's
+    field_sources: Mapped[dict[str, str]] = mapped_column(
+        JSONB, default=dict, server_default=text("'{}'::jsonb")
+    )
 
 
 class ActionStatus(StrEnum):

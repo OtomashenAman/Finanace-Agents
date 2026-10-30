@@ -67,6 +67,10 @@ export function useRenameSource() {
   return useMutation({ mutationFn: dataSourcesApi.rename, meta: { invalidates } })
 }
 
+export function useSetSourceEntity() {
+  return useMutation({ mutationFn: dataSourcesApi.setEntity, meta: { invalidates } })
+}
+
 export function useDeleteSource() {
   return useMutation({ mutationFn: dataSourcesApi.remove, meta: { invalidates: [...invalidates, "runs"] } })
 }

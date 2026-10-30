@@ -17,8 +17,8 @@ services:
     restart: unless-stopped
     environment: *db-env
     ports:
-      # host 5434 by default: 5432/5433 are commonly taken by a local Postgres or other projects
-      - "${POSTGRES_PORT:-5434}:5432"
+      # host 5435 by default: 5432/5433 are commonly taken by a local Postgres or other projects
+      - "${POSTGRES_PORT:-5435}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

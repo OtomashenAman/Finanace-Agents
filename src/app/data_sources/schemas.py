@@ -21,6 +21,7 @@ class DataSourceOut(BaseModel):
     kind: SourceKind
     name: str
     status: SourceStatus
+    entity_id: uuid.UUID | None  # the legal entity whose books these are
     # QuickBooks: the owner's own Intuit app (the secret is never returned)
     client_id: str | None
     environment: IntegrationEnvironment | None
@@ -51,7 +52,10 @@ class AdminDataSourceOut(DataSourceOut):
 
 
 class SourceUpdate(BaseModel):
-    name: str = Field(min_length=1, max_length=200)
+    """Only the fields sent change; "entity_id": null unlinks the entity."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    entity_id: uuid.UUID | None = None
 
 
 class QuickBooksApp(BaseModel):

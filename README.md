@@ -5,7 +5,7 @@ maker-checker approvals and an immutable audit trail.
 
 | Layer | Stack |
 |---|---|
-| Backend | Python 3.12, FastAPI, SQLAlchemy 2 (async), Alembic, Pydantic v2, Azure OpenAI (pluggable LLM layer), `uv` |
+| Backend | Python 3.12, FastAPI, SQLAlchemy 2 (async), Alembic, Pydantic v2, Anthropic Claude or Azure OpenAI (pluggable LLM layer), `uv` |
 | Database | PostgreSQL 16 + pgvector (same image locally, in CI and in prod) |
 | Frontend | React 19, TypeScript, Vite, Tailwind CSS v4, shadcn/ui |
 | Runtime | Docker multi-stage images, nginx (prod), GitHub Actions CI |
@@ -125,7 +125,21 @@ folder gets an `input_schema`, `run_model` and `analyze()` (see `agents/ap_invoi
   reviews record `on_behalf_of`, and one person never counts twice in a multi-approval round.
 - Evidence pack: `GET .../runs/{id}/evidence-pack` is a ZIP with the run, documents' text, the
   data source snapshot, the audit timeline and a SHA-256 manifest (the export is audited).
-- QuickBooks write-back: after approval the preparer can note the approval on the QuickBooks
+- QuickBooks is read-only by default (`QUICKBOOKS_WRITE_BACK=false`): the app never posts,
+  pays or sends anything. Reports are read on an explicit basis (`QUICKBOOKS_ACCOUNTING_METHOD`),
+  throttled (429) and failed reads are retried with backoff, and each QuickBooks company is
+  linked to the legal entity whose books it holds (Data Sources), so a run reads its entity's
+  books first and Intercompany reads each side from its own company.
+- Agents complete the input from the preparer's data on Analyze (`BaseAgent.autofill`), never
+  overwriting what was typed: the records used are frozen with the run like a picked record,
+  each lookup is a finding with its "data as of" time, and data older than 7 days is flagged.
+  Every filled field shows its origin in the form (source, record, sync time) until the
+  preparer changes it (`run_source_snapshots.field_sources`).
+- AP three-way match by line: when the invoice's QuickBooks bill and its PO both have item lines,
+  each item must be on the PO, within the quantity ordered and at the PO's unit price; GL coding
+  comes from the bill, else the PO items' expense accounts, else the supplier's usual account.
+- QuickBooks write-back (only with `QUICKBOOKS_WRITE_BACK=true`): after approval the preparer
+  can note the approval on the QuickBooks
   bill the run came from (`POST .../runs/{id}/write-back`, a background job; only the bill's
   private note changes). For an invoice entered by hand (or from a PDF/upload), the preparer
   picks one of their QuickBooks companies and an expense account and the bill is created there
@@ -158,9 +172,15 @@ folder gets an `input_schema`, `run_model` and `analyze()` (see `agents/ap_invoi
   `run_documents`, `run_narratives` and `run_reviews`.
 - Uploads: only the extracted text and the file's SHA-256 are stored, never the file. Supported:
   text-based PDF, XLSX, CSV/TSV, DOCX, TXT. Scanned PDFs and images are rejected (no OCR yet).
-- LLM: pluggable (`LLM_PROVIDER=azure_openai | none`, see `.env.example`). It only explains
-  engine results; output is schema-validated, may cite only real fields/documents, and every figure
-  it quotes is checked against the source data. With `none`, runs work without explanations.
+- LLM: pluggable (`LLM_PROVIDER=anthropic | azure_openai | none`, see `.env.example`; Claude by
+  `ANTHROPIC_MODEL`, default `claude-opus-5-5`). It only explains engine results; output is
+  schema-validated JSON (summary, evidence ids, missing evidence, suggested action), may cite only
+  real fields, documents and the run's source records (QuickBooks ids), and every figure it
+  quotes is checked against the source data. Each call records the model, a SHA-256 of exactly
+  what was sent (prompt hash), the prompt and rules versions and the time. With `none`, runs work
+  without explanations.
+- Maker-checker: nobody approves their own run unless a Finance Admin turns on admin
+  self-approval (Governance; off by default).
 
 ### Viewing the database
 - **VS Code:** accept the recommended extensions (*SQLTools* + *SQLTools PostgreSQL*), open the

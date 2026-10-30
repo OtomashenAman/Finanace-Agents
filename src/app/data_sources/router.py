@@ -227,10 +227,15 @@ async def get_source(source_id: uuid.UUID, session: SessionDep, user: CurrentUse
 
 
 @router.patch("/{source_id}", response_model=DataSourceOut, responses=_ERRORS)
-async def rename_source(
-    source_id: uuid.UUID, body: SourceUpdate, session: SessionDep, user: CurrentUser
+async def update_source(
+    source_id: uuid.UUID,
+    body: SourceUpdate,
+    session: SessionDep,
+    user: CurrentUser,
+    ctx: RequestContextDep,
 ) -> DataSourceOut:
-    return await service.rename_source(session, user, source_id, body.name)
+    """Rename, or link to (or unlink from) a legal entity."""
+    return await service.update_source(session, user, source_id, body, ctx)
 
 
 @router.delete(

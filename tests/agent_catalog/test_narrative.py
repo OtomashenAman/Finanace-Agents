@@ -10,6 +10,7 @@ PAYLOAD: dict[str, Any] = {
     ],
     "findings": [{"message": "Invoice total differs from the received amount by 11,500.00"}],
     "documents": [{"id": "D1", "filename": "inv.pdf", "text": "Invoice INV-2048 dated 2026-10-01"}],
+    "source_records": [{"id": "S1", "type": "bill", "record_id": "145", "data": {}}],
 }
 
 
@@ -21,6 +22,8 @@ def output(**overrides: Any) -> NarrativeOutput:
         "cited_documents": ["D1"],
         "missing_evidence": [],
         "ambiguities": [],
+        "evidence_ids": ["S1"],
+        "suggested_action": "Ask receiving for the goods receipt note",
     }
     return NarrativeOutput(**{**base, **overrides})
 
@@ -48,6 +51,21 @@ def test_unknown_citations_are_flagged() -> None:
     assert warnings == [
         "Cited a document that wasn't provided: D9",
         "Cited a field that doesn't exist: bank_account",
+    ]
+
+
+def test_only_supplied_source_records_may_be_cited() -> None:
+    schema = output_schema(PAYLOAD)
+    assert schema.model_json_schema()["$defs"]["EvidenceId"]["enum"] == ["S1"]
+    assert check_output(output(evidence_ids=["S7"]), PAYLOAD) == [
+        "Cited a source record that wasn't provided: S7"
+    ]
+
+
+def test_a_suggested_action_never_moves_money() -> None:
+    warnings = check_output(output(suggested_action="Pay the supplier today"), PAYLOAD)
+    assert warnings == [
+        "The suggested action proposes approving, posting, paying or sending: a person decides that"
     ]
 
 

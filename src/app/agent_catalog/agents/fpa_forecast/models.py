@@ -20,6 +20,7 @@ class FpaForecastRun(AgentRunDetail, Base):
     # --- input ---
     business_unit: Mapped[str | None] = mapped_column(String(200))
     forecast_period: Mapped[str | None] = mapped_column(String(20))
+    metric: Mapped[str | None] = mapped_column(String(30))
     actual_value: Mapped[Decimal | None] = mapped_column(MONEY)
     budget_value: Mapped[Decimal | None] = mapped_column(MONEY)
     scenario_volume_pct: Mapped[Decimal | None] = mapped_column(PERCENT_INPUT)

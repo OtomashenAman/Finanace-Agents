@@ -61,13 +61,14 @@ async def _settings(session: AsyncSession, *, lock: bool = False) -> OrgSettings
 
 async def allow_self_approval(session: AsyncSession) -> bool:
     row = await session.get(OrgSettings, SETTINGS_ROW)
-    return True if row is None else row.allow_admin_self_approval
+    # Off unless a Finance Admin turns it on: maker and checker are different people
+    return False if row is None else row.allow_admin_self_approval
 
 
 async def get_settings(session: AsyncSession) -> OrgSettingsOut:
     row = await session.get(OrgSettings, SETTINGS_ROW)
     if row is None:
-        return OrgSettingsOut(allow_admin_self_approval=True, updated_at=None)
+        return OrgSettingsOut(allow_admin_self_approval=False, updated_at=None)
     return OrgSettingsOut(
         allow_admin_self_approval=row.allow_admin_self_approval, updated_at=row.updated_at
     )

@@ -1,4 +1,6 @@
-from typing import cast
+from datetime import date
+from decimal import Decimal
+from typing import Any, cast
 
 from pydantic import BaseModel
 
@@ -8,12 +10,21 @@ from src.app.agent_catalog.agents.base import (
     BaseAgent,
     Calculation,
     Finding,
+    Prefill,
 )
-from src.app.agent_catalog.agents.checks import has_severity, missing, percent, ratio_pct
+from src.app.agent_catalog.agents.checks import has_severity, missing, money, percent, ratio_pct
+from src.app.agent_catalog.agents.fields import PolicySettings
+from src.app.agent_catalog.agents.periods import months_of, period_options
 from src.app.agent_catalog.agents.sox_controls import prompt
 from src.app.agent_catalog.agents.sox_controls.models import SoxControlsRun
-from src.app.agent_catalog.agents.sox_controls.schemas import SoxControlsInput, SoxControlsPolicy
+from src.app.agent_catalog.agents.sox_controls.schemas import (
+    SoxControlsInput,
+    SoxControlsPolicy,
+    SoxPrefillParams,
+)
 from src.app.agent_catalog.runs.models import FlagSeverity
+from src.app.data_sources.access import FinanceData
+from src.app.data_sources.records import BillPayment, RecordType
 
 
 def _items(n: int) -> str:
@@ -42,6 +53,64 @@ class SoxControlsAgent(BaseAgent):
     narrative_guidance = prompt.GUIDANCE
     prompt_version = prompt.PROMPT_VERSION
     policy_schema = SoxControlsPolicy
+    prefill_params = SoxPrefillParams
+
+    @classmethod
+    async def prefill_options(cls, data: FinanceData) -> dict[str, list[str]]:
+        payments = await data.records(BillPayment, RecordType.BILL_PAYMENT)
+        months = {f"{p.payment_date:%Y-%m}" for p in payments if p.payment_date}
+        return {"test_period": period_options(months)}
+
+    @classmethod
+    async def autofill_params(
+        cls, values: dict[str, Any], data: FinanceData
+    ) -> dict[str, Any] | None:
+        if not values.get("test_period") or not await data.has(RecordType.BILL_PAYMENT):
+            return None
+        threshold = values.get("population_threshold")
+        return {
+            "test_period": values["test_period"],
+            "population_threshold": threshold if threshold is not None else 0,
+        }
+
+    @classmethod
+    async def prefill_from_data(
+        cls, params: BaseModel, data: FinanceData, policy: PolicySettings | None = None
+    ) -> Prefill:
+        """The supplier payments in the period at or above the threshold: the complete,
+        deduplicated population, frozen with the run (count, filters and each payment)."""
+        wanted = cast(SoxPrefillParams, params)
+        months = set(months_of(wanted.test_period) or [])
+        unique = {
+            p.external_id: p
+            for p in await data.records(BillPayment, RecordType.BILL_PAYMENT)
+            if p.payment_date
+            and f"{p.payment_date:%Y-%m}" in months
+            and p.total >= wanted.population_threshold
+        }
+        population = sorted(unique.values(), key=lambda p: p.payment_date or date.min)
+        threshold = wanted.population_threshold
+        values: dict[str, object] = {
+            "test_period": wanted.test_period,
+            "population_threshold": threshold,
+        }
+        if population:
+            values["population_count"] = len(population)
+        return Prefill(
+            values,
+            reference=f"Supplier payments {wanted.test_period}"
+            + (f" of at least {money(threshold)}" if threshold else ""),
+            summary={
+                "population": "Supplier payments (QuickBooks BillPayment)",
+                "period": wanted.test_period,
+                "threshold": threshold,
+                "count": len(population),
+                "total": sum((p.total for p in population), Decimal("0.00")),
+                "approval_evidence": "Not in QuickBooks: take approvals from the approval "
+                "system; missing evidence is not proof the control failed",
+            },
+            lines={"population": population},
+        )
 
     @classmethod
     async def analyze(cls, data: BaseModel, ctx: AnalysisContext) -> Analysis:

@@ -19,6 +19,7 @@ class RevenueRecognitionRun(AgentRunDetail, Base):
     contract_id: Mapped[str | None] = mapped_column(String(100), index=True)
     contract_total: Mapped[Decimal | None] = mapped_column(MONEY)
     service_term_months: Mapped[int | None]
+    months_delivered: Mapped[int | None]
     performance_obligations: Mapped[str | None] = mapped_column(Text)
     variable_consideration: Mapped[str | None] = mapped_column(Text)
     contract_clauses: Mapped[str | None] = mapped_column(Text)
@@ -26,3 +27,5 @@ class RevenueRecognitionRun(AgentRunDetail, Base):
     # --- computed by the engine ---
     monthly_revenue: Mapped[Decimal | None] = mapped_column(MONEY)
     obligation_count: Mapped[int | None]
+    earned_to_date: Mapped[Decimal | None] = mapped_column(MONEY)
+    deferred_revenue: Mapped[Decimal | None] = mapped_column(MONEY)

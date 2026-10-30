@@ -67,6 +67,11 @@ class DataSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     kind: Mapped[SourceKind] = mapped_column(string_enum(SourceKind, 32))
     name: Mapped[str] = mapped_column(String(200))
+    # The legal entity whose books these are: one QuickBooks company (realm) per entity.
+    # Runs for that entity read this source first.
+    entity_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("legal_entities.id", ondelete="SET NULL"), index=True
+    )
     status: Mapped[SourceStatus] = mapped_column(string_enum(SourceStatus, 32))
     # QuickBooks: the user's Intuit app, and the company (realmId) they authorized
     client_id: Mapped[str | None] = mapped_column(String(255))

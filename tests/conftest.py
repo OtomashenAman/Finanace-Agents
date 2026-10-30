@@ -173,6 +173,8 @@ class FakeLLM:
             "cited_documents": [],
             "missing_evidence": ["Goods receipt note"],
             "ambiguities": [],
+            "evidence_ids": [],
+            "suggested_action": "Obtain the goods receipt note from receiving",
         }
         self.error: Exception | None = None
         self.calls: list[tuple[str, str]] = []

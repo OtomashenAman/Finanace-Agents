@@ -154,8 +154,13 @@ async def test_board_quarter_against_the_same_quarter_last_year(
     source_ref = run["input"]["source_dataset_id"]
     assert source_ref.startswith(f"QuickBooks Acme Holdings Ltd: P&L {quarter}")
     records = run["source"]["records"]
-    assert len(records["months"]) == 3 and len(records["prior_year_months"]) == 3
+    assert len(records["months"]) == 3 and len(records["comparison_months"]) == 3
     assert run["source"]["record_reference"] == f"{quarter} vs {same_period_last_year(quarter)}"
+    assert run["input"]["comparison_period"] == same_period_last_year(quarter)
+    # Financial position at the quarter's last month end, from the trial balance
+    position = records["summary"]
+    assert position["cash"] == "250000.00" and position["receivables"] == "120000.00"
+    assert position["payables"] == "49000.00"  # credit-positive
 
     fake_llm.output["cited_fields"] = ["reported_revenue"]
     values = {**run["input"], "report_name": "Board pack"}

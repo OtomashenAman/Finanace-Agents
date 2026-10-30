@@ -20,6 +20,12 @@ class AppCredentialsError(AppError):
     message = "Add your QuickBooks app's Client ID and Client Secret first."
 
 
+class EntityAlreadyLinkedError(AppError):
+    status_code = 409
+    code = "entity_already_linked"
+    message = "That legal entity already has its QuickBooks company."
+
+
 class SourceNotSyncableError(AppError):
     status_code = 409
     code = "source_not_syncable"
