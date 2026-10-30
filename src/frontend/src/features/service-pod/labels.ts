@@ -1,0 +1,96 @@
+import type {
+  ArtifactKind,
+  CaseStatus,
+  Collection,
+  MessageStatus,
+  ReviewTaskKind,
+  TaskStatus,
+  WorkflowKey,
+} from "./api"
+
+type Tone = "neutral" | "info" | "good" | "warn" | "bad"
+
+export const TONE_CLASSES: Record<Tone, string> = {
+  neutral: "bg-muted text-muted-foreground",
+  info: "bg-sky-50 text-sky-800",
+  good: "bg-emerald-50 text-emerald-800",
+  warn: "bg-amber-50 text-amber-800",
+  bad: "bg-red-50 text-red-800",
+}
+
+export const WORKFLOW_SHORT: Record<WorkflowKey, string> = {
+  ar_collections: "AR Collections",
+  bank_recon: "Bank-to-Invoice",
+  fpa_trend: "FP&A Trends",
+  treasury: "Treasury",
+  reporting: "Reporting",
+}
+
+export const CASE_STATUS: Record<CaseStatus, [string, Tone]> = {
+  draft: ["Draft", "neutral"],
+  in_review: ["In review", "info"],
+  awaiting_final: ["Awaiting final approval", "info"],
+  approved: ["Approved", "good"],
+  changes_requested: ["Changes requested", "warn"],
+  rejected: ["Rejected", "bad"],
+  completed: ["Completed", "good"],
+  cancelled: ["Cancelled", "neutral"],
+}
+
+export const MESSAGE_STATUS: Record<MessageStatus, [string, Tone]> = {
+  draft: ["Draft", "neutral"],
+  approved: ["Approved, not sent", "info"],
+  sending: ["Sending…", "info"],
+  sent: ["Sent", "good"],
+  send_failed: ["Send failed", "bad"],
+  send_unknown: ["Outcome unknown: reconcile", "warn"],
+  received: ["Reply received", "info"],
+}
+
+export const TASK_STATUS: Record<TaskStatus, [string, Tone]> = {
+  proposed: ["Proposed", "neutral"],
+  approved: ["Approved: post in QuickBooks", "info"],
+  recorded_unverified: ["Recorded, not verified", "warn"],
+  verified: ["Verified", "good"],
+  cancelled: ["Cancelled", "neutral"],
+}
+
+export const REVIEW_KIND: Record<ReviewTaskKind, string> = {
+  unknown_date: "Unknown date",
+  dispute: "Dispute",
+  missing_document: "Missing document",
+  ambiguity: "Ambiguity",
+  scope: "Scope / as-of date",
+  other: "Other",
+}
+
+export const ARTIFACT_KIND: Record<ArtifactKind, string> = {
+  timesheet: "Timesheet",
+  invoice_copy: "Invoice copy",
+  msa: "MSA / contract",
+  supporting: "Supporting document",
+  other: "Other",
+}
+
+export const COLLECTION_LABEL: Record<Collection, string> = {
+  customers: "Customers",
+  invoices: "Invoices",
+  payments: "Payments",
+  accounts: "Accounts",
+  gl_lines: "GL lines",
+  transactions: "Transactions",
+  bank_receipts: "Bank receipts",
+  contracts: "Contracts",
+  planned_outflows: "Planned outflows",
+  cash_position: "Cash position",
+  balance_sheets: "Balance sheets",
+  close_status: "Close status",
+}
+
+export function formatDateTime(value: string | null): string {
+  return value ? new Date(value).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : "—"
+}
+
+export function shortHash(hash: string): string {
+  return `${hash.slice(0, 10)}…`
+}

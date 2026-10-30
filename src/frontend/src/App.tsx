@@ -20,6 +20,11 @@ import { GuestOnly, RequireAdmin, RequireAuth } from "@/features/auth/route-guar
 import { DataSourcesPage } from "@/features/data-sources/data-sources-page"
 import { AiMonitoringPage } from "@/features/monitoring/ai-monitoring-page"
 import { OverviewPage } from "@/features/overview/overview-page"
+import { PodAssignmentsPage } from "@/features/service-pod/assignments-page"
+import { CasePage } from "@/features/service-pod/case-page"
+import { CasesPage } from "@/features/service-pod/cases-page"
+import { InboxPage, ReviewQueuePage, TasksPage } from "@/features/service-pod/queue-pages"
+import { SourcesPage } from "@/features/service-pod/sources-page"
 import { queryClient } from "@/lib/query-client"
 
 const router = createBrowserRouter([
@@ -41,6 +46,13 @@ const router = createBrowserRouter([
           { path: "/approvals", element: <ApprovalsPage /> },
           { path: "/audit", element: <AuditPage /> },
           { path: "/data-sources", element: <DataSourcesPage /> },
+          { path: "/pod", element: <Navigate to="/pod/cases" replace /> },
+          { path: "/pod/cases", element: <CasesPage /> },
+          { path: "/pod/cases/:caseId", element: <CasePage /> },
+          { path: "/pod/inbox", element: <InboxPage /> },
+          { path: "/pod/review", element: <ReviewQueuePage /> },
+          { path: "/pod/tasks", element: <TasksPage /> },
+          { path: "/pod/sources", element: <SourcesPage /> },
           {
             element: <RequireAdmin />,
             children: [
@@ -50,6 +62,7 @@ const router = createBrowserRouter([
               { path: "/admin/governance", element: <GovernancePage /> },
               { path: "/admin/data-sources", element: <AdminDataSourcesPage /> },
               { path: "/admin/ai-monitoring", element: <AiMonitoringPage /> },
+              { path: "/admin/service-pod", element: <PodAssignmentsPage /> },
             ],
           },
         ],

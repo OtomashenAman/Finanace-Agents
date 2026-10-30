@@ -69,12 +69,38 @@ class Settings(BaseSettings):
     # Audit trail: events older than this are removed by `python -m src.app.cli.audit purge`
     audit_retention_days: int = 7 * 365
 
+    # Service POD: read-only source snapshots
+    pod_snapshot_max_bytes: int = 5 * 1024 * 1024
+    pod_bank_csv_max_bytes: int = 2 * 1024 * 1024
+    pod_max_rows_per_collection: int = 10_000
+    # Snapshots labelled SYNTHETIC_DEMO (or from a QuickBooks sandbox). Unset: allowed outside
+    # production only, so a client installation never shows demo figures as its books
+    pod_allow_demo_snapshots: bool | None = None
+
+    # Service POD: email. "outbox" records approved messages without sending anything
+    # (labelled as simulated); "brevo" sends through Brevo's transactional API
+    email_provider: Literal["outbox", "brevo"] = "outbox"
+    email_sender: str | None = None  # a sender verified in the provider
+    email_sender_name: str = "Finance"
+    brevo_api_key: SecretStr | None = None
+    email_timeout_seconds: float = 20
+    # The only addresses internal reports may be distributed to
+    pod_internal_recipients: list[str] = []
+
     # Demo seed user (uv run poe seed)
     demo_admin_email: str = "finance.admin@example.com"
     demo_admin_name: str = "Finance Admin"
     demo_admin_password: SecretStr | None = None
 
-    @field_validator("data_encryption_key", "metrics_token", "metrics_dir", mode="before")
+    @field_validator(
+        "data_encryption_key",
+        "metrics_token",
+        "metrics_dir",
+        "brevo_api_key",
+        "email_sender",
+        "pod_allow_demo_snapshots",
+        mode="before",
+    )
     @classmethod
     def _blank_is_unset(cls, value: object) -> object:
         return None if value == "" else value
@@ -82,6 +108,18 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment == "production"
+
+    @property
+    def demo_snapshots_allowed(self) -> bool:
+        if self.pod_allow_demo_snapshots is None:
+            return not self.is_production
+        return self.pod_allow_demo_snapshots
+
+    @model_validator(mode="after")
+    def _check_email_config(self) -> Self:
+        if self.email_provider == "brevo" and not (self.brevo_api_key and self.email_sender):
+            raise ValueError("EMAIL_PROVIDER=brevo requires BREVO_API_KEY and EMAIL_SENDER")
+        return self
 
     @model_validator(mode="after")
     def _check_llm_config(self) -> Self:

@@ -2,4 +2,5 @@
 
 import src.app.agent_catalog.runs.jobs
 import src.app.audit.jobs  # audit.purge (daily)
-import src.app.data_sources.service  # noqa: F401 - data_source.history
+import src.app.data_sources.service  # data_source.history
+import src.app.service_pod.messaging.jobs  # noqa: F401 - pod.send_message

@@ -9,6 +9,7 @@ export type AuditCategory =
   | "entities"
   | "governance"
   | "audit"
+  | "service_pod"
 
 export interface AuditPerson {
   id: string
@@ -88,4 +89,5 @@ export const CATEGORY_LABELS: Record<AuditCategory, string> = {
   entities: "Legal entities",
   governance: "Governance",
   audit: "Audit exports",
+  service_pod: "Service POD",
 }

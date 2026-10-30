@@ -54,6 +54,16 @@ from src.app.core.llm.factory import get_llm_provider  # noqa: E402
 from src.app.main import app  # noqa: E402
 
 TABLES = (
+    "pod_commitments",
+    "pod_posting_tasks",
+    "pod_messages",
+    "pod_artifacts",
+    "pod_owned_actions",
+    "pod_review_tasks",
+    "pod_approvals",
+    "pod_cases",
+    "pod_snapshots",
+    "pod_assignments",
     "password_reset_requests",
     "run_actions",
     "approval_delegations",

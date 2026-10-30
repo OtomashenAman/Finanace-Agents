@@ -1,0 +1,2 @@
+reference,payer,date,amount,currency,cleared,proof_reference
+WIRE-2901,Harbor Distribution,2026-11-05,9000.00,USD,yes,Statement line 14

@@ -13,6 +13,7 @@ from src.app.jobs.router import router as jobs_router
 from src.app.monitoring.router import router as monitoring_router
 from src.app.overview.router import router as overview_router
 from src.app.search.router import router as search_router
+from src.app.service_pod.router import router as service_pod_router
 from src.app.users.router import router as users_router
 from src.app.worklist.router import router as worklist_router
 
@@ -33,3 +34,4 @@ api_router.include_router(entities_router)
 api_router.include_router(governance_router)
 api_router.include_router(worklist_router)
 api_router.include_router(search_router)
+api_router.include_router(service_pod_router)
