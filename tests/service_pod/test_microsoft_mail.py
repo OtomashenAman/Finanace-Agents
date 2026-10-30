@@ -205,3 +205,42 @@ async def test_replies_are_read_from_the_inbox(
     assert reply["body"].startswith("Pay both on Nov 12.")
     cursor = await db.scalar(select(PodMailboxCursor))
     assert cursor is not None and cursor.received_after.year == 2099
+
+
+async def test_sandbox_may_mail_the_quickbooks_contact_only(
+    pod: AsyncClient,
+    entity: LegalEntity,
+    fake_graph: FakeGraph,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(get_settings(), "email_sandbox_to_quickbooks_contacts", True)
+    demo = snapshot_payload(provenance="SYNTHETIC_DEMO", source_reference="sandbox")
+    snap = (await import_snapshot(pod, entity, demo)).json()["snapshot"]
+    case = await open_ar_case(pod, snap)
+
+    msg = await _send(pod, case)
+    assert msg["status"] == "sent", msg
+    (sent,) = fake_graph.drafts
+    assert sent["toRecipients"] == [{"emailAddress": {"address": CUSTOMER_EMAIL}}]
+    assert sent["subject"] == "Confirm payment schedule"  # the real recipient: no test label
+
+    # On sandbox data a draft may name any address; it still can't go out
+    draft = (
+        await pod.post(
+            f"/api/v1/pod/cases/{case['id']}/messages",
+            json={
+                "audience": "customer",
+                "purpose": "case_message",
+                "to_email": "someone@else.example",
+                "subject": "s",
+                "body": "b",
+            },
+        )
+    ).json()
+    r = await pod.post(
+        f"/api/v1/pod/messages/{draft['id']}/send",
+        json={"expected_version": draft["version"], "checks": CHECKS},
+    )
+    assert r.status_code == 409
+    assert "as QuickBooks states it" in r.json()["detail"]["message"]
+    assert len(fake_graph.drafts) == 1

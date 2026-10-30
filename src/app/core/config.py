@@ -112,6 +112,9 @@ class Settings(BaseSettings):
     # While set, every email goes to this address instead of the customer (the subject names
     # the real recipient). Mail from demo / sandbox data can only go out this way
     email_test_recipient: str | None = None
+    # Demo / sandbox data may also mail real addresses, but only each customer's own email
+    # as the source states it (never an edited one). The test recipient, when set, wins
+    email_sandbox_to_quickbooks_contacts: bool = False
     # The only addresses internal reports may be distributed to
     pod_internal_recipients: list[str] = []
 

@@ -206,6 +206,16 @@ def _require_open(case: PodCase) -> None:
         raise CaseActionError(f"{case.reference} is {case.status.value}; it can't change any more.")
 
 
+def _source_contacts(snapshot: PodSnapshot, case: PodCase) -> set[str]:
+    """The case customer's email as the source states it."""
+    selected = case.selection.get("customer_id")
+    return {
+        c.email.lower()
+        for c in snapshots.document(snapshot).customers or []
+        if c.email and (selected is None or c.id == selected)
+    }
+
+
 async def _check_recipient(
     session: AsyncSession, case: PodCase, audience: Audience, to_email: str
 ) -> None:
@@ -220,15 +230,8 @@ async def _check_recipient(
     snapshot = await session.get(PodSnapshot, case.snapshot_id)
     assert snapshot is not None  # noqa: S101 - RESTRICT foreign key
     if snapshot.is_demo:
-        return  # fictional customers: the demo recipient may be edited
-    customers = snapshots.document(snapshot).customers or []
-    selected = case.selection.get("customer_id")
-    contacts = {
-        (c.email or "").lower()
-        for c in customers
-        if c.email and (selected is None or c.id == selected)
-    }
-    if address not in contacts:
+        return  # fictional customers: the demo recipient may be edited (see send_message)
+    if address not in _source_contacts(snapshot, case):
         raise MessageRefusedError(
             "Customer mail goes only to the verified contact imported with the source data."
         )
@@ -455,11 +458,19 @@ async def send_message(
     if message.audience == Audience.CUSTOMER and not provider.simulated:
         snapshot = await session.get(PodSnapshot, case.snapshot_id)
         assert snapshot is not None  # noqa: S101 - RESTRICT foreign key
-        if snapshot.is_demo and not get_settings().email_test_recipient:
-            raise MessageRefusedError(
-                "This case is on demo / sandbox data: real mail from it goes only to a test "
-                "address. Set EMAIL_TEST_RECIPIENT to your own address."
-            )
+        settings = get_settings()
+        if snapshot.is_demo and not settings.email_test_recipient:
+            if not settings.email_sandbox_to_quickbooks_contacts:
+                raise MessageRefusedError(
+                    "This case is on demo / sandbox data: real mail from it goes only to a test "
+                    "address (EMAIL_TEST_RECIPIENT), or to the customer's own email from the "
+                    "source with EMAIL_SANDBOX_TO_QUICKBOOKS_CONTACTS=true."
+                )
+            if message.to_email.lower() not in _source_contacts(snapshot, case):
+                raise MessageRefusedError(
+                    "On sandbox data, mail goes only to the customer's email as QuickBooks "
+                    "states it, not to an edited address."
+                )
     message.provider = provider.name
     message.sender = provider.sender
     message.approval_hash = _approval_hash(message, artifacts, provider.name, provider.sender)
