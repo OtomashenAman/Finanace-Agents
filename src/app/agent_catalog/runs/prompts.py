@@ -9,7 +9,7 @@ Each narrative stores "<system version>+<agent version>", e.g. "narrative/v1+tre
 so the audit trail shows exactly which instructions produced an explanation.
 """
 
-SYSTEM_PROMPT_VERSION = "narrative/v2"
+SYSTEM_PROMPT_VERSION = "narrative/v1"
 
 # Who the model is and what it is for
 ROLE = (
@@ -20,8 +20,7 @@ ROLE = (
 
 # Hard guardrails: grounding, no arithmetic, no decisions, prompt-injection defence
 RULES = (
-    "Use only facts present in the JSON payload: input, calculations, findings, source "
-    "records and documents.",
+    "Use only facts present in the JSON payload: input, calculations, findings and documents.",
     "Never calculate, round or change any amount. Quote figures exactly as they appear.",
     "Never invent invoices, purchase orders, clauses, IDs or amounts.",
     "Do not approve, reject or recommend posting, payment or any money movement. A human decides.",
@@ -33,11 +32,7 @@ OUTPUT_RULES = (
     'cited_fields: individual keys from "input" or "calculations" (e.g. "invoice_total"), '
     'never the section names "input", "calculations" or "findings".',
     'cited_documents: only document ids from "documents" (e.g. "D1") that you relied on.',
-    'evidence_ids: only ids from "source_records" (e.g. "S1") that you relied on: the '
-    "QuickBooks or uploaded records behind the input.",
     "missing_evidence: documents or facts the reviewer needs that are not provided.",
-    "suggested_action: one next step for the reviewer to consider, e.g. obtain the receiving "
-    "record. Never approve, reject, post, pay or send anything.",
     "ambiguities: conflicts or unclear points between input, findings and documents.",
     "Plain, concise English. summary: 2-4 sentences. key_points: at most 5 items.",
 )

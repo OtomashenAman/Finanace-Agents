@@ -15,7 +15,7 @@ import { DynamicField, type FormValues } from "../components/dynamic-field"
 import { EvidencePanel } from "../components/evidence-panel"
 import { Panel } from "../components/panel"
 import { SourceSnapshot } from "../components/source-snapshot"
-import { formatDateTime, parseMoneyInput } from "../format"
+import { parseMoneyInput } from "../format"
 import { useAnalyzeRun, useDeleteRun, useSaveInput } from "../hooks"
 
 function toFormValues(fields: FormField[], input: Record<string, FieldValue>): FormValues {
@@ -34,21 +34,9 @@ function toPayload(fields: FormField[], values: FormValues): Record<string, Fiel
       if (f.kind === "boolean") return [f.name, raw === true]
       const text = typeof raw === "string" ? raw.trim() : ""
       if (!text) return [f.name, null]
-      const isText = f.kind === "text" || f.kind === "textarea" || f.kind === "choice"
-      return [f.name, isText ? text : parseMoneyInput(text)]
+      return [f.name, f.kind === "text" || f.kind === "textarea" ? text : parseMoneyInput(text)]
     }),
   )
-}
-
-/** "QuickBooks · Acme Holdings · bill INV-2048 · synced 23 Oct 2026, 09:30" for a field the
- *  source filled; undefined for one the preparer typed. */
-function lineageOf(run: RunDetail, field: string): string | undefined {
-  const source = run.source
-  const origin = source?.field_sources?.[field]
-  if (!source || !origin) return undefined
-  const kind = source.source_kind === "quickbooks" ? "QuickBooks" : "Upload"
-  const synced = source.source_synced_at ? ` · synced ${formatDateTime(source.source_synced_at)}` : ""
-  return `${kind} · ${source.source_name} · ${origin}${synced}`
 }
 
 interface InputStepProps {
@@ -101,8 +89,6 @@ export function InputStep({ agentKey, run, form }: InputStepProps) {
     if (!(await persist(values))) return
     try {
       const result = await analyze.mutateAsync()
-      // Show what the agent completed from your data, so the next save keeps it
-      reset(toFormValues(form.fields, result.input))
       if (result.status === "validation_failed") toast.error("Some required fields are missing or invalid")
     } catch (error) {
       toast.error(error instanceof ApiError ? error.message : "Analysis failed")
@@ -158,7 +144,6 @@ export function InputStep({ agentKey, run, form }: InputStepProps) {
                 register={register}
                 error={errors[field.name]?.message ?? serverErrors[field.name]}
                 disabled={!canEdit || busy}
-                lineage={lineageOf(run, field.name)}
               />
             ))}
           </fieldset>
@@ -166,7 +151,7 @@ export function InputStep({ agentKey, run, form }: InputStepProps) {
             <p className="text-xs text-muted-foreground">
               {run.source
                 ? `Prefilled from ${run.source.source_name}; edit anything the source doesn't know.`
-                : "Enter what you know: on Analyze, the agent completes empty fields from your QuickBooks or uploaded data."}
+                : "Enter the values, or prefill them from your QuickBooks or uploaded data."}
             </p>
             {canEdit && (
               <div className="flex gap-2">

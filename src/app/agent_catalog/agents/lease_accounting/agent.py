@@ -1,14 +1,12 @@
-import re
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
-from typing import Any, cast
+from typing import cast
 
 from pydantic import BaseModel
 
 from src.app.agent_catalog.agents.base import (
     Analysis,
     AnalysisContext,
-    Autofill,
     BaseAgent,
     Calculation,
     Finding,
@@ -33,11 +31,7 @@ from src.app.agent_catalog.agents.lease_accounting.schemas import (
 from src.app.agent_catalog.runs.models import FlagSeverity
 from src.app.data_sources.access import FinanceData
 from src.app.data_sources.models import DataSource
-from src.app.data_sources.records import CENT, AccountBalance, Bill, Record, RecordType
-
-# Trial balance account names (QuickBooks or uploads) holding leases
-_LEASE_LIABILITY = re.compile(r"lease\s+liabilit", re.IGNORECASE)
-_RIGHT_OF_USE = re.compile(r"right[\s-]+of[\s-]+use|\bROU\b", re.IGNORECASE)
+from src.app.data_sources.records import CENT, Bill, Record, RecordType
 
 
 def lease_liability(payment: Decimal, months: int, annual_rate_pct: Decimal) -> Decimal:
@@ -100,23 +94,6 @@ class LeaseAccountingAgent(BaseAgent):
         # Term, rate and options come from the lease agreement, not the books
         return Prefill(values)
 
-    @classmethod
-    async def autofill(
-        cls, values: dict[str, Any], data: FinanceData, policy: PolicySettings | None = None
-    ) -> Autofill:
-        """The monthly payment from the lessor's latest bill."""
-        result = Autofill()
-        lessor = values.get("lessor")
-        if not lessor:
-            return result
-        bills = await data.records(Bill, RecordType.BILL, counterparty=lessor)
-        if not bills:
-            return result
-        latest = max(bills, key=lambda b: b.bill_date or date.min)
-        prefill = Prefill({"monthly_payment": latest.total if latest.total > ZERO else None})
-        result.add(cls, values, prefill, f"the latest bill from {lessor} ({latest.doc_number})")
-        return result
-
     @staticmethod
     async def _ledger_checks(lease: LeaseAccountingInput, ctx: AnalysisContext) -> list[Finding]:
         """Against the lessor's bills in the preparer's data source, if they have bills."""
@@ -153,53 +130,6 @@ class LeaseAccountingAgent(BaseAgent):
                 "monthly_payment",
             )
         ]
-
-    @staticmethod
-    async def _balance_checks(
-        liability: Decimal, rou_asset: Decimal, ctx: AnalysisContext
-    ) -> tuple[list[Finding], list[Calculation]]:
-        """The lease liability and right-of-use balances in the books (latest month-end trial
-        balance), set against this lease's indicative figures."""
-        balances = await ctx.data.records(AccountBalance, RecordType.ACCOUNT_BALANCE)
-        if not balances:
-            return [], []
-        latest = max(b.period for b in balances)
-        month = [b for b in balances if b.period == latest]
-        # The trial balance is debit - credit: a liability is shown credit-positive
-        book_liability = -sum(
-            (b.balance for b in month if _LEASE_LIABILITY.search(b.account_name)), ZERO
-        )
-        book_rou = sum((b.balance for b in month if _RIGHT_OF_USE.search(b.account_name)), ZERO)
-        has_accounts = any(
-            _LEASE_LIABILITY.search(b.account_name) or _RIGHT_OF_USE.search(b.account_name)
-            for b in month
-        )
-        if not has_accounts:
-            return [
-                Finding(
-                    "LEASE_NOT_IN_BOOKS",
-                    FlagSeverity.WARNING,
-                    f"No lease liability or right-of-use account in the {latest} trial balance: "
-                    "the lease may not be recorded yet",
-                    "lease_liability",
-                )
-            ], []
-        calculations = [
-            Calculation("book_lease_liability", f"Lease liability in the books ({latest})",
-                        book_liability),
-            Calculation("book_right_of_use", f"Right-of-use assets in the books ({latest})",
-                        book_rou),
-        ]  # fmt: skip
-        return [
-            Finding(
-                "BOOK_BALANCES_COMPARED",
-                FlagSeverity.INFO,
-                f"Books at {latest}: lease liability {money(book_liability)} and right-of-use "
-                f"assets {money(book_rou)} (all leases) vs this lease's indicative "
-                f"{money(liability)} and {money(rou_asset)}: reconcile before recording",
-                "lease_liability",
-            )
-        ], calculations
 
     @classmethod
     def approval_amount(cls, data: BaseModel) -> Decimal | None:
@@ -314,8 +244,6 @@ class LeaseAccountingAgent(BaseAgent):
             )
 
         findings.extend(await cls._ledger_checks(lease, ctx))
-        book_findings, book_calculations = await cls._balance_checks(liability, rou_asset, ctx)
-        findings.extend(book_findings)
         optional_checks = [
             missing(
                 lease.lease_clauses,
@@ -361,7 +289,6 @@ class LeaseAccountingAgent(BaseAgent):
                 ),
                 Calculation("right_of_use_asset", "Indicative right-of-use asset", rou_asset),
                 Calculation("total_interest", "Total interest over the term", interest),
-                *book_calculations,
             ],
             findings=findings,
             computed={

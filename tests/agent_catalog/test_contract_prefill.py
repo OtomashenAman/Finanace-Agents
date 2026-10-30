@@ -1,16 +1,13 @@
 """Revenue Recognition and Lease Accounting prefilled from the preparer's QuickBooks."""
 
-from datetime import date
 from typing import Any
 
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.app.agent_catalog.agents.revenue_recognition.agent import months_elapsed
 from src.app.agent_catalog.models import AgentCapacity
 from src.app.auth.models import UserRole
-from src.app.common.clock import utcnow
 from tests.agent_catalog.test_data_source_prefill import analyzed, codes, prefilled
 from tests.agent_catalog.test_runs_api import assign
 from tests.conftest import ClientFactory, FakeLLM, MakeUser
@@ -102,8 +99,6 @@ async def test_contract_invoice_fills_the_contract_facts(
         "contract_id": "CTR-2026-091",
         "contract_total": "120000.00",
         "service_term_months": 12,  # service dates Jan to Dec
-        # whole months of service since 1 Jan: splits earned from deferred revenue
-        "months_delivered": months_elapsed(date(2026, 1, 1), utcnow().date()),
         "performance_obligations": "Hosting: 90,000.00\nSupport: 30,000.00",
     }
 

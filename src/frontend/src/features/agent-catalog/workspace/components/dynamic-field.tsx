@@ -1,5 +1,4 @@
 import type { UseFormRegister } from "react-hook-form"
-import { Database } from "lucide-react"
 
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -15,17 +14,12 @@ interface DynamicFieldProps {
   register: UseFormRegister<FormValues>
   error?: string
   disabled?: boolean
-  /** Where the value came from, e.g. "QuickBooks · Acme Ltd · bill INV-2048 · synced …" */
-  lineage?: string
 }
 
 /** Renders one input from the backend's form spec; the same component serves every agent. */
-export function DynamicField({ field, register, error, disabled, lineage }: DynamicFieldProps) {
+export function DynamicField({ field, register, error, disabled }: DynamicFieldProps) {
   const id = `field-${field.name}`
-  const describedBy =
-    [error && `${id}-error`, lineage && !error && `${id}-lineage`, field.help && !lineage && `${id}-help`]
-      .filter(Boolean)
-      .join(" ") || undefined
+  const describedBy = [error && `${id}-error`, field.help && `${id}-help`].filter(Boolean).join(" ") || undefined
   const a11y = { id, disabled, "aria-invalid": error ? true : undefined, "aria-describedby": describedBy }
 
   if (field.kind === "boolean") {
@@ -47,19 +41,6 @@ export function DynamicField({ field, register, error, disabled, lineage }: Dyna
       </Label>
       {field.kind === "textarea" ? (
         <Textarea maxLength={field.max_length ?? undefined} {...a11y} {...register(field.name)} />
-      ) : field.kind === "choice" && field.options ? (
-        <select
-          className="h-9 w-full rounded-md border bg-background px-3 text-sm disabled:opacity-60"
-          {...a11y}
-          {...register(field.name)}
-        >
-          <option value="">{field.required ? "Choose…" : "Not set"}</option>
-          {field.options.map((option) => (
-            <option key={option} value={option}>
-              {option}
-            </option>
-          ))}
-        </select>
       ) : (
         <div className="relative">
           <Input
@@ -79,13 +60,7 @@ export function DynamicField({ field, register, error, disabled, lineage }: Dyna
           )}
         </div>
       )}
-      {lineage && !error && (
-        <p id={`${id}-lineage`} className="flex items-center gap-1 text-xs text-emerald-800">
-          <Database className="size-3 shrink-0" aria-hidden />
-          <span>From {lineage}</span>
-        </p>
-      )}
-      {field.help && !error && !lineage && (
+      {field.help && !error && (
         <p id={`${id}-help`} className="text-xs text-muted-foreground">
           {field.help}
         </p>

@@ -17,9 +17,6 @@ PDF_EXAMPLE = {
     "gl_balance": "120000",
     "subledger_balance": "119000",
     "materiality_threshold": "500",
-    # The QuickBooks deck: both balances on the same basis and currency
-    "accounting_basis": "Accrual",
-    "currency": "USD",
 }
 
 

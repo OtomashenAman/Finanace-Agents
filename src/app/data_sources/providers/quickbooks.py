@@ -1,6 +1,5 @@
 """QuickBooks Online: Intuit OAuth 2.0 and the accounting API, mapped to canonical records."""
 
-import asyncio
 import contextlib
 import urllib.parse
 from dataclasses import dataclass
@@ -18,13 +17,9 @@ from src.app.data_sources.records import (
     Account,
     AccountBalance,
     Bill,
-    BillPayment,
-    CreditMemo,
     Customer,
-    DocLine,
     Expense,
     Invoice,
-    JournalLine,
     Payment,
     PeriodResult,
     PurchaseOrder,
@@ -32,7 +27,6 @@ from src.app.data_sources.records import (
     RecordType,
     SubledgerTotal,
     Vendor,
-    VendorCredit,
     month_end,
 )
 
@@ -47,9 +41,6 @@ API_BASE = {
 MINOR_VERSION = "75"
 PAGE_SIZE = 1000
 CALLBACK_PATH = "/api/v1/data-sources/quickbooks/callback"
-# Seconds to wait before each retry of a throttled (429) or failed (5xx) call; then give up
-RETRY_DELAYS: tuple[float, ...] = (1.0, 4.0)
-MAX_RETRY_AFTER = 30.0
 
 # Tests swap this for an httpx.MockTransport; None means real network calls
 transport: httpx.AsyncBaseTransport | None = None
@@ -114,14 +105,6 @@ def authorization_url(app: AppCredentials, state: str) -> str:
 
 def client() -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=transport, timeout=get_settings().data_sync_timeout_seconds)
-
-
-def _retry_after(resp: httpx.Response) -> float:
-    """The Retry-After header in seconds (capped), or 0 when absent or unreadable."""
-    try:
-        return min(float(resp.headers.get("Retry-After", 0)), MAX_RETRY_AFTER)
-    except ValueError:
-        return 0.0
 
 
 def _fault(resp: httpx.Response) -> str:
@@ -198,32 +181,15 @@ class Api:
         self._base = f"{API_BASE[app.environment]}/v3/company/{realm_id}"
         self._headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
 
-    async def _send(self, request: httpx.Request, *, idempotent: bool) -> httpx.Response:
-        """Send with backoff when QuickBooks throttles (429) or, for reads, fails (5xx)."""
-        for delay in (*RETRY_DELAYS, None):
-            try:
-                resp = await self._client.send(request)
-            except httpx.HTTPError as exc:
-                if delay is None or not idempotent:
-                    raise QuickBooksError(
-                        "Couldn't reach QuickBooks. Try again in a moment."
-                    ) from exc
-            else:
-                retryable = resp.status_code == 429 or (idempotent and resp.status_code >= 500)
-                if not retryable or delay is None:
-                    return resp
-                delay = max(delay, _retry_after(resp))
-            await asyncio.sleep(delay)
-        raise AssertionError("unreachable")  # pragma: no cover - the loop always returns
-
     async def _get(self, path: str, **params: str) -> dict[str, Any]:
-        request = self._client.build_request(
-            "GET",
-            f"{self._base}/{path}",
-            params={**params, "minorversion": MINOR_VERSION},
-            headers=self._headers,
-        )
-        resp = await self._send(request, idempotent=True)
+        try:
+            resp = await self._client.get(
+                f"{self._base}/{path}",
+                params={**params, "minorversion": MINOR_VERSION},
+                headers=self._headers,
+            )
+        except httpx.HTTPError as exc:
+            raise QuickBooksError("Couldn't reach QuickBooks. Try again in a moment.") from exc
         if resp.status_code in (401, 403):
             raise ReauthorizationRequired("QuickBooks no longer accepts this connection.")
         if resp.is_error:
@@ -232,15 +198,15 @@ class Api:
         return result
 
     async def _post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
-        request = self._client.build_request(
-            "POST",
-            f"{self._base}/{path}",
-            params={"minorversion": MINOR_VERSION},
-            headers={**self._headers, "Content-Type": "application/json"},
-            json=body,
-        )
-        # A throttled write wasn't applied and may be resent; other failures never are
-        resp = await self._send(request, idempotent=False)
+        try:
+            resp = await self._client.post(
+                f"{self._base}/{path}",
+                params={"minorversion": MINOR_VERSION},
+                headers={**self._headers, "Content-Type": "application/json"},
+                json=body,
+            )
+        except httpx.HTTPError as exc:
+            raise QuickBooksError("Couldn't reach QuickBooks. Try again in a moment.") from exc
         if resp.status_code in (401, 403):
             raise ReauthorizationRequired("QuickBooks no longer accepts this connection.")
         if resp.is_error:
@@ -351,53 +317,7 @@ def _vendor(row: dict[str, Any]) -> Vendor:
     )
 
 
-def _decimal(value: Any) -> Decimal | None:
-    return None if value is None else Decimal(str(value))
-
-
-def _doc_lines(row: dict[str, Any], item_accounts: dict[str, str] | None = None) -> list[DocLine]:
-    """A bill's or PO's expense lines: by item (with quantity, unit price and the item's
-    expense account) or by account."""
-    lines = []
-    for line in row.get("Line", []):
-        if "Amount" not in line:
-            continue
-        if detail := line.get("ItemBasedExpenseLineDetail"):
-            item = _ref_name(detail, "ItemRef")
-            quantity, price = _decimal(detail.get("Qty")), _decimal(detail.get("UnitPrice"))
-            item_id = str((detail.get("ItemRef") or {}).get("value", ""))
-            account = (item_accounts or {}).get(item_id)
-        elif detail := line.get("AccountBasedExpenseLineDetail"):
-            item = account = _ref_name(detail, "AccountRef")
-            quantity = price = None
-        else:
-            continue  # subtotals and other non-expense lines
-        lines.append(
-            DocLine(
-                item=(item or line.get("Description") or "Line")[:200],
-                quantity=quantity,
-                unit_price=price,
-                amount=line["Amount"],
-                account=account,
-            )
-        )
-    return lines
-
-
-def _item_accounts(items: list[dict[str, Any]]) -> dict[str, str]:
-    """Item id -> the GL account its purchases post to (expense, else asset/COGS account)."""
-    accounts = {}
-    for item in items:
-        for key in ("ExpenseAccountRef", "AssetAccountRef"):
-            if name := _ref_name(item, key):
-                accounts[str(item["Id"])] = name
-                break
-    return accounts
-
-
-def _purchase_order(
-    row: dict[str, Any], item_accounts: dict[str, str] | None = None
-) -> PurchaseOrder:
+def _purchase_order(row: dict[str, Any]) -> PurchaseOrder:
     return PurchaseOrder(
         external_id=str(row["Id"]),
         po_number=row.get("DocNumber") or f"PO {row['Id']}",
@@ -405,19 +325,14 @@ def _purchase_order(
         total=row.get("TotalAmt", 0),
         status=row.get("POStatus"),
         po_date=row.get("TxnDate"),
-        lines=_doc_lines(row, item_accounts),
     )
 
 
-def _bill(
-    row: dict[str, Any], po_numbers: dict[str, str], item_accounts: dict[str, str] | None = None
-) -> Bill:
+def _bill(row: dict[str, Any], po_numbers: dict[str, str]) -> Bill:
     linked_po = next(
         (t["TxnId"] for t in row.get("LinkedTxn", []) if t.get("TxnType") == "PurchaseOrder"),
         None,
     )
-    lines = _doc_lines(row, item_accounts)
-    # The first account line's account, else the first item's expense account
     account = next(
         (
             _ref_name(line.get("AccountBasedExpenseLineDetail", {}), "AccountRef")
@@ -425,7 +340,7 @@ def _bill(
             if line.get("AccountBasedExpenseLineDetail")
         ),
         None,
-    ) or next((line.account for line in lines if line.account), None)
+    )
     return Bill(
         external_id=str(row["Id"]),
         doc_number=row.get("DocNumber") or f"Bill {row['Id']}",
@@ -437,71 +352,7 @@ def _bill(
         po_number=po_numbers.get(str(linked_po)) if linked_po else None,
         account=account,
         balance=row.get("Balance"),
-        lines=lines,
     )
-
-
-def _bill_payment(row: dict[str, Any], bill_numbers: dict[str, str]) -> BillPayment:
-    paid = [
-        bill_numbers.get(str(t["TxnId"]), f"Bill {t['TxnId']}")
-        for line in row.get("Line", [])
-        for t in line.get("LinkedTxn", [])
-        if t.get("TxnType") == "Bill"
-    ]
-    return BillPayment(
-        external_id=str(row["Id"]),
-        payment_number=row.get("DocNumber") or f"Payment {row['Id']}",
-        vendor_name=_ref_name(row, "VendorRef") or "Unknown vendor",
-        total=row.get("TotalAmt", 0),
-        payment_date=row.get("TxnDate"),
-        payment_type=row.get("PayType"),
-        bills_paid=", ".join(paid)[:2000] or None,
-        memo=row.get("PrivateNote"),
-    )
-
-
-def _credit_memo(row: dict[str, Any]) -> CreditMemo:
-    return CreditMemo(
-        external_id=str(row["Id"]),
-        doc_number=row.get("DocNumber") or f"Credit {row['Id']}",
-        customer_name=_ref_name(row, "CustomerRef") or "Unknown customer",
-        total=row.get("TotalAmt", 0),
-        remaining_credit=row.get("RemainingCredit"),
-        credit_date=row.get("TxnDate"),
-    )
-
-
-def _vendor_credit(row: dict[str, Any]) -> VendorCredit:
-    return VendorCredit(
-        external_id=str(row["Id"]),
-        doc_number=row.get("DocNumber") or f"Credit {row['Id']}",
-        vendor_name=_ref_name(row, "VendorRef") or "Unknown vendor",
-        total=row.get("TotalAmt", 0),
-        remaining_credit=row.get("Balance"),
-        credit_date=row.get("TxnDate"),
-    )
-
-
-def _journal_lines(row: dict[str, Any]) -> list[JournalLine]:
-    """A journal entry's lines, debits positive and credits negative."""
-    lines = []
-    for position, line in enumerate(row.get("Line", []), start=1):
-        detail = line.get("JournalEntryLineDetail")
-        account = _ref_name(detail or {}, "AccountRef")
-        if not detail or not account:
-            continue
-        amount = Decimal(str(line.get("Amount", 0)))
-        lines.append(
-            JournalLine(
-                external_id=f"{row['Id']}-{line.get('Id', position)}",
-                entry_number=row.get("DocNumber") or f"JE {row['Id']}",
-                account=account,
-                amount_signed=amount if detail.get("PostingType") == "Debit" else -amount,
-                entry_date=row.get("TxnDate"),
-                memo=line.get("Description") or row.get("PrivateNote"),
-            )
-        )
-    return lines
 
 
 def _account(row: dict[str, Any]) -> Account:
@@ -787,13 +638,9 @@ async def fetch_history(qbo: Api, today: date) -> History:
     totals: list[Record] = []
     results: list[Record] = []
     periods = history_periods(today)
-    # Always explicit: a report's default basis is the company preference, which can change
-    method = get_settings().quickbooks_accounting_method
     for period in periods:
         end = month_end(period).isoformat()
-        trial = await qbo.report(
-            "TrialBalance", start_date=f"{period}-01", end_date=end, accounting_method=method
-        )
+        trial = await qbo.report("TrialBalance", start_date=f"{period}-01", end_date=end)
         balances.extend(_trial_balance(trial, period, accounts))
         for ledger, report in (("AR", "AgedReceivables"), ("AP", "AgedPayables")):
             aging = await qbo.report(report, report_date=end)
@@ -809,7 +656,6 @@ async def fetch_history(qbo: Api, today: date) -> History:
             "ProfitAndLoss",
             start_date=f"{period}-01",
             end_date=end,
-            accounting_method=method,
             summarize_column_by="Classes",
         )
         results.extend(_profit_and_loss(pnl, period))
@@ -849,16 +695,9 @@ async def fetch_all(qbo: Api, realm_id: str) -> Snapshot:
             "Payment",
             "Purchase",
             "Attachable",
-            "BillPayment",
-            "CreditMemo",
-            "VendorCredit",
-            "JournalEntry",
-            "Item",
         )
     }
-    item_accounts = _item_accounts(raw["Item"])
     po_numbers = {str(r["Id"]): r.get("DocNumber") or f"PO {r['Id']}" for r in raw["PurchaseOrder"]}
-    bill_numbers = {str(r["Id"]): r.get("DocNumber") or f"Bill {r['Id']}" for r in raw["Bill"]}
     invoice_numbers = {
         str(r["Id"]): r.get("DocNumber") or f"Invoice {r['Id']}" for r in raw["Invoice"]
     }
@@ -870,20 +709,13 @@ async def fetch_all(qbo: Api, realm_id: str) -> Snapshot:
     with_receipt = _receipts(raw["Attachable"])
     mappers: dict[RecordType, tuple[str, Any]] = {
         RecordType.VENDOR: ("Vendor", _vendor),
-        RecordType.PURCHASE_ORDER: (
-            "PurchaseOrder",
-            lambda row: _purchase_order(row, item_accounts),
-        ),
-        RecordType.BILL: ("Bill", lambda row: _bill(row, po_numbers, item_accounts)),
+        RecordType.PURCHASE_ORDER: ("PurchaseOrder", _purchase_order),
+        RecordType.BILL: ("Bill", lambda row: _bill(row, po_numbers)),
         RecordType.ACCOUNT: ("Account", _account),
         RecordType.CUSTOMER: ("Customer", _customer),
         RecordType.INVOICE: ("Invoice", lambda row: _invoice(row, paid_on)),
         RecordType.PAYMENT: ("Payment", lambda row: _payment(row, invoice_numbers)),
         RecordType.EXPENSE: ("Purchase", lambda row: _expense(row, with_receipt)),
-        RecordType.BILL_PAYMENT: ("BillPayment", lambda row: _bill_payment(row, bill_numbers)),
-        RecordType.CREDIT_MEMO: ("CreditMemo", _credit_memo),
-        RecordType.VENDOR_CREDIT: ("VendorCredit", _vendor_credit),
-        RecordType.JOURNAL_LINE: ("JournalEntry", _journal_lines),  # one record per line
     }
     records: dict[RecordType, list[Record]] = {}
     skipped = 0
@@ -891,9 +723,7 @@ async def fetch_all(qbo: Api, realm_id: str) -> Snapshot:
         records[record_type] = []
         for row in raw[entity]:
             try:
-                mapped = mapper(row)
+                records[record_type].append(mapper(row))
             except (ValidationError, KeyError):
                 skipped += 1
-                continue
-            records[record_type].extend(mapped if isinstance(mapped, list) else [mapped])
     return Snapshot(await qbo.company_name(realm_id), records, skipped)

@@ -1,11 +1,10 @@
 """Cash Application, Expense Audit and AR Collections prefilled from the preparer's QuickBooks."""
 
-from datetime import date, timedelta
+from datetime import date
 from typing import Any
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.agent_catalog.agents.ar_collections.agent import exposure
@@ -13,7 +12,6 @@ from src.app.agent_catalog.agents.cash_application.agent import candidate_invoic
 from src.app.agent_catalog.models import AgentCapacity
 from src.app.auth.models import UserRole
 from src.app.common.clock import utcnow
-from src.app.data_sources.models import DataSource
 from src.app.data_sources.records import Invoice, Payment
 from tests.agent_catalog.test_runs_api import assign
 from tests.conftest import ClientFactory, FakeLLM, MakeUser
@@ -128,8 +126,9 @@ class FakeData:
 @pytest.mark.parametrize(
     ("memo", "invoices", "expected"),
     [
-        # Same amount, nothing names it: amount alone is never a match, the preparer picks
-        (None, [invoice("INV-1", "900"), invoice("INV-2", "50")], (None, False)),
+        # Same amount, only one: proposed but not verified
+        (None, [invoice("INV-1", "900"), invoice("INV-2", "50")], ("INV-1", False)),
+        # Two with the same amount: the preparer picks
         (None, [invoice("INV-1", "900"), invoice("INV-2", "900")], (None, False)),
         # INV-1 is not INV-10
         ("Paying INV-10", [invoice("INV-1", "900"), invoice("INV-10", "70")], ("INV-10", True)),
@@ -216,88 +215,6 @@ async def test_customer_prefills_balance_aging_and_late_history(
     fake_llm.output["draft_message"] = "Dear Harbor Distribution, a reminder about INV-8021."
     run = await analyzed(me, "ar_collections", run)
     assert run["narrative"]["output"]["draft_message"].startswith("Dear Harbor")
-
-
-# --- Completed from the data on analyze -------------------------------------------------------
-
-
-async def entered_and_analyzed(client: AsyncClient, key: str, **values: Any) -> Any:
-    """A run typed in by hand (no record picked), then analyzed."""
-    await connect(client)
-    runs = f"/api/v1/agents/{key}/runs"
-    run = (await client.post(runs)).json()
-    r = await client.put(f"{runs}/{run['id']}/input", json={"values": values})
-    assert r.status_code == 200, r.text
-    return (await client.post(f"{runs}/{run['id']}/analyze")).json()
-
-
-async def test_payment_reference_alone_finds_the_payment_and_its_invoice(
-    me: AsyncClient, fake_llm: FakeLLM
-) -> None:
-    run = await entered_and_analyzed(me, "cash_application", payment_reference="WIRE-2901")
-
-    assert run["status"] == "analyzed", run
-    assert run["input"]["customer"] == "Harbor Distribution"
-    assert run["input"]["payment_amount"] == "900.00"
-    assert run["input"]["candidate_invoice_number"] == "INV-8021"
-    assert run["input"]["invoice_open_amount"] == "1000.00"
-    note = next(f for f in run["flags"] if f["code"] == "FILLED_FROM_DATA")
-    assert note["severity"] == "info" and "payment WIRE-2901" in note["message"]
-    assert codes(run)["SHORT_PAYMENT"] == "warning"
-
-
-async def test_customer_name_alone_fills_balance_and_aging(
-    me: AsyncClient, fake_llm: FakeLLM
-) -> None:
-    run = await entered_and_analyzed(
-        me,
-        "ar_collections",
-        customer="Harbor Distribution",
-        open_dispute=False,
-        strategic_account=False,
-    )
-
-    assert run["status"] == "analyzed", run
-    assert run["input"]["open_balance"] == "1000.00"
-    assert run["input"]["previous_late_payments"] == 1
-    assert "FILLED_FROM_DATA" in codes(run)
-
-
-async def test_nothing_in_the_data_leaves_the_run_for_the_preparer(me: AsyncClient) -> None:
-    run = await entered_and_analyzed(me, "cash_application", payment_reference="NOPE-1")
-
-    assert run["status"] == "validation_failed"
-    assert run["input"]["customer"] is None
-
-
-async def test_a_reference_used_twice_is_never_guessed(
-    me: AsyncClient,
-    intuit: FakeIntuit,  # noqa: F811 - the fixture imported above
-) -> None:
-    other = {"value": "9", "name": "Other Co"}
-    twin = {"Id": "403", "PaymentRefNum": "WIRE-2901", "CustomerRef": other, "TotalAmt": 50.0,
-            "TxnDate": "2026-10-16", "UnappliedAmt": 50.0, "Line": []}  # fmt: skip
-    intuit.extra = {"Payment": [twin]}
-    run = await entered_and_analyzed(me, "cash_application", payment_reference="WIRE-2901")
-
-    assert run["status"] == "validation_failed"
-    assert run["input"]["customer"] is None
-    messages = [e["message"] for e in run["validation_errors"]]
-    assert any("Several payment records are numbered WIRE-2901" in m for m in messages)
-
-
-async def test_old_data_is_flagged(me: AsyncClient, db: AsyncSession, fake_llm: FakeLLM) -> None:
-    await connect(me)
-    await db.execute(update(DataSource).values(last_synced_at=utcnow() - timedelta(days=30)))
-    await db.commit()
-    runs = "/api/v1/agents/cash_application/runs"
-    run = (await me.post(runs)).json()
-    await me.put(f"{runs}/{run['id']}/input", json={"values": {"payment_reference": "WIRE-2901"}})
-    run = (await me.post(f"{runs}/{run['id']}/analyze")).json()
-
-    assert run["status"] == "analyzed", run
-    stale = next(f for f in run["flags"] if f["code"] == "DATA_MAY_BE_STALE")
-    assert stale["severity"] == "warning" and "30 days ago" in stale["message"]
 
 
 def test_exposure_from_invoices() -> None:

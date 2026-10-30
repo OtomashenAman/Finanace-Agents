@@ -20,7 +20,6 @@ class BoardReportingRun(AgentRunDetail, Base):
     reporting_period: Mapped[str | None] = mapped_column(String(20))
     reported_revenue: Mapped[Decimal | None] = mapped_column(MONEY)
     prior_period_revenue: Mapped[Decimal | None] = mapped_column(MONEY)
-    comparison_period: Mapped[str | None] = mapped_column(String(20))
     operating_profit: Mapped[Decimal | None] = mapped_column(MONEY)
     source_dataset_id: Mapped[str | None] = mapped_column(String(200))
     known_disclosures: Mapped[str | None] = mapped_column(Text)

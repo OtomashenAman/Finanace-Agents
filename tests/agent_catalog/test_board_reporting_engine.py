@@ -14,7 +14,6 @@ PDF_EXAMPLE = {
     "reported_revenue": "1000000",
     "prior_period_revenue": "900000",
     "operating_profit": "150000",
-    "comparison_period": "2025-Q3",  # year on year
 }
 
 

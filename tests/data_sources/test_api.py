@@ -13,12 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.app.agent_catalog.models import Agent, AgentAssignment, AgentCapacity
 from src.app.auth.models import User, UserRole
 from src.app.common.clock import utcnow
-from src.app.core.config import get_settings
 from src.app.data_sources import crypto
 from src.app.data_sources.models import DataSource, SourceStatus
 from src.app.data_sources.providers import quickbooks as qb
 from tests.conftest import ClientFactory, FakeLLM, MakeUser
-from tests.entities.test_api import entity, give
 
 SOURCES = "/api/v1/data-sources"
 APP = {"client_id": "ABclient", "client_secret": "super-secret", "environment": "sandbox"}
@@ -328,7 +326,7 @@ class FakeIntuit:
                 ],
                 "Budget": self.budgets,
                 **RECEIVABLES_AND_EXPENSES,
-            }.get(entity, [])  # entities without fixed rows: only what a test adds in extra
+            }[entity]
             rows = [*rows, *self.extra.get(entity, [])]
             return httpx.Response(200, json={"QueryResponse": {entity: rows}})
         return httpx.Response(404)
@@ -339,12 +337,6 @@ def intuit(monkeypatch: pytest.MonkeyPatch) -> Iterator[FakeIntuit]:
     fake = FakeIntuit()
     monkeypatch.setattr(qb, "transport", httpx.MockTransport(fake.handler))
     yield fake
-
-
-@pytest.fixture(autouse=True)
-def write_back_on(monkeypatch: pytest.MonkeyPatch) -> None:
-    """These tests cover write-back, which is off by default (QuickBooks read-only)."""
-    monkeypatch.setattr(get_settings(), "quickbooks_write_back", True)
 
 
 @pytest.fixture
@@ -487,11 +479,6 @@ async def test_user_connects_own_quickbooks_and_it_syncs(
         "invoice": 3,
         "payment": 2,
         "expense": 2,
-        # supplier payments, credits and journals: none in this company
-        "bill_payment": 0,
-        "credit_memo": 0,
-        "vendor_credit": 0,
-        "journal_line": 0,
         # month-end history, fetched by the background job (run inline in tests)
         "account_balance": 3 * 24,
         "subledger_total": 2 * 24,
@@ -795,169 +782,6 @@ async def test_vendor_master_flags_unknown_and_inactive_suppliers(
         assert code in {f["code"] for f in analyzed["flags"]}
 
 
-# In the fake QuickBooks, PO-77 (12,500) is fully billed by INV-2048 already
-ACME = {"value": "56", "name": "Acme Cloud Services"}
-
-
-def acme_po(po_id: str, number: str, total: float, status: str = "Open") -> dict[str, Any]:
-    return {"Id": po_id, "DocNumber": number, "VendorRef": ACME, "TotalAmt": total,
-            "POStatus": status}  # fmt: skip
-
-
-def acme_bill(bill_id: str, number: str, total: float, po_id: str | None = None) -> dict[str, Any]:
-    linked = [{"TxnId": po_id, "TxnType": "PurchaseOrder"}] if po_id else []
-    return {"Id": bill_id, "DocNumber": number, "VendorRef": ACME, "TotalAmt": total,
-            "TxnDate": "2026-10-15", "LinkedTxn": linked, "Line": []}  # fmt: skip
-
-
-async def entered(client: AsyncClient, **values: Any) -> Any:
-    """An AP invoice typed in by hand (Acme, unless given), then analyzed."""
-    await connect(client)
-    run = (await client.post(RUNS)).json()
-    values = {"supplier": "Acme Cloud Services", **values}
-    await client.put(f"{RUNS}/{run['id']}/input", json={"values": values})
-    return (await client.post(f"{RUNS}/{run['id']}/analyze")).json()
-
-
-async def test_bill_without_a_linked_po_finds_its_po_and_gl_account(
-    me: AsyncClient, intuit: FakeIntuit
-) -> None:
-    intuit.extra = {
-        "Bill": [acme_bill("146", "INV-2049", 12500.0)],
-        "PurchaseOrder": [acme_po("303", "PO-80", 12500.0)],
-    }
-    source_id = (await connect(me))["source"][0]
-    run = (await me.post(RUNS)).json()
-
-    r = await me.put(
-        f"{RUNS}/{run['id']}/source", json={"source_id": source_id, "record_id": "146"}
-    )
-    assert r.status_code == 200, r.text
-    run = r.json()
-    # PO-77 is used up: PO-80 is Acme's open PO for this amount; coded like Acme's other bill
-    assert run["source"]["records"]["purchase_order"]["po_number"] == "PO-80"
-    assert run["input"]["po_authorized_amount"] == "12500.00"
-    assert run["input"]["proposed_gl_account"] == "6100 Cloud Hosting"
-
-
-async def test_invoice_entered_by_hand_is_completed_and_its_po_frozen_for_the_reviewer(
-    me: AsyncClient, intuit: FakeIntuit, fake_llm: FakeLLM
-) -> None:
-    intuit.extra = {"PurchaseOrder": [acme_po("303", "PO-80", 12500.0)]}
-    run = await entered(
-        me, invoice_number="INV-3002", invoice_total="12500.00", received_amount="10000.00"
-    )
-
-    assert run["status"] == "analyzed", run
-    assert run["input"]["po_authorized_amount"] == "12500.00"
-    assert run["input"]["proposed_gl_account"] == "6100 Cloud Hosting"
-    assert run["input"]["received_amount"] == "10000.00"  # never overwritten
-    flags = {f["code"]: f for f in run["flags"]}
-    assert "PO-80" in flags["PO_FOUND"]["message"]
-    assert "data as of" in flags["PO_FOUND"]["message"]
-    assert flags["GL_CODED"]["severity"] == "info"
-    assert flags["PO_MATCH"]["severity"] == "pass"
-    assert flags["RECEIPT_MISMATCH"]["severity"] == "high"
-    assert run["headline"] == "Invoice discrepancy"
-    assert run["source"]["records"]["purchase_order"]["po_number"] == "PO-80"
-
-    # The frozen PO is evidence the AI explanation can cite by its QuickBooks id
-    _, user = fake_llm.calls[-1]
-    [evidence] = json.loads(user)["source_records"]
-    assert (evidence["id"], evidence["type"], evidence["record_id"]) == (
-        "S1",
-        "purchase_order",
-        "303",
-    )
-    seen = (await me.get(f"{RUNS}/{run['id']}")).json()
-    assert seen["narrative"]["source_records"] == {"S1": "purchase order 303"}
-
-
-async def test_a_po_already_billed_in_full_is_not_matched_again(
-    me: AsyncClient, intuit: FakeIntuit
-) -> None:
-    run = await entered(
-        me, invoice_number="INV-3003", invoice_total="12500.00", received_amount="12500.00"
-    )
-
-    assert run["status"] == "validation_failed"
-    assert run["input"]["po_authorized_amount"] is None
-    messages = [e["message"] for e in run["validation_errors"]]
-    assert any("No open PO with an amount left to bill" in m for m in messages), messages
-
-
-async def test_a_partly_billed_po_offers_what_is_left(
-    me: AsyncClient, intuit: FakeIntuit, fake_llm: FakeLLM
-) -> None:
-    intuit.extra = {
-        "PurchaseOrder": [acme_po("304", "PO-82", 20000.0)],
-        "Bill": [acme_bill("147", "INV-2050", 8000.0, po_id="304")],
-    }
-    run = await entered(
-        me, invoice_number="INV-3004", invoice_total="12000.00", received_amount="12000.00"
-    )
-
-    assert run["status"] == "analyzed", run
-    assert run["input"]["po_authorized_amount"] == "12000.00"
-    found = next(f for f in run["flags"] if f["code"] == "PO_FOUND")
-    assert "8,000.00 already billed by INV-2050" in found["message"]
-
-
-async def test_closed_and_tied_pos_are_never_guessed(me: AsyncClient, intuit: FakeIntuit) -> None:
-    intuit.extra = {
-        "PurchaseOrder": [
-            acme_po("305", "PO-83", 12500.0),
-            acme_po("306", "PO-84", 12500.0),
-            acme_po("307", "PO-85", 12500.0, status="Closed"),
-        ]
-    }
-    run = await entered(
-        me, invoice_number="INV-3005", invoice_total="12500.00", received_amount="12500.00"
-    )
-
-    assert run["status"] == "validation_failed"
-    messages = [e["message"] for e in run["validation_errors"]]
-    assert any("(PO-83, PO-84)" in m for m in messages)  # not the closed PO-85
-
-
-async def test_an_invoice_already_in_quickbooks_is_completed_from_that_bill(
-    me: AsyncClient, intuit: FakeIntuit, fake_llm: FakeLLM
-) -> None:
-    run = await entered(me, invoice_number="INV-2048", received_amount="12500.00")
-
-    assert run["status"] == "analyzed", run
-    assert run["input"]["invoice_total"] == "12500.00"
-    assert run["input"]["tax_total"] == "500.00"
-    # Its own linked PO: the bill itself isn't counted as billing it
-    assert run["input"]["po_authorized_amount"] == "12500.00"
-    # Frozen as that QuickBooks bill: approval write-back notes it instead of creating another
-    assert run["source"]["records"]["bill"]["external_id"] == "145"
-
-
-async def test_each_legal_entity_has_one_quickbooks_company(
-    adm: AsyncClient, me: AsyncClient, analyst: User, intuit: FakeIntuit
-) -> None:
-    us = await entity(adm, "US01", "US Operations")
-    uk = await entity(adm, "UK01", "UK Operations")
-    await give(adm, analyst, us)
-    first = (await connect(me))["source"][0]
-    second = (await connect(me, realm="9130350000000002"))["source"][0]
-
-    r = await me.patch(f"{SOURCES}/{first}", json={"entity_id": us["id"]})
-    assert r.status_code == 200 and r.json()["entity_id"] == us["id"]
-    assert r.json()["name"]  # only the fields sent change
-
-    taken = await me.patch(f"{SOURCES}/{second}", json={"entity_id": us["id"]})
-    assert taken.status_code == 409
-    assert taken.json()["detail"]["code"] == "entity_already_linked"
-    # Only entities the user works for
-    assert (await me.patch(f"{SOURCES}/{second}", json={"entity_id": uk["id"]})).status_code == 404
-
-    r = await me.patch(f"{SOURCES}/{first}", json={"entity_id": None})
-    assert r.json()["entity_id"] is None
-    assert (await me.patch(f"{SOURCES}/{second}", json={"entity_id": us["id"]})).status_code == 200
-
-
 async def test_cannot_prefill_from_someone_elses_source(
     adm: AsyncClient,
     me: AsyncClient,
@@ -1132,48 +956,24 @@ async def test_an_invoice_entered_by_hand_becomes_a_quickbooks_bill_once(
     assert f"Created QuickBooks bill 900 for {run['reference']}" in summaries
 
 
-async def test_quickbooks_is_read_only_unless_write_back_is_turned_on(
+async def test_an_existing_bill_with_that_number_is_not_duplicated(
     me: AsyncClient,
     intuit: FakeIntuit,
     make_user: MakeUser,
     signed_in_client: ClientFactory,
     fake_llm: FakeLLM,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(get_settings(), "quickbooks_write_back", False)  # the default
     admin = await signed_in_client(await make_user("admin@example.com", UserRole.FINANCE_ADMIN))
     source_id = (await connect(me))["source"][0]
-    run = await approved_by_hand(me, admin)
-
-    mine = (await me.get(f"{RUNS}/{run['id']}")).json()["permissions"]
-    assert mine["can_write_back"] is False
-    assert "read-only" in mine["write_back_blocked_reason"]
-    r = await me.post(
-        f"{RUNS}/{run['id']}/write-back", json={"source_id": source_id, "account_id": "7"}
-    )
-    assert r.status_code == 403 and intuit.created == []
-
-
-async def test_an_invoice_typed_in_that_is_already_a_bill_notes_that_bill(
-    me: AsyncClient,
-    intuit: FakeIntuit,
-    make_user: MakeUser,
-    signed_in_client: ClientFactory,
-    fake_llm: FakeLLM,
-) -> None:
-    admin = await signed_in_client(await make_user("admin@example.com", UserRole.FINANCE_ADMIN))
-    await connect(me)
-    # Analyze finds INV-2048 in QuickBooks and links the run to that bill
     run = await approved_by_hand(me, admin, invoice_number="INV-2048")
-    assert run["source"]["records"]["bill"]["external_id"] == "145"
-    differs = next(f for f in run["flags"] if f["code"] == "TOTAL_DIFFERS_FROM_BOOKS")
-    assert differs["severity"] == "high" and "12,500.00" in differs["message"]  # 980.50 typed
-
-    done = (await me.post(f"{RUNS}/{run['id']}/write-back")).json()
-    [action] = done["actions"]
-    assert action["status"] == "succeeded", action
-    assert action["receipt"]["bill_id"] == "145"
-    assert intuit.created == []  # never a second bill
+    done = (
+        await me.post(
+            f"{RUNS}/{run['id']}/write-back", json={"source_id": source_id, "account_id": "7"}
+        )
+    ).json()
+    receipt = done["actions"][0]["receipt"]
+    assert receipt["bill_id"] == "145" and receipt["already_present"] is True
+    assert intuit.created == []
 
 
 async def test_bill_needs_a_vendor_known_to_quickbooks_and_your_own_connection(

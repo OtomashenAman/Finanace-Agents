@@ -17,8 +17,6 @@ class FinancialCloseRun(AgentRunDetail, Base):
     # --- input ---
     gl_account: Mapped[str | None] = mapped_column(String(100), index=True)
     close_period: Mapped[str | None] = mapped_column(String(7))
-    accounting_basis: Mapped[str | None] = mapped_column(String(10))
-    currency: Mapped[str | None] = mapped_column(String(3))
     gl_balance: Mapped[Decimal | None] = mapped_column(MONEY)
     subledger_balance: Mapped[Decimal | None] = mapped_column(MONEY)
     materiality_threshold: Mapped[Decimal | None] = mapped_column(MONEY)

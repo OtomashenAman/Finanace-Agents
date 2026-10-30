@@ -1,5 +1,5 @@
 from decimal import ROUND_HALF_UP, Decimal
-from typing import Any, cast
+from typing import cast
 
 from pydantic import BaseModel
 
@@ -23,7 +23,6 @@ from src.app.agent_catalog.agents.fields import PolicySettings
 from src.app.agent_catalog.agents.fpa_forecast import prompt
 from src.app.agent_catalog.agents.fpa_forecast.models import FpaForecastRun
 from src.app.agent_catalog.agents.fpa_forecast.schemas import (
-    COST_METRICS,
     METRICS,
     WHOLE_COMPANY,
     FpaForecastInput,
@@ -40,15 +39,6 @@ CENT = Decimal("0.01")
 
 def _pct_of(value: Decimal, pct: Decimal) -> Decimal:
     return (value * pct / 100).quantize(CENT, ROUND_HALF_UP)
-
-
-def _direction(variance: Decimal, is_cost: bool, metric: str | None) -> str:
-    """ ", favourable" / ", unfavourable" once the metric is known: above budget is good for
-    revenue and profit, bad for a cost."""
-    if metric is None or variance == ZERO:
-        return ""
-    favourable = (variance > ZERO) != is_cost
-    return ", favourable" if favourable else ", unfavourable"
 
 
 class FpaForecastAgent(BaseAgent):
@@ -90,20 +80,6 @@ class FpaForecastAgent(BaseAgent):
         }
 
     @classmethod
-    async def autofill_params(
-        cls, values: dict[str, Any], data: FinanceData
-    ) -> dict[str, Any] | None:
-        """The chosen metric for the unit and period entered; nothing until the metric is set
-        (revenue and costs aren't interchangeable)."""
-        if not all(values.get(k) for k in ("business_unit", "forecast_period", "metric")):
-            return None
-        return {
-            "business_unit": values["business_unit"],
-            "forecast_period": values["forecast_period"],
-            "metric": values["metric"],
-        }
-
-    @classmethod
     async def prefill_from_data(
         cls, params: BaseModel, data: FinanceData, policy: PolicySettings | None = None
     ) -> Prefill:
@@ -128,7 +104,6 @@ class FpaForecastAgent(BaseAgent):
         values: dict[str, object] = {
             "business_unit": wanted.business_unit,
             "forecast_period": wanted.forecast_period,
-            "metric": wanted.metric,
             "actual_value": actual,
             "budget_value": budget,
         }
@@ -172,40 +147,13 @@ class FpaForecastAgent(BaseAgent):
         policy = cast(FpaForecastPolicy, ctx.policy) if ctx.policy else FpaForecastPolicy()
         variance = plan.actual_value - plan.budget_value
         variance_pct = ratio_pct(variance, abs(plan.budget_value))
-        is_cost = plan.metric in COST_METRICS
 
-        # Scenario bridge, by cost behaviour. Revenue / profit: volume, then price on the new
-        # volume, then the cost change taken off the actual. A cost: it grows with volume and
-        # by the cost change; selling prices don't move it.
+        # Scenario bridge: volume, then price on the new volume, then cost on the actual
         volume_impact = _pct_of(plan.actual_value, plan.scenario_volume_pct)
-        if is_cost:
-            price_impact = ZERO
-            cost_impact = _pct_of(plan.actual_value + volume_impact, plan.scenario_cost_pct)
-        else:
-            price_impact = _pct_of(plan.actual_value + volume_impact, plan.scenario_price_pct)
-            cost_impact = -_pct_of(plan.actual_value, plan.scenario_cost_pct)
+        price_impact = _pct_of(plan.actual_value + volume_impact, plan.scenario_price_pct)
+        cost_impact = -_pct_of(plan.actual_value, plan.scenario_cost_pct)
         scenario = plan.actual_value + volume_impact + price_impact + cost_impact
         findings: list[Finding] = []
-        if plan.metric is None:
-            findings.append(
-                Finding(
-                    "METRIC_NOT_STATED",
-                    FlagSeverity.WARNING,
-                    "Say whether the values are revenue, profit or a cost: it decides whether "
-                    "a variance is favourable and how the scenario treats costs",
-                    "metric",
-                )
-            )
-        elif is_cost and plan.scenario_price_pct != ZERO:
-            findings.append(
-                Finding(
-                    "PRICE_NOT_APPLIED",
-                    FlagSeverity.INFO,
-                    f"The {percent(plan.scenario_price_pct)} price change doesn't apply to "
-                    f"{plan.metric.lower()}: left out of the scenario",
-                    "scenario_price_pct",
-                )
-            )
 
         materiality = policy.variance_materiality_pct
         if variance_pct is None:
@@ -222,9 +170,8 @@ class FpaForecastAgent(BaseAgent):
                 Finding(
                     "VARIANCE_MATERIAL",
                     FlagSeverity.HIGH,
-                    f"Actual vs budget variance of {money(variance)} ({percent(variance_pct)}"
-                    f"{_direction(variance, is_cost, plan.metric)}) exceeds the "
-                    f"{percent(materiality)} materiality threshold",
+                    f"Actual vs budget variance of {money(variance)} ({percent(variance_pct)}) "
+                    f"exceeds the {percent(materiality)} materiality threshold",
                     "actual_value",
                 )
             )

@@ -1,8 +1,6 @@
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import Field
-
 from src.app.agent_catalog.agents.fields import (
     AgentInput,
     PolicySettings,
@@ -14,27 +12,10 @@ from src.app.agent_catalog.agents.fields import (
     textarea_field,
 )
 
-WHOLE_COMPANY = "Whole company"
-# Metric -> PeriodResult field
-METRICS = {
-    "Revenue": "revenue",
-    "Operating profit": "operating_profit",
-    "Operating expenses": "operating_expenses",
-}
-# Metrics that are costs: higher is unfavourable, and a cost change raises them
-COST_METRICS = frozenset({"Operating expenses"})
-Metric = Literal["Revenue", "Operating profit", "Operating expenses"]
-
 
 class FpaForecastInput(AgentInput):
     business_unit: str = text_field("Business unit", max_length=200)
     forecast_period: str = text_field("Forecast period", max_length=20, help="e.g. Q4 2026")
-    metric: Metric | None = Field(
-        None,
-        title="Metric",
-        description="What the actual and budget values measure: revenue or a cost",
-        json_schema_extra={"ui": "choice", "options": list(METRICS)},
-    )
     actual_value: Decimal = signed_money_field("Actual value")
     budget_value: Decimal = signed_money_field("Budget value")
     scenario_volume_pct: Decimal = percent_field(
@@ -64,9 +45,20 @@ class FpaForecastPolicy(PolicySettings):
     )
 
 
+WHOLE_COMPANY = "Whole company"
+# Metric -> PeriodResult field
+METRICS = {
+    "Revenue": "revenue",
+    "Operating profit": "operating_profit",
+    "Operating expenses": "operating_expenses",
+}
+
+
 class FpaPrefillParams(AgentInput):
     """Which unit, period and figure to take from the preparer's monthly P&L and budget."""
 
     business_unit: str = choice_field("Business unit", help="A QuickBooks class, or the company")
     forecast_period: str = choice_field("Forecast period", help="A month, quarter or year")
-    metric: Metric = choice_field("Metric", options=list(METRICS))
+    metric: Literal["Revenue", "Operating profit", "Operating expenses"] = choice_field(
+        "Metric", options=list(METRICS)
+    )

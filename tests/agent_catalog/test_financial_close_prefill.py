@@ -87,26 +87,6 @@ async def prefilled(client: AsyncClient, source_id: str, account: str, period: s
     return r.json()
 
 
-async def test_account_and_period_typed_in_are_completed_on_analyze(
-    me: AsyncClient, source_id: str, fake_llm: FakeLLM
-) -> None:
-    periods = (await me.get(f"{AGENT}/prefill-options", params={"source_id": source_id})).json()
-    latest = periods["close_period"][0]
-    run = (await me.post(RUNS)).json()
-    values = {"gl_account": "1200", "close_period": latest, "materiality_threshold": "500"}
-    await me.put(f"{RUNS}/{run['id']}/input", json={"values": values})
-
-    run = (await me.post(f"{RUNS}/{run['id']}/analyze")).json()
-    assert run["status"] == "analyzed", run
-    assert run["input"]["gl_account"] == "1200"  # as typed: never overwritten
-    assert run["input"]["gl_balance"] == "120000.00"
-    assert run["input"]["subledger_balance"] == "119000.00"
-    assert "FILLED_FROM_DATA" in {f["code"] for f in run["flags"]}
-    # The figures and the records behind them are frozen for the reviewer
-    assert run["source"]["records"]["subledger_total"]["ledger"] == "AR"
-    assert run["source"]["record_reference"] == f"Accounts Receivable (A/R) · {latest}"
-
-
 async def test_options_come_from_the_month_end_balances(me: AsyncClient, source_id: str) -> None:
     options = (await me.get(f"{AGENT}/prefill-options", params={"source_id": source_id})).json()
 

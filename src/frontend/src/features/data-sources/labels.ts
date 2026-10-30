@@ -20,10 +20,6 @@ export const RECORD_LABELS: Record<RecordType, string> = {
   account_balance: "Month-end account balances",
   subledger_total: "Month-end AR/AP totals",
   period_result: "Monthly P&L (actual and budget)",
-  bill_payment: "Supplier payments",
-  credit_memo: "Customer credit memos",
-  vendor_credit: "Supplier credits",
-  journal_line: "Journal entry lines",
 }
 
 /** Singular, for pickers: "Pick a bill" */
@@ -39,10 +35,6 @@ export const RECORD_NOUN: Record<string, string> = {
   account_balance: "account balance",
   subledger_total: "subledger total",
   period_result: "P&L month",
-  bill_payment: "supplier payment",
-  credit_memo: "credit memo",
-  vendor_credit: "supplier credit",
-  journal_line: "journal line",
   // what a prefill pulled in alongside the picked record (run source snapshots)
   oldest_open_invoice: "oldest open invoice",
   // a prefill from parameters (e.g. Treasury's cash position)
@@ -55,7 +47,6 @@ export const RECORD_NOUN: Record<string, string> = {
   // Board Reporting and FP&A: the months behind each total
   months: "months",
   prior_year_months: "same months last year",
-  comparison_months: "comparison period by month",
   actual_months: "actual by month",
   budget_months: "budget by month",
 }
@@ -107,13 +98,6 @@ export const FIELD_LABELS: Record<string, string> = {
   cogs: "Cost of goods sold",
   operating_expenses: "Operating expenses",
   operating_profit: "Operating profit (optional: calculated)",
-  payment_number: "Payment / check number",
-  bills_paid: "Bills paid (comma-separated)",
-  remaining_credit: "Remaining credit",
-  credit_date: "Credit date",
-  entry_number: "Journal entry number",
-  amount_signed: "Amount (debit +, credit -)",
-  entry_date: "Entry date",
 }
 
 export function fieldLabel(name: string): string {

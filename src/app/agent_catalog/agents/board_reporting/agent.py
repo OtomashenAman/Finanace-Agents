@@ -1,4 +1,4 @@
-from typing import Any, cast
+from typing import cast
 
 from pydantic import BaseModel
 
@@ -27,17 +27,15 @@ from src.app.agent_catalog.agents.checks import (
 )
 from src.app.agent_catalog.agents.fields import PolicySettings
 from src.app.agent_catalog.agents.periods import (
-    comparison_basis,
     months_of,
     period_end,
     period_options,
-    previous_period,
     same_period_last_year,
 )
 from src.app.agent_catalog.runs.models import FlagSeverity
 from src.app.data_sources.access import FinanceData
 from src.app.data_sources.models import DataSource, SourceKind
-from src.app.data_sources.records import AccountBalance, PeriodResult, RecordType
+from src.app.data_sources.records import PeriodResult, RecordType
 
 
 async def company_actuals(data: FinanceData) -> dict[str, PeriodResult]:
@@ -52,31 +50,6 @@ def covering(by_month: dict[str, PeriodResult], period: str | None) -> list[Peri
     if not months or any(m not in by_month for m in months):
         return None
     return [by_month[m] for m in months]
-
-
-# Trial balance account types (QuickBooks) grouped for the board's financial position
-_POSITION = {
-    "cash": ("bank",),
-    "receivables": ("accounts receivable",),
-    "payables": ("accounts payable",),
-    "credit_cards": ("credit card",),
-    "long_term_liabilities": ("long term liability",),
-}
-
-
-async def financial_position(data: FinanceData, period: str) -> dict[str, object]:
-    """Balance sheet totals at the period's last month end, from the month-end trial balance
-    (liabilities shown credit-positive). Empty when that month isn't in the data."""
-    months = months_of(period)
-    balances = await data.records(AccountBalance, RecordType.ACCOUNT_BALANCE)
-    month = [b for b in balances if months and b.period == months[-1]]
-    if not month:
-        return {}
-    position: dict[str, object] = {"position_at": months[-1] if months else None}
-    for name, types in _POSITION.items():
-        total = sum((b.balance for b in month if (b.account_type or "").lower() in types), ZERO)
-        position[name] = total if name in ("cash", "receivables") else -total
-    return position
 
 
 def source_reference(source: DataSource | None, period: str) -> str | None:
@@ -118,37 +91,16 @@ class BoardReportingAgent(BaseAgent):
         return {"reporting_period": period_options(set(await company_actuals(data)))}
 
     @classmethod
-    async def autofill_params(
-        cls, values: dict[str, Any], data: FinanceData
-    ) -> dict[str, Any] | None:
-        period = values.get("reporting_period")
-        if not period:
-            return None
-        # The comparison the preparer typed decides month-on-month vs year-on-year
-        basis = comparison_basis(period, values.get("comparison_period"))
-        compare = "Previous period" if basis == "period on period" else "Same period last year"
-        return {"reporting_period": period, "compare_with": compare}
-
-    @classmethod
     async def prefill_from_data(
         cls, params: BaseModel, data: FinanceData, policy: PolicySettings | None = None
     ) -> Prefill:
-        wanted = cast(BoardPrefillParams, params)
-        period = wanted.reporting_period.strip()
-        prior_period = (
-            previous_period(period)
-            if wanted.compare_with == "Previous period"
-            else same_period_last_year(period)
-        )
+        period = cast(BoardPrefillParams, params).reporting_period.strip()
+        prior_period = same_period_last_year(period)
         by_month = await company_actuals(data)
         current = covering(by_month, period)
         prior = covering(by_month, prior_period)
-        values: dict[str, object] = {"reporting_period": period, "comparison_period": prior_period}
-        summary: dict[str, object] = {
-            "compared_with": prior_period,
-            "operating_profit": "QuickBooks net operating income (before other income and "
-            "expenses), not net income",
-        }
+        values: dict[str, object] = {"reporting_period": period}
+        summary: dict[str, object] = {"compared_with": prior_period}
         if current is None:
             summary["reported"] = f"Not every month of {period} is in the data"
         else:
@@ -156,7 +108,6 @@ class BoardReportingAgent(BaseAgent):
             values["reported_revenue"] = revenue if revenue >= ZERO else None
             values["operating_profit"] = sum((r.operating_profit or ZERO for r in current), ZERO)
             values["source_dataset_id"] = source_reference(await data.primary_source(), period)
-        summary |= await financial_position(data, period)
         if prior is None:
             summary["prior"] = f"Not every month of {prior_period} is in the data"
         else:
@@ -166,7 +117,7 @@ class BoardReportingAgent(BaseAgent):
             {k: v for k, v in values.items() if v is not None},
             reference=f"{period} vs {prior_period}",
             summary=summary,
-            lines={"months": current or [], "comparison_months": prior or []},
+            lines={"months": current or [], "prior_year_months": prior or []},
         )
 
     @staticmethod
@@ -203,22 +154,7 @@ class BoardReportingAgent(BaseAgent):
         change = report.reported_revenue - report.prior_period_revenue
         growth = ratio_pct(change, report.prior_period_revenue)
         margin = ratio_pct(report.operating_profit, report.reported_revenue)
-        basis = comparison_basis(report.reporting_period, report.comparison_period)
-        versus = report.comparison_period or "the prior period"
-        if basis:
-            versus = f"{versus} ({basis})"
         findings: list[Finding] = []
-
-        if basis is None:
-            findings.append(
-                Finding(
-                    "COMPARISON_UNCLEAR",
-                    FlagSeverity.WARNING,
-                    "State which period prior revenue covers (the previous period or the same "
-                    "period last year): month-on-month and year-on-year growth differ",
-                    "comparison_period",
-                )
-            )
 
         if report.source_dataset_id:
             findings.append(
@@ -271,7 +207,7 @@ class BoardReportingAgent(BaseAgent):
                 Finding(
                     "UNUSUAL_REVENUE_CHANGE",
                     FlagSeverity.WARNING,
-                    f"Revenue changed {percent(growth)} vs {versus}, beyond the "
+                    f"Revenue changed {percent(growth)} vs the prior period, beyond the "
                     f"{percent(policy.revenue_change_review_pct)} review threshold: confirm "
                     "the explanation",
                     "reported_revenue",
@@ -320,19 +256,10 @@ class BoardReportingAgent(BaseAgent):
         calculations = [
             Calculation("reported_revenue", "Reported revenue", report.reported_revenue),
             Calculation(
-                "prior_period_revenue",
-                f"Revenue {report.comparison_period}"
-                if report.comparison_period
-                else "Prior period revenue",
-                report.prior_period_revenue,
+                "prior_period_revenue", "Prior period revenue", report.prior_period_revenue
             ),
             Calculation("revenue_change", f"Revenue {verb} by", change),
-            Calculation(
-                "revenue_growth_pct",
-                f"Revenue growth ({basis})" if basis else "Revenue growth",
-                growth,
-                "percent",
-            ),
+            Calculation("revenue_growth_pct", "Revenue growth", growth, "percent"),
             Calculation("operating_profit", "Operating profit", report.operating_profit),
             Calculation("operating_margin_pct", "Operating margin", margin, "percent"),
         ]

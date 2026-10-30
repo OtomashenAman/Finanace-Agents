@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Any, cast
+from typing import cast
 
 from pydantic import BaseModel
 
@@ -60,29 +60,6 @@ class CashPosition:
     def outflows(self) -> Decimal:
         return sum((b.open_amount for b in self.bills_due), ZERO)
 
-    def daily_low(self, today: date, horizon_days: int) -> tuple[Decimal, date]:
-        """The lowest end-of-day cash within the horizon, and its first day.
-
-        Conservative timing: bills overdue or without a due date go out today, invoices
-        without a due date come in on the last day, and each day's payments leave before its
-        receipts arrive. Each invoice and bill counts once.
-        """
-        end = today + timedelta(days=horizon_days)
-        flows: dict[date, Decimal] = {}
-        for bill in self.bills_due:
-            day = max(bill.due_date or today, today)
-            flows[day] = flows.get(day, ZERO) - bill.open_amount
-        for invoice in self.invoices_due:
-            day = invoice.due_date or end
-            flows[day] = flows.get(day, ZERO) + invoice.open_amount
-        balance = low = self.opening_cash
-        low_day = today
-        for day in sorted(flows):
-            balance += flows[day]
-            if balance < low:
-                low, low_day = balance, day
-        return low, low_day
-
 
 def cash_position(
     accounts: list[Account],
@@ -114,16 +91,9 @@ def _closing_cash(data: TreasuryCashInput) -> Decimal:
     return data.opening_cash + data.expected_inflows - data.expected_outflows
 
 
-def _low_point(data: TreasuryCashInput) -> Decimal:
-    """The lowest cash the horizon reaches: the daily low when known, else closing cash."""
-    closing = _closing_cash(data)
-    low = data.lowest_projected_cash
-    return closing if low is None else min(low, closing)
-
-
 def _funding_gap(data: TreasuryCashInput) -> Decimal:
-    """How much must be funded to stay at the buffer every day (0 when the buffer holds)."""
-    return max(data.minimum_liquidity_buffer - _low_point(data), ZERO)
+    """How much must be funded to stay at the buffer (0 when the buffer holds)."""
+    return max(data.minimum_liquidity_buffer - _closing_cash(data), ZERO)
 
 
 class TreasuryCashAgent(BaseAgent):
@@ -151,22 +121,6 @@ class TreasuryCashAgent(BaseAgent):
     prefill_params = TreasuryPrefillParams
 
     @classmethod
-    async def autofill_params(
-        cls, values: dict[str, Any], data: FinanceData
-    ) -> dict[str, Any] | None:
-        """The horizon entered (else the default), when there are balances, invoices or bills."""
-        if not any(
-            [
-                await data.has(RecordType.ACCOUNT),
-                await data.has(RecordType.INVOICE),
-                await data.has(RecordType.BILL),
-            ]
-        ):
-            return None
-        horizon = values.get("forecast_horizon_days")
-        return {"forecast_horizon_days": horizon} if horizon else {}
-
-    @classmethod
     async def prefill_from_data(
         cls, params: BaseModel, data: FinanceData, policy: PolicySettings | None = None
     ) -> Prefill:
@@ -185,10 +139,6 @@ class TreasuryCashAgent(BaseAgent):
             values["expected_inflows"] = position.inflows
         if bills:
             values["expected_outflows"] = position.outflows
-        low, low_day = position.daily_low(today, horizon)
-        if position.banks and (invoices or bills):
-            values["lowest_projected_cash"] = low
-            values["lowest_cash_date"] = low_day.isoformat()
         return Prefill(
             values,
             reference=f"Next {horizon} days from {today:%d %b %Y}",
@@ -202,10 +152,6 @@ class TreasuryCashAgent(BaseAgent):
                 "overdue_receivables_not_counted": position.overdue_receivables,
                 "bills_due": len(position.bills_due),
                 "expected_outflows": position.outflows,
-                "lowest_daily_cash": low,
-                "lowest_cash_date": low_day,
-                "opening_cash_basis": "Book (GL) balance of bank accounts: confirm the available "
-                "bank cash with a bank statement",
             },
             lines={
                 "bank_accounts": position.banks,
@@ -248,25 +194,18 @@ class TreasuryCashAgent(BaseAgent):
         cash = cast(TreasuryCashInput, data)
         policy = cast(TreasuryCashPolicy, ctx.policy) if ctx.policy else TreasuryCashPolicy()
         closing = _closing_cash(cash)
-        low = _low_point(cash)
         gap = _funding_gap(cash)
         buffer = cash.minimum_liquidity_buffer
         findings: list[Finding] = []
-        # The trough, when it is below closing cash: cash dips before it recovers
-        dips = low < closing
-        when = f" on {cash.lowest_cash_date}" if dips and cash.lowest_cash_date else ""
-        what = f"Lowest daily cash{when}" if dips else "Projected closing cash"
-        field = "lowest_projected_cash" if dips else "expected_outflows"
 
-        if low < ZERO:
+        if closing < ZERO:
             findings.append(
                 Finding(
                     "NEGATIVE_PROJECTED_CASH",
                     FlagSeverity.HIGH,
-                    f"{what} is negative ({money(low)}) within "
-                    f"{cash.forecast_horizon_days} days"
-                    + (f", before recovering to {money(closing)}" if dips else ""),
-                    field,
+                    f"Projected closing cash is negative ({money(closing)}) within "
+                    f"{cash.forecast_horizon_days} days",
+                    "expected_outflows",
                 )
             )
         else:
@@ -274,8 +213,8 @@ class TreasuryCashAgent(BaseAgent):
                 Finding(
                     "PROJECTED_CASH_POSITIVE",
                     FlagSeverity.PASS,
-                    f"Projected cash stays positive (lowest {money(low)})",
-                    field,
+                    f"Projected closing cash stays positive ({money(closing)})",
+                    "expected_outflows",
                 )
             )
 
@@ -284,9 +223,8 @@ class TreasuryCashAgent(BaseAgent):
                 Finding(
                     "LIQUIDITY_BUFFER",
                     FlagSeverity.HIGH,
-                    f"{what} {money(low)} is {money(gap)} below the {money(buffer)} minimum "
-                    "liquidity buffer"
-                    + (f" (closing cash {money(closing)} recovers)" if dips else ""),
+                    f"Projected closing cash {money(closing)} is {money(gap)} below the "
+                    f"{money(buffer)} minimum liquidity buffer",
                     "minimum_liquidity_buffer",
                 )
             )
@@ -312,8 +250,8 @@ class TreasuryCashAgent(BaseAgent):
                 Finding(
                     "LIQUIDITY_BUFFER_MET",
                     FlagSeverity.PASS,
-                    f"Projected cash covers the {money(buffer)} minimum liquidity buffer every "
-                    f"day (headroom {money(low - buffer)})",
+                    f"Projected closing cash covers the {money(buffer)} minimum liquidity "
+                    f"buffer (headroom {money(closing - buffer)})",
                     "minimum_liquidity_buffer",
                 )
             )
@@ -335,7 +273,7 @@ class TreasuryCashAgent(BaseAgent):
         findings.extend(f for f in optional_checks if f is not None)
 
         exceptions = has_severity(findings, FlagSeverity.HIGH)
-        if low < ZERO:
+        if closing < ZERO:
             headline = "Negative cash projected"
         elif gap > ZERO:
             headline = "Liquidity shortfall"
@@ -344,24 +282,6 @@ class TreasuryCashAgent(BaseAgent):
         else:
             headline = "Liquidity within buffer"
 
-        calculations = [
-            Calculation("opening_cash", "Opening cash", cash.opening_cash),
-            Calculation("expected_inflows", "Expected inflows", cash.expected_inflows),
-            Calculation("expected_outflows", "Expected outflows", cash.expected_outflows),
-            Calculation("closing_cash", "Projected closing cash", closing),
-        ]
-        if cash.lowest_projected_cash is not None:
-            calculations.append(
-                Calculation(
-                    "lowest_projected_cash", "Lowest daily cash", cash.lowest_projected_cash
-                )
-            )
-            if cash.lowest_cash_date:
-                calculations.append(
-                    Calculation(
-                        "lowest_cash_date", "Lowest cash date", cash.lowest_cash_date, "text"
-                    )
-                )
         return Analysis(
             headline=headline,
             proposed_decision=(
@@ -370,7 +290,10 @@ class TreasuryCashAgent(BaseAgent):
                 else "Treasury approver sign-off required"
             ),
             calculations=[
-                *calculations,
+                Calculation("opening_cash", "Opening cash", cash.opening_cash),
+                Calculation("expected_inflows", "Expected inflows", cash.expected_inflows),
+                Calculation("expected_outflows", "Expected outflows", cash.expected_outflows),
+                Calculation("closing_cash", "Projected closing cash", closing),
                 Calculation("minimum_liquidity_buffer", "Minimum liquidity buffer", buffer),
                 Calculation("funding_gap", "Funding gap", gap),
                 Calculation(

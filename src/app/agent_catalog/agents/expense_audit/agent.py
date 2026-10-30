@@ -62,7 +62,6 @@ class ExpenseAuditAgent(BaseAgent):
     prompt_version = prompt.PROMPT_VERSION
     draft_message = "Clarification request to the employee about this expense claim"
     source_record_type = RecordType.EXPENSE
-    lookup_field = "card_transaction_id"
     policy_schema = ExpenseAuditPolicy
     approval_amount_label = "Claim amount"
 

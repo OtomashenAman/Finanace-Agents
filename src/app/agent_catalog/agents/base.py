@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any, ClassVar, Literal
 
-from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.agent_catalog.agents.fields import PolicySettings
@@ -59,99 +59,6 @@ class AnalysisContext:
     data: FinanceData
     # The thresholds in force (the agent's policy_schema, current version); None if it has none
     policy: PolicySettings | None = None
-
-
-@dataclass(frozen=True)
-class Evidence:
-    """The records an autofill used, frozen into the run's source snapshot for the reviewer
-    (like a record picked by hand)."""
-
-    source: DataSource
-    record_type: str  # e.g. "bill", or "data" for figures computed over many records
-    reference: str
-    records: dict[str, Any]  # JSON-ready, by name
-
-
-def as_of(source: DataSource | None) -> str:
-    """e.g. " (data as of 21 Oct 2026 09:30 UTC)"; empty when unknown."""
-    if source is None or source.last_synced_at is None:
-        return ""
-    return f" (data as of {source.last_synced_at:%d %b %Y %H:%M} UTC)"
-
-
-@dataclass
-class Autofill:
-    """Empty input fields the agent completed from the preparer's data, and how (one note per
-    lookup, shown to the reviewer as findings)."""
-
-    values: dict[str, Any] = field(default_factory=dict)
-    notes: list[Finding] = field(default_factory=list)
-    evidence: Evidence | None = None  # the first lookup that filled something
-    # Data lineage: field -> the record its value came from, e.g. "bill INV-2048"
-    sources: dict[str, str] = field(default_factory=dict)
-
-    def add(
-        self,
-        agent: type["BaseAgent"],
-        current: dict[str, Any],
-        prefill: "Prefill",
-        found: str,
-        evidence: Evidence | None = None,
-    ) -> None:
-        """Take the prefill values for fields still empty, with one note naming them."""
-        new = {
-            k: v
-            for k, v in prefill.values.items()
-            if v is not None and current.get(k) is None and k not in self.values
-        }
-        if not new:
-            return
-        self.values.update(new)
-        self.sources.update(dict.fromkeys(new, found))
-        if self.evidence is None:
-            self.evidence = evidence
-        assert agent.input_schema is not None  # noqa: S101 - only agents with a workspace
-        fields = agent.input_schema.model_fields
-        labels = ", ".join(fields[k].title or k for k in new if k in fields)
-        source = evidence.source if evidence else None
-        self.notes.append(
-            Finding(
-                "FILLED_FROM_DATA",
-                FlagSeverity.INFO,
-                f"Filled {labels} from {found}{as_of(source)}",
-                next(iter(new)),
-            )
-        )
-
-
-# How many records behind each total a snapshot keeps (the totals use all of them)
-MAX_SNAPSHOT_LINES = 50
-_JSON = TypeAdapter(dict[str, Any])
-
-
-def record_snapshot(name: str, record: Record, related: dict[str, Record]) -> dict[str, Any]:
-    """Snapshot records for one source record and the records it led to."""
-    return {
-        name: record.model_dump(mode="json"),
-        **{n: r.model_dump(mode="json") for n, r in related.items()},
-    }
-
-
-def data_snapshot(params: BaseModel, prefill: "Prefill") -> dict[str, Any]:
-    """Snapshot records for figures computed over many records: the parameters, the summary,
-    and (up to MAX_SNAPSHOT_LINES) the records behind each total."""
-    summary = dict(prefill.summary)
-    lines: dict[str, Any] = {}
-    for name, records in prefill.lines.items():
-        lines[name] = [r.model_dump(mode="json") for r in records[:MAX_SNAPSHOT_LINES]]
-        if len(records) > MAX_SNAPSHOT_LINES:
-            summary[f"{name}_listed"] = f"first {MAX_SNAPSHOT_LINES} of {len(records)}"
-    return {
-        "parameters": params.model_dump(mode="json"),
-        "summary": _JSON.dump_python(summary, mode="json"),
-        **{n: r.model_dump(mode="json") for n, r in prefill.related.items()},
-        **lines,
-    }
 
 
 @dataclass
@@ -210,9 +117,6 @@ class BaseAgent:
     # Parameters for a prefill computed from many records (e.g. a forecast horizon), instead of
     # picking one record; implemented by prefill_from_data
     prefill_params: ClassVar[type[BaseModel] | None] = None
-    # Input field holding the reference of a `source_record_type` record (e.g. the payment
-    # reference): autofill looks that record up and prefills the empty fields from it
-    lookup_field: ClassVar[str | None] = None
 
     _required: ClassVar[tuple[str, ...]] = (
         "key",
@@ -279,75 +183,6 @@ class BaseAgent:
         """Choices for prefill_params "choice" fields taken from the user's data (e.g. the
         accounts and periods that have balances), by field name."""
         return {}
-
-    @classmethod
-    async def autofill(
-        cls, values: dict[str, Any], data: FinanceData, policy: PolicySettings | None = None
-    ) -> Autofill:
-        """Run before every analysis: complete the input fields still empty in `values` by
-        looking them up in the preparer's data (e.g. the PO of an invoice). Never overwrites a
-        value the preparer entered.
-
-        Default: the `lookup_field` record through prefill(), and the prefill_from_data()
-        figures for the parameters autofill_params() reads from the input."""
-        result = Autofill()
-        reference = values.get(cls.lookup_field) if cls.lookup_field else None
-        if cls.source_record_type is not None and reference:
-            record_type = cls.source_record_type
-            what = record_type.value.replace("_", " ")
-            records, source = await data.find_all(record_type, str(reference))
-            if len(records) > 1 and source is not None:
-                result.notes.append(
-                    Finding(
-                        "AMBIGUOUS_IN_DATA",
-                        FlagSeverity.WARNING,
-                        f"Several {what} records are numbered {reference} in {source.name}: "
-                        "pick the right one from your data",
-                        cls.lookup_field,
-                    )
-                )
-            elif records and source is not None:
-                record = records[0]
-                prefill = await cls.prefill(record, source, data, policy)
-                evidence = Evidence(
-                    source,
-                    record_type.value,
-                    record.reference,
-                    record_snapshot(record_type.value, record, prefill.related),
-                )
-                result.add(
-                    cls, values, prefill, f"{what} {record.reference} in {source.name}", evidence
-                )
-        if cls.prefill_params is not None:
-            raw = await cls.autofill_params(values, data)
-            if raw is not None:
-                try:
-                    params = cls.prefill_params.model_validate(raw)
-                except ValidationError:
-                    return result
-                prefill = await cls.prefill_from_data(params, data, policy)
-                label = prefill.reference or "From your data"
-                latest = await data.latest_source()
-                computed = (
-                    Evidence(latest, "data", label, data_snapshot(params, prefill))
-                    if latest is not None
-                    else None
-                )
-                result.add(cls, values, prefill, f"your data ({label})", computed)
-        return result
-
-    @classmethod
-    async def autofill_params(
-        cls, values: dict[str, Any], data: FinanceData
-    ) -> dict[str, Any] | None:
-        """The prefill_params to compute from the input entered so far; None: not enough yet."""
-        return None
-
-    @classmethod
-    def draft_for(cls, data: BaseModel) -> str | None:
-        """What the LLM drafts for this run (default: draft_message). An agent narrows it when
-        the input rules a draft out, e.g. no customer reminder while a dispute is open."""
-        return cls.draft_message
 
     @classmethod
     def approval_amount(cls, data: BaseModel) -> Decimal | None:

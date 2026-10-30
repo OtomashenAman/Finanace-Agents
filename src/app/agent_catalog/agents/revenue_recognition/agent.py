@@ -30,7 +30,6 @@ from src.app.agent_catalog.agents.revenue_recognition.schemas import (
     RevenueRecognitionPolicy,
 )
 from src.app.agent_catalog.runs.models import FlagSeverity
-from src.app.common.clock import utcnow
 from src.app.data_sources.access import FinanceData
 from src.app.data_sources.models import DataSource
 from src.app.data_sources.records import CENT, Invoice, Record, RecordType
@@ -64,25 +63,6 @@ def _final_month(data: RevenueRecognitionInput) -> Decimal:
     return data.contract_total - _monthly(data) * (data.service_term_months - 1)
 
 
-def earned_and_deferred(data: RevenueRecognitionInput) -> tuple[Decimal, Decimal] | None:
-    """Straight-line revenue earned for the months delivered, and what is still deferred
-    (None when the months delivered aren't known). A finished term has earned it all."""
-    if data.months_delivered is None:
-        return None
-    months = min(data.months_delivered, data.service_term_months)
-    finished = months == data.service_term_months
-    earned = data.contract_total if finished else _monthly(data) * months
-    return earned, data.contract_total - earned
-
-
-def months_elapsed(start: date | None, today: date) -> int | None:
-    """Whole service months completed from `start` to `today` (0 before the first month ends)."""
-    if start is None or today < start:
-        return None if start is None else 0
-    months = (today.year - start.year) * 12 + today.month - start.month
-    return months if today.day >= start.day else months - 1
-
-
 class RevenueRecognitionAgent(BaseAgent):
     key = "revenue_recognition"
     code = "09"
@@ -105,7 +85,6 @@ class RevenueRecognitionAgent(BaseAgent):
     narrative_guidance = prompt.GUIDANCE
     prompt_version = prompt.PROMPT_VERSION
     source_record_type = RecordType.INVOICE
-    lookup_field = "contract_id"  # when the contract is billed as one invoice
     policy_schema = RevenueRecognitionPolicy
     approval_amount_label = "Contract total"
 
@@ -123,7 +102,6 @@ class RevenueRecognitionAgent(BaseAgent):
             "contract_id": invoice.doc_number,
             "contract_total": invoice.total if invoice.total > ZERO else None,
             "service_term_months": service_months(invoice.service_start, invoice.service_end),
-            "months_delivered": months_elapsed(invoice.service_start, utcnow().date()),
             "performance_obligations": invoice.line_items,
         }
         # Only what the invoice knows: clauses and variable consideration come from the contract
@@ -288,20 +266,6 @@ class RevenueRecognitionAgent(BaseAgent):
         needs_review = has_severity(findings, FlagSeverity.HIGH) or has_severity(
             findings, FlagSeverity.WARNING
         )
-        split = earned_and_deferred(rev)
-        to_date: list[Calculation] = []
-        computed: dict[str, object] = {"monthly_revenue": monthly, "obligation_count": len(listed)}
-        if split is not None:
-            earned, deferred = split
-            delivered = min(rev.months_delivered or 0, rev.service_term_months)
-            to_date = [
-                Calculation(
-                    "months_delivered", "Months delivered to date", str(delivered), "number"
-                ),
-                Calculation("earned_to_date", "Earned to date (straight-line)", earned),
-                Calculation("deferred_revenue", "Deferred revenue", deferred),
-            ]
-            computed |= {"earned_to_date": earned, "deferred_revenue": deferred}
         return Analysis(
             headline=headline,
             proposed_decision=(
@@ -326,8 +290,7 @@ class RevenueRecognitionAgent(BaseAgent):
                 Calculation(
                     "final_month_revenue", "Final month (takes rounding)", _final_month(rev)
                 ),
-                *to_date,
             ],
             findings=findings,
-            computed=computed,
+            computed={"monthly_revenue": monthly, "obligation_count": len(listed)},
         )

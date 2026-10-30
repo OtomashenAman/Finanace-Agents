@@ -2,18 +2,18 @@ import hashlib
 import json
 import uuid
 from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
 from typing import Any, Literal
 
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 from sqlalchemy import Select, case, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
-from src.app.agent_catalog.agents.base import AnalysisContext, BaseAgent, Finding, data_snapshot
+from src.app.agent_catalog.agents.base import AnalysisContext, BaseAgent
 from src.app.agent_catalog.agents.fields import draft_schema, form_fields
 from src.app.agent_catalog.exceptions import AgentNotFoundError
 from src.app.agent_catalog.models import Agent, AgentAssignment, AgentCapacity
@@ -429,10 +429,6 @@ async def _write_back_option(
             )
     else:
         return WriteBackOption(None, None)
-    if not get_settings().quickbooks_write_back:
-        return WriteBackOption(
-            kind, "QuickBooks is connected read-only: write-back is turned off for this app."
-        )
     if any(a.kind == kind and a.status != ActionStatus.FAILED for a in actions):
         return WriteBackOption(kind, "Already written back.")
     return WriteBackOption(kind, None)
@@ -671,12 +667,6 @@ async def _detail(
                 provider=narrative.provider,
                 model=narrative.model,
                 prompt_version=narrative.prompt_version,
-                prompt_hash=narrative.prompt_hash,
-                policy_version=narrative.policy_version,
-                source_records={
-                    s["id"]: f"{s['type'].replace('_', ' ')} {s['record_id']}"
-                    for s in narrative.input_payload.get("source_records", [])
-                },
                 output=NarrativeResult(**narrative.output) if narrative.output else None,
                 guard_warnings=narrative.guard_warnings,
                 error=narrative.error,
@@ -710,7 +700,6 @@ async def _detail(
                 records=snapshot.records,
                 source_synced_at=snapshot.source_synced_at,
                 captured_at=snapshot.created_at,
-                field_sources=snapshot.field_sources or {},
             )
             if snapshot
             else None
@@ -817,16 +806,8 @@ async def update_input(
             [{**e, "loc": ("body", "values", *e["loc"])} for e in exc.errors(include_url=False)]
         ) from exc
 
-    before = _input_values(access, detail)
     for name, value in draft.model_dump().items():
         setattr(detail, name, value)
-    changed = {k for k, v in _input_values(access, detail).items() if v != before.get(k)}
-    snapshot = await session.get(RunSourceSnapshot, run.id)
-    if snapshot is not None and changed & set(snapshot.field_sources or {}):
-        # A value the preparer changed is theirs now, not the source's
-        snapshot.field_sources = {
-            k: v for k, v in snapshot.field_sources.items() if k not in changed
-        }
     if run.status != RunStatus.DRAFT:
         await _reset_analysis(session, run)
     await session.commit()
@@ -867,16 +848,7 @@ async def link_source(
         record_type.value: record.model_dump(mode="json"),
         **{name: r.model_dump(mode="json") for name, r in prefill.related.items()},
     }
-    origin = f"{record_type.value.replace('_', ' ')} {record.reference}"
-    await _save_snapshot(
-        session,
-        run,
-        source,
-        record_type.value,
-        record.reference,
-        records,
-        dict.fromkeys(prefill.values, origin),
-    )
+    await _save_snapshot(session, run, source, record_type.value, record.reference, records)
 
     if run.status != RunStatus.DRAFT:
         await _reset_analysis(session, run)
@@ -915,9 +887,7 @@ async def _save_snapshot(
     record_type: str,
     reference: str,
     records: dict[str, Any],
-    field_sources: dict[str, str],
 ) -> None:
-    """Freeze the records (replacing any earlier snapshot) and where each field came from."""
     snapshot = await session.get(RunSourceSnapshot, run.id)
     if snapshot is None:
         snapshot = RunSourceSnapshot(run_id=run.id)
@@ -930,11 +900,11 @@ async def _save_snapshot(
     snapshot.records = records
     snapshot.source_synced_at = source.last_synced_at
     snapshot.created_at = utcnow()
-    snapshot.field_sources = field_sources
 
 
-# Data older than this is flagged when an agent fills a run from it
-STALE_DATA_AFTER = timedelta(days=7)
+# How many records behind each total the snapshot keeps (the totals use all of them)
+MAX_SNAPSHOT_LINES = 50
+_JSON = TypeAdapter(dict[str, Any])
 
 
 async def prefill_from_data(
@@ -971,16 +941,20 @@ async def prefill_from_data(
     )
     await _apply_prefill(access, detail, prefill.values)
 
+    summary = dict(prefill.summary)
+    lines: dict[str, Any] = {}
+    for name, records in prefill.lines.items():
+        lines[name] = [r.model_dump(mode="json") for r in records[:MAX_SNAPSHOT_LINES]]
+        if len(records) > MAX_SNAPSHOT_LINES:
+            summary[f"{name}_listed"] = f"first {MAX_SNAPSHOT_LINES} of {len(records)}"
+    snapshot_records = {
+        "parameters": params.model_dump(mode="json"),
+        "summary": _JSON.dump_python(summary, mode="json"),
+        **{name: r.model_dump(mode="json") for name, r in prefill.related.items()},
+        **lines,
+    }
     reference = prefill.reference or "From your data"
-    await _save_snapshot(
-        session,
-        run,
-        source,
-        "data",
-        reference,
-        data_snapshot(params, prefill),
-        dict.fromkeys(prefill.values, reference),
-    )
+    await _save_snapshot(session, run, source, "data", reference, snapshot_records)
 
     if run.status != RunStatus.DRAFT:
         await _reset_analysis(session, run)
@@ -1040,59 +1014,6 @@ async def analyze_run(
     _require_owner(run, user)
     ensure_allowed(run.status, RunAction.ANALYZE)
 
-    snapshot = await session.get(RunSourceSnapshot, run.id)
-    finance_data = FinanceData(
-        session, run.preparer_id, snapshot.source_id if snapshot else None, run.entity_id
-    )
-    policy = await governance.policy_in_force(session, access.definition)
-    policy_values = policy.values if access.definition.policy_schema else None
-
-    # The agent completes what the preparer left empty (e.g. the invoice's PO) from their data
-    current = _input_values(access, detail)
-    autofill = await access.definition.autofill(current, finance_data, policy_values)
-    filled = {k: v for k, v in autofill.values.items() if current.get(k) is None and v is not None}
-    if filled:
-        await _apply_prefill(access, detail, filled)
-        evidence = autofill.evidence
-        if snapshot is None and evidence is not None:
-            # Freeze what was looked up, as if the preparer had picked it, for the reviewer
-            await _save_snapshot(
-                session,
-                run,
-                evidence.source,
-                evidence.record_type,
-                evidence.reference,
-                evidence.records,
-                {},
-            )
-            snapshot = await session.get(RunSourceSnapshot, run.id)
-        if snapshot is not None:
-            # Lineage of what the agent filled, next to what a prefill filled
-            snapshot.field_sources = {
-                **(snapshot.field_sources or {}),
-                **{k: autofill.sources.get(k, "your data") for k in filled},
-            }
-        synced = evidence.source.last_synced_at if evidence else None
-        if synced is not None and utcnow() - synced > STALE_DATA_AFTER:
-            autofill.notes.append(
-                Finding(
-                    "DATA_MAY_BE_STALE",
-                    FlagSeverity.WARNING,
-                    f"{evidence.source.name if evidence else 'Your data'} was last updated "
-                    f"{(utcnow() - synced).days} days ago: sync or re-upload it if it may have "
-                    "changed, then analyze again",
-                    None,
-                )
-            )
-        record_event(
-            session,
-            "run.autofilled",
-            ctx,
-            actor_id=user.id,
-            run=run.reference,
-            fields=sorted(filled),
-        )
-
     try:
         data = access.input_schema.model_validate(_input_values(access, detail))
     except ValidationError as exc:
@@ -1101,10 +1022,6 @@ async def analyze_run(
         run.validation_errors = [
             {"field": str(e["loc"][0]) if e["loc"] else None, "message": e["msg"]}
             for e in exc.errors(include_url=False)
-        ] + [  # why the agent couldn't complete a field itself (e.g. several open POs)
-            {"field": note.field, "message": note.message}
-            for note in autofill.notes
-            if note.severity == FlagSeverity.WARNING
         ]
         record_event(session, "run.validation_failed", ctx, actor_id=user.id, run=run.reference)
         await session.commit()
@@ -1115,6 +1032,9 @@ async def analyze_run(
             select(RunDocument).where(RunDocument.run_id == run.id).order_by(RunDocument.created_at)
         )
     )
+    snapshot = await session.get(RunSourceSnapshot, run.id)
+    finance_data = FinanceData(session, run.preparer_id, snapshot.source_id if snapshot else None)
+    policy = await governance.policy_in_force(session, access.definition)
     analysis = await access.definition.analyze(
         data,
         AnalysisContext(
@@ -1122,11 +1042,9 @@ async def analyze_run(
             run=run,
             document_count=len(documents),
             data=finance_data,
-            policy=policy_values,
+            policy=policy.values if access.definition.policy_schema else None,
         ),
     )
-    # What the agent looked up itself comes first, for the reviewer
-    analysis.findings = [*autofill.notes, *analysis.findings]
 
     await session.execute(delete(RunFlag).where(RunFlag.run_id == run.id))
     for position, finding in enumerate(analysis.findings):
@@ -1299,8 +1217,8 @@ def _result_hash(run: AgentRun, detail: RunDetail) -> str:
         "flags": [f.model_dump(mode="json") for f in detail.flags],
         "documents": sorted(d.sha256 for d in detail.documents),
         "source": detail.source.records if detail.source else None,
-        # A narrative without a draft (None) or narrative/v2 fields (defaults) hashes as before
-        "narrative": detail.narrative.output.model_dump(exclude_none=True, exclude_defaults=True)
+        # exclude_none: a narrative without a draft hashes as it did before drafts existed
+        "narrative": detail.narrative.output.model_dump(exclude_none=True)
         if detail.narrative and detail.narrative.output
         else None,
     }

@@ -102,10 +102,6 @@ export interface NarrativeOutput {
   cited_documents: string[]
   missing_evidence: string[]
   ambiguities: string[]
-  /** Source records (S1...) relied on; see Narrative.source_records */
-  evidence_ids: string[]
-  /** One next step for the reviewer (empty on narratives drafted before narrative/v2) */
-  suggested_action: string
   /** For agents that draft a message (e.g. a payment reminder): for review, never sent */
   draft_message?: string | null
 }
@@ -115,12 +111,6 @@ export interface Narrative {
   provider: string
   model: string
   prompt_version: string
-  /** SHA-256 of the instructions, data and output schema sent to the model */
-  prompt_hash: string | null
-  /** Rules (policy) version of the analysis explained */
-  policy_version: string | null
-  /** Evidence id (S1...) -> "<record type> <id in the source>" */
-  source_records: Record<string, string>
   output: NarrativeOutput | null
   guard_warnings: string[]
   error: string | null
@@ -153,8 +143,6 @@ export interface RunSource {
   records: Record<string, Record<string, unknown> | Record<string, unknown>[]>
   source_synced_at: string | null
   captured_at: string
-  /** Input field -> the record its value came from, e.g. { invoice_total: "bill INV-2048" } */
-  field_sources: Record<string, string>
 }
 
 /** A write to an outside system after approval, with its receipt */

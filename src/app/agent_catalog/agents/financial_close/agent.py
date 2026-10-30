@@ -1,5 +1,5 @@
 from decimal import Decimal
-from typing import Any, cast
+from typing import cast
 
 from pydantic import BaseModel
 
@@ -27,11 +27,9 @@ from src.app.agent_catalog.agents.financial_close.schemas import (
     FinancialClosePrefillParams,
 )
 from src.app.agent_catalog.runs.models import FlagSeverity
-from src.app.core.config import get_settings
 from src.app.data_sources.access import FinanceData
 from src.app.data_sources.records import (
     AccountBalance,
-    JournalLine,
     Record,
     RecordType,
     SubledgerTotal,
@@ -75,14 +73,6 @@ class FinancialCloseAgent(BaseAgent):
         }
 
     @classmethod
-    async def autofill_params(
-        cls, values: dict[str, Any], data: FinanceData
-    ) -> dict[str, Any] | None:
-        if not values.get("gl_account") or not values.get("close_period"):
-            return None
-        return {"gl_account": values["gl_account"], "close_period": values["close_period"]}
-
-    @classmethod
     async def prefill_from_data(
         cls, params: BaseModel, data: FinanceData, policy: PolicySettings | None = None
     ) -> Prefill:
@@ -99,8 +89,6 @@ class FinancialCloseAgent(BaseAgent):
         values: dict[str, object] = {
             "gl_account": found.account_name if found else wanted.gl_account,
             "close_period": wanted.close_period,
-            # Month-end balances and aging are read on this basis (always sent explicitly)
-            "accounting_basis": get_settings().quickbooks_accounting_method,
         }
         summary: dict[str, object] = {"books_closed_through": await data.books_closed_through()}
         related: dict[str, Record] = {}
@@ -132,45 +120,6 @@ class FinancialCloseAgent(BaseAgent):
             else:
                 summary["subledger"] = f"No {ledger} aging total for {wanted.close_period}"
         return Prefill(values, related, f"{found.account_name} · {wanted.close_period}", summary)
-
-    @staticmethod
-    async def _journal_drilldown(close: FinancialCloseInput, ctx: AnalysisContext) -> list[Finding]:
-        """Manual journal entries posted to the account in the close month: the first place an
-        unexplained difference between GL and subledger comes from."""
-        if not await ctx.data.has(RecordType.JOURNAL_LINE):
-            return []
-        wanted = close.gl_account.strip().lower()
-        lines = [
-            line
-            for line in await ctx.data.records(JournalLine, RecordType.JOURNAL_LINE)
-            if line.entry_date
-            and f"{line.entry_date:%Y-%m}" == close.close_period
-            and (line.account.lower() == wanted or line.account.lower().startswith(f"{wanted} "))
-        ]
-        if not lines:
-            return [
-                Finding(
-                    "NO_MANUAL_JOURNALS",
-                    FlagSeverity.INFO,
-                    f"No manual journal entries to {close.gl_account} in {close.close_period}: "
-                    "look at timing and subledger postings",
-                    "gl_balance",
-                )
-            ]
-        net = sum((line.amount_signed for line in lines), ZERO)
-        listed = ", ".join(
-            f"{line.entry_number} ({money(line.amount_signed)})" for line in lines[:5]
-        )
-        more = f" and {len(lines) - 5} more" if len(lines) > 5 else ""
-        return [
-            Finding(
-                "MANUAL_JOURNALS",
-                FlagSeverity.WARNING,
-                f"Manual journal entries to {close.gl_account} in {close.close_period}, net "
-                f"{money(net)}: {listed}{more}. Check each has support and a subledger posting",
-                "gl_balance",
-            )
-        ]
 
     @staticmethod
     async def _period_checks(close: FinancialCloseInput, ctx: AnalysisContext) -> list[Finding]:
@@ -264,7 +213,6 @@ class FinancialCloseAgent(BaseAgent):
                         "materiality_threshold",
                     )
                 )
-            findings.extend(await cls._journal_drilldown(close, ctx))
             rationale = missing(
                 close.proposed_adjustment_rationale,
                 code="MISSING_RATIONALE",
@@ -274,21 +222,6 @@ class FinancialCloseAgent(BaseAgent):
             if rationale is not None:
                 findings.append(rationale)
 
-        if close.accounting_basis is None or close.currency is None:
-            unstated = " and ".join(
-                name
-                for name, value in (("basis", close.accounting_basis), ("currency", close.currency))
-                if value is None
-            )
-            findings.append(
-                Finding(
-                    "BASIS_NOT_STATED",
-                    FlagSeverity.WARNING,
-                    f"State the accounting {unstated}: GL and subledger only compare on the "
-                    "same company, currency, cut-off and basis",
-                    "accounting_basis" if close.accounting_basis is None else "currency",
-                )
-            )
         findings.extend(await cls._period_checks(close, ctx))
         evidence = evidence_check(ctx, "GL detail, subledger report or reconciliation")
         if evidence is not None:

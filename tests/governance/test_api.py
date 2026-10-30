@@ -55,23 +55,21 @@ async def review(client: AsyncClient, run: dict[str, Any], decision: str = "appr
 # --- maker-checker setting -------------------------------------------------------------------
 
 
-async def test_maker_and_checker_differ_unless_self_approval_is_turned_on(
+async def test_self_approval_can_be_turned_off(
     adm: AsyncClient, adm2: AsyncClient, me: AsyncClient, fake_llm: FakeLLM
 ) -> None:
     assert (await me.get(f"{GOV}/settings")).status_code == 403
-    assert (await adm.get(f"{GOV}/settings")).json()["allow_admin_self_approval"] is False
+    assert (await adm.get(f"{GOV}/settings")).json()["allow_admin_self_approval"] is True
 
     own = await submitted(adm)
+    assert own["permissions"]["can_review"] is True  # allowed by default
+
+    r = await adm.put(f"{GOV}/settings", json={"allow_admin_self_approval": False})
+    assert r.json()["allow_admin_self_approval"] is False
     seen = (await adm.get(f"{RUNS}/{own['id']}")).json()
-    assert seen["permissions"]["can_review"] is False  # off by default
+    assert seen["permissions"]["can_review"] is False
     assert "segregation of duties" in seen["permissions"]["review_blocked_reason"]
     assert (await review(adm, own)).status_code == 403
-
-    r = await adm.put(f"{GOV}/settings", json={"allow_admin_self_approval": True})
-    assert r.json()["allow_admin_self_approval"] is True
-    assert (await adm.get(f"{RUNS}/{own['id']}")).json()["permissions"]["can_review"] is True
-
-    await adm.put(f"{GOV}/settings", json={"allow_admin_self_approval": False})
     assert (await review(adm2, own)).json()["status"] == "approved"  # another admin may
 
 

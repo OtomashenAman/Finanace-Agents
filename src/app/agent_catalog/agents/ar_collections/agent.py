@@ -25,7 +25,7 @@ from src.app.agent_catalog.runs.models import FlagSeverity
 from src.app.common.clock import utcnow
 from src.app.data_sources.access import FinanceData
 from src.app.data_sources.models import DataSource
-from src.app.data_sources.records import CreditMemo, Customer, Invoice, Record, RecordType
+from src.app.data_sources.records import Customer, Invoice, Record, RecordType
 
 # Priority score points (0-100): aging bucket, plus exposure, plus late payment history
 AGING_POINTS = (
@@ -122,7 +122,6 @@ class ArCollectionsAgent(BaseAgent):
         "Payment reminder email to the customer, or an internal note if there is an open dispute"
     )
     source_record_type = RecordType.CUSTOMER
-    lookup_field = "customer"
     policy_schema = ArCollectionsPolicy
     approval_amount_label = "Open balance"
 
@@ -150,16 +149,6 @@ class ArCollectionsAgent(BaseAgent):
             values["open_balance"] = customer.balance
         # Dispute, strategic account and promise to pay aren't in the source: the preparer sets them
         return Prefill({k: v for k, v in values.items() if v is not None}, related)
-
-    @classmethod
-    def draft_for(cls, data: BaseModel) -> str | None:
-        """Never a customer reminder while a dispute is open: only an internal note."""
-        if cast(ArCollectionsInput, data).open_dispute:
-            return (
-                "Internal note to the collections lead about the open dispute; not addressed "
-                "to the customer and no payment request"
-            )
-        return "Payment reminder email to the customer"
 
     @classmethod
     def approval_amount(cls, data: BaseModel) -> Decimal | None:
@@ -237,23 +226,6 @@ class ArCollectionsAgent(BaseAgent):
                     FlagSeverity.INFO,
                     "Promise to pay recorded: follow up on it before escalating",
                     "promise_to_pay",
-                )
-            )
-        credits = await ctx.data.records(
-            CreditMemo, RecordType.CREDIT_MEMO, counterparty=ar.customer
-        )
-        open_credits = [c for c in credits if c.open_amount > ZERO]
-        if open_credits:
-            credit = sum((c.open_amount for c in open_credits), ZERO)
-            numbers = ", ".join(c.doc_number for c in open_credits[:5])
-            findings.append(
-                Finding(
-                    "UNAPPLIED_CREDITS",
-                    FlagSeverity.WARNING,
-                    f"{ar.customer} has {money(credit)} of unapplied credit memos ({numbers}): "
-                    f"net of them the exposure is {money(max(ar.open_balance - credit, ZERO))}. "
-                    "Apply them before chasing payment",
-                    "open_balance",
                 )
             )
         evidence = evidence_check(ctx, "customer statement or invoices")

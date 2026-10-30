@@ -5,12 +5,11 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { formatDateTime } from "@/features/agent-catalog/workspace/format"
-import { useEntities } from "@/features/entities/hooks"
 import { errorMessage } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 import type { DataSource, RecordType } from "../api"
-import { useAuthorizeQuickBooks, useDeleteSource, useRenameSource, useSetSourceEntity, useSyncSource } from "../hooks"
+import { useAuthorizeQuickBooks, useDeleteSource, useRenameSource, useSyncSource } from "../hooks"
 import { RECORD_LABELS, STATUS } from "../labels"
 import { QuickBooksAppForm } from "./quickbooks-app-form"
 
@@ -66,40 +65,6 @@ function RenameForm({ source, onDone }: { source: DataSource; onDone: () => void
   )
 }
 
-/** Which legal entity's books these are: runs for that entity read this source first */
-function EntityPicker({ source }: { source: DataSource }) {
-  const { data: entities } = useEntities()
-  const setEntity = useSetSourceEntity()
-  if (!entities?.length) return null
-  const id = `entity-${source.id}`
-  return (
-    <div className="mt-3 flex items-center gap-2 text-xs">
-      <label htmlFor={id} className="text-muted-foreground">
-        Books of
-      </label>
-      <select
-        id={id}
-        className="h-8 rounded-md border bg-background px-2 text-xs"
-        value={source.entity_id ?? ""}
-        disabled={setEntity.isPending}
-        onChange={(e) =>
-          setEntity.mutate(
-            { id: source.id, entityId: e.target.value || null },
-            { onError: (error) => toast.error(errorMessage(error, "Couldn't link the legal entity")) },
-          )
-        }
-      >
-        <option value="">No legal entity</option>
-        {entities.map((entity) => (
-          <option key={entity.id} value={entity.id}>
-            {entity.code} · {entity.name}
-          </option>
-        ))}
-      </select>
-    </div>
-  )
-}
-
 export function SourceCard({ source }: { source: DataSource }) {
   const sync = useSyncSource()
   const authorize = useAuthorizeQuickBooks()
@@ -144,21 +109,15 @@ export function SourceCard({ source }: { source: DataSource }) {
                 {source.name}
               </h2>
               <StatusPill source={source} />
-              {isQuickBooks && (
-                <span
-                  className={cn(
-                    "rounded px-2 py-0.5 text-xs font-semibold tracking-wide",
-                    source.environment === "sandbox" ? "bg-amber-100 text-amber-900" : "bg-emerald-100 text-emerald-900",
-                  )}
-                >
-                  QBO: {source.environment === "sandbox" ? "SANDBOX" : "PRODUCTION"}
-                </span>
-              )}
             </div>
           )}
           <p className="mt-0.5 text-xs text-muted-foreground">
             {isQuickBooks
-              ? ["QuickBooks Online", source.external_id && `company ${source.external_id}`]
+              ? [
+                  "QuickBooks Online",
+                  source.environment === "sandbox" && "sandbox",
+                  source.external_id && `company ${source.external_id}`,
+                ]
                   .filter(Boolean)
                   .join(" · ")
               : `Upload · ${source.filename ?? "file"}`}
@@ -192,7 +151,6 @@ export function SourceCard({ source }: { source: DataSource }) {
         {isQuickBooks ? "Last synced" : "Imported"}: {source.last_synced_at ? formatDateTime(source.last_synced_at) : "never"}
       </p>
       {isQuickBooks && source.history_status && <HistoryLine source={source} />}
-      <EntityPicker source={source} />
 
       <div className="mt-auto flex flex-wrap gap-2 pt-4">
         {isQuickBooks && !needsAuth && (

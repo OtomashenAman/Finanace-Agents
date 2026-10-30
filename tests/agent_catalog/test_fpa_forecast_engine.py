@@ -16,7 +16,6 @@ PDF_EXAMPLE = {
     "scenario_volume_pct": "5",
     "scenario_price_pct": "2",
     "scenario_cost_pct": "3",
-    "metric": "Revenue",
 }
 
 
@@ -41,8 +40,7 @@ async def test_pdf_example_variance_and_scenario_bridge(db: AsyncSession) -> Non
     }
     material = next(f for f in analysis.findings if f.code == "VARIANCE_MATERIAL")
     assert material.message == (
-        "Actual vs budget variance of 20,000.00 (20%, favourable) exceeds the 10% materiality "
-        "threshold"
+        "Actual vs budget variance of 20,000.00 (20%) exceeds the 10% materiality threshold"
     )
     # 120,000 +5% volume = +6,000; +2% price on 126,000 = +2,520; 3% cost = -3,600
     assert calculation(analysis, "volume_impact") == Decimal("6000.00")
