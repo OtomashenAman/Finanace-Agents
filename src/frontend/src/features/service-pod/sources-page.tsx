@@ -1,7 +1,6 @@
 import { useState } from "react"
 import { Archive, ArchiveRestore, ChevronDown, ChevronRight, FileJson, Landmark, Trash2, Upload } from "lucide-react"
 
-import { AppPage } from "@/components/layout/app-page"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useDataSources } from "@/features/data-sources/hooks"
@@ -23,6 +22,8 @@ import {
   useSnapshots,
 } from "./hooks"
 import { COLLECTION_LABEL, formatDateTime, shortHash } from "./labels"
+import { snapshotKey, splitLatest } from "./components/latest"
+import { PodPage } from "./components/pod-page"
 
 function imported(result: SnapshotImportResult): string {
   const head = result.created ? "Snapshot imported." : "Identical content was already imported: using that snapshot."
@@ -324,16 +325,28 @@ export function SourcesPage() {
   const snapshots = useSnapshots(showArchived)
   const [openId, setOpenId] = useState<string | null>(null)
 
+  // The latest snapshot of each company first; earlier ones on request
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const groups = splitLatest(snapshots.data ?? [], snapshotKey)
+  const rows = groups.latest.flatMap((s) => {
+    const key = snapshotKey(s)
+    const older = groups.older.get(key) ?? []
+    return [
+      { s, key, older, first: true },
+      ...(expanded.has(key) ? older.map((o) => ({ s: o, key, older, first: false })) : []),
+    ]
+  })
+
   return (
-    <AppPage
-      title="Service POD"
+    <PodPage
+      title="Data sources"
       subtitle="Read-only source snapshots. Imported data is never changed; a refresh is a new snapshot."
     >
       <PodTabs />
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
         <Card
           title="Snapshots"
-          hint="Newest first. Missing collections stay missing: workflows that need them refuse the snapshot."
+          hint="The latest snapshot of each company; earlier ones fold underneath. Missing collections stay missing: workflows that need them refuse the snapshot."
           actions={
             <label className="flex items-center gap-2 text-xs">
               <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
@@ -345,11 +358,11 @@ export function SourcesPage() {
           {snapshots.isError && <LoadError what="snapshots" />}
           {snapshots.data?.length === 0 && <Empty>No snapshots yet.</Empty>}
           <ul className="divide-y">
-            {snapshots.data?.map((s) => {
+            {rows.map(({ s, key, older, first }) => {
               const hasReceipts = s.coverage.includes("bank_receipts")
               const isOpen = openId === s.id
               return (
-                <li key={s.id} className="py-2">
+                <li key={s.id} className={first ? "py-2" : "ml-6 border-l-2 border-border/70 py-1 pl-3"}>
                   <button
                     type="button"
                     className="flex w-full items-start justify-between gap-3 rounded-lg p-2.5 text-left transition-colors hover:bg-muted/50"
@@ -389,6 +402,22 @@ export function SourcesPage() {
                       <Removal snapshot={s} />
                     </div>
                   )}
+                  {first && older.length > 0 && (
+                    <button
+                      type="button"
+                      className="ml-2.5 text-xs text-primary hover:underline"
+                      onClick={() =>
+                        setExpanded((prev) => {
+                          const next = new Set(prev)
+                          if (next.has(key)) next.delete(key)
+                          else next.add(key)
+                          return next
+                        })
+                      }
+                    >
+                      {expanded.has(key) ? "Hide earlier snapshots" : `${older.length} earlier snapshot${older.length > 1 ? "s" : ""} of ${s.company_name}`}
+                    </button>
+                  )}
                 </li>
               )
             })}
@@ -409,6 +438,6 @@ export function SourcesPage() {
           </Card>
         </div>
       </div>
-    </AppPage>
+    </PodPage>
   )
 }

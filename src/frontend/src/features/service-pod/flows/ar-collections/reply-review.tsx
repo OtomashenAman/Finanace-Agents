@@ -1,11 +1,11 @@
 import { useState, type ReactNode } from "react"
-import { Bot, CalendarClock, CircleAlert, FileCheck2 } from "lucide-react"
+import { CalendarClock, CircleAlert, FileCheck2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
 import type { CaseDetail, Message, ReviewTask } from "../../api"
-import { Pill } from "../../components/bits"
+import { AiBadge, Pill } from "../../components/bits"
 import { Extraction } from "../../components/case-messages"
 import { useCompose, useCreateDraft, useDecideArtifact, useUploadArtifact } from "../../hooks"
 import { ARTIFACT_KIND, CASE_STATUS } from "../../labels"
@@ -158,10 +158,9 @@ export function ArReplyReview({ c, m }: { c: CaseDetail; m: Message }) {
     .filter((v) => v !== null)
 
   return (
-    <div className="rounded-md border border-sky-200 bg-sky-50/50 p-3 text-xs">
+    <div className="rounded-lg border border-ai-border bg-ai-soft/70 p-3 text-xs shadow-[0_6px_20px_-14px_rgb(76_47_184/0.35)]">
       <p className="mb-2 flex flex-wrap items-center gap-1.5">
-        <Bot className="size-3.5 text-sky-900" aria-hidden />
-        <span className="font-semibold text-sky-900">AI recommendation</span>
+        <AiBadge label="AI recommendation" />
         <Pill label={unsure ? "Confidence: review" : "Confidence: ok"} tone={unsure ? "warn" : "good"} />
         <Pill
           label={docTasks.length ? `Proof: ${docTasks.map((t) => ARTIFACT_KIND[(t.requirement?.kind ?? "other") as keyof typeof ARTIFACT_KIND] ?? t.requirement?.kind).join(", ").toLowerCase()} pending` : "Proof: none pending"}
@@ -170,7 +169,7 @@ export function ArReplyReview({ c, m }: { c: CaseDetail; m: Message }) {
         <Pill label="QB posting: none" tone="neutral" />
         <Pill label={`Case: ${CASE_STATUS[c.status][0].toLowerCase()}`} tone="neutral" />
       </p>
-      <dl className="divide-y divide-sky-100">
+      <dl className="divide-y divide-ai-border/60">
         <Row label="Intent">{reading.intent || "-"}</Row>
         <Row label="Promises">
           {reading.tranches.length === 0 && "None"}

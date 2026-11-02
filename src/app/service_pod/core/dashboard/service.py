@@ -11,6 +11,7 @@ from typing import cast
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.app.audit.models import AuditEvent
 from src.app.common.clock import utcnow
 from src.app.core.config import get_settings
 from src.app.service_pod.core.access.service import PodAccess
@@ -27,6 +28,11 @@ from src.app.service_pod.core.cases.service import case_blockers
 from src.app.service_pod.core.dashboard.schemas import (
     OPEN_PHASES,
     AgingBucket,
+    AiActivity,
+    AiEvent,
+    AiKind,
+    CashRunway,
+    CashWeek,
     Dashboard,
     EmailHealth,
     MoneyTotal,
@@ -38,6 +44,7 @@ from src.app.service_pod.core.hooks import hooks_for
 from src.app.service_pod.core.messaging import service as messaging
 from src.app.service_pod.core.messaging.models import Direction, MessageStatus, PodMessage
 from src.app.service_pod.core.snapshots.models import PodSnapshot
+from src.app.service_pod.core.workflows import WorkflowKey
 
 AGING = [
     ("0-7 days", 0, 7),
@@ -171,6 +178,64 @@ async def _email(session: AsyncSession) -> EmailHealth:
     )
 
 
+AI_EVENTS: dict[str, AiKind] = {
+    "pod.reply_read": "reply_read",
+    "pod.reply_not_read": "reply_not_read",
+    "pod.fpa_commentary": "commentary",
+    "pod.reply_imported": "reply_imported",
+}
+
+
+async def _ai_activity(session: AsyncSession) -> AiActivity:
+    since = utcnow() - timedelta(days=7)
+    grouped = await session.execute(
+        select(AuditEvent.event_type, func.count())
+        .where(AuditEvent.event_type.in_(AI_EVENTS), AuditEvent.created_at >= since)
+        .group_by(AuditEvent.event_type)
+    )
+    counts = {event: n for event, n in grouped.all()}  # noqa: C416
+    rows = await session.scalars(
+        select(AuditEvent)
+        .where(AuditEvent.event_type.in_(AI_EVENTS))
+        .order_by(AuditEvent.created_at.desc())
+        .limit(8)
+    )
+    return AiActivity(
+        last_7_days={kind: counts.get(event, 0) for event, kind in AI_EVENTS.items()},
+        recent=[
+            AiEvent(
+                at=e.created_at,
+                kind=AI_EVENTS[e.event_type],
+                summary=str((e.details or {}).get("summary") or e.event_type)[:300],
+                case_reference=(e.details or {}).get("run"),
+            )
+            for e in rows
+        ],
+    )
+
+
+async def _cash(session: AsyncSession) -> CashRunway | None:
+    case = await session.scalar(
+        select(PodCase)
+        .where(PodCase.workflow == WorkflowKey.TREASURY, PodCase.status != CaseStatus.CANCELLED)
+        .order_by(PodCase.updated_at.desc())
+        .limit(1)
+    )
+    base = ((case.state or {}).get("results") or {}).get("base") if case else None
+    if case is None or not base:
+        return None
+    return CashRunway(
+        case_id=case.id,
+        case_reference=case.reference,
+        currency=str(case.state.get("currency", "")),
+        opening=base["opening"],
+        buffer=base["buffer"],
+        ending_cash=base["ending_cash"],
+        first_breach=base.get("first_breach"),
+        weeks=[CashWeek(to=w["to"], ending_cash=w["ending_cash"]) for w in base["weeks"]],
+    )
+
+
 async def dashboard(session: AsyncSession, access: PodAccess) -> Dashboard:
     now = utcnow()
     today = now.date()
@@ -219,4 +284,6 @@ async def dashboard(session: AsyncSession, access: PodAccess) -> Dashboard:
             for c in open_cases
         ],
         email=await _email(session),
+        ai_activity=await _ai_activity(session),
+        cash=await _cash(session),
     )

@@ -73,3 +73,15 @@ async def test_messages_carry_their_case_reference(
     await customer_replies(pod, ar_case, fake_llm)
     messages = (await pod.get("/api/v1/pod/messages")).json()
     assert {m["case_reference"] for m in messages} == {ar_case["reference"]}
+
+
+async def test_ai_activity_and_cash_runway(
+    pod: AsyncClient, ar_case: dict[str, Any], fake_llm: FakeLLM
+) -> None:
+    await customer_replies(pod, ar_case, fake_llm)  # the AI reads the reply
+    d = await _dashboard(pod)
+    activity = d["ai_activity"]
+    assert activity["last_7_days"]["reply_read"] == 1
+    assert activity["recent"][0]["kind"] == "reply_read"
+    assert activity["recent"][0]["case_reference"] == ar_case["reference"]
+    assert d["cash"] is None  # no Treasury forecast yet

@@ -2,7 +2,6 @@ import { useState } from "react"
 import { Link, Navigate, useSearchParams } from "react-router"
 import { ArrowRight } from "lucide-react"
 
-import { AppPage } from "@/components/layout/app-page"
 import { Button } from "@/components/ui/button"
 
 import type { MessageStatus } from "./api"
@@ -12,6 +11,7 @@ import { Card, Empty, LoadError, Loading, Pill, PodTabs } from "./components/bit
 import { selectClass } from "./ui"
 import { useMessages, useMyQueue, useWorkflows } from "./hooks"
 import { formatDateTime, MESSAGE_STATUS, REVIEW_KIND, WORKFLOW_SHORT } from "./labels"
+import { PodPage } from "./components/pod-page"
 
 type QueueType = "all" | "signoff" | "review" | "email" | "posting" | "log"
 
@@ -79,6 +79,9 @@ export function MyQueuePage() {
   const [params, setParams] = useSearchParams()
   const type = (params.get("type") as QueueType | null) ?? "all"
   const q = useMyQueue()
+  // Many cases waiting only for a sign-off read as one line in "Everything"
+  const [unfold, setUnfold] = useState(false)
+  const folded = type === "all" && !unfold && q.signoffs.length > 2
   const { data: workflows } = useWorkflows()
   const show = (t: QueueType) => type === "all" || type === t
   const tabs: [QueueType, string, number | null][] = [
@@ -91,7 +94,7 @@ export function MyQueuePage() {
   ]
 
   return (
-    <AppPage title="Service POD" subtitle="Everything waiting on you, across all cases.">
+    <PodPage title="My Queue" subtitle="Everything waiting on you, across all cases.">
       <PodTabs />
       <Card title="My Queue" hint="Settle review tasks, send the emails, and post in QuickBooks by hand: each item opens where it's done.">
         <div className="mb-4 flex flex-wrap gap-1.5" role="group" aria-label="Show">
@@ -111,7 +114,20 @@ export function MyQueuePage() {
             {q.isError && <LoadError what="your queue" />}
             {!q.isPending && q.count === 0 && <Empty>Nothing is waiting on you.</Empty>}
             <ul className="divide-y">
+              {folded && (
+                <li className="flex items-center gap-3 py-3 text-sm">
+                  <Pill label="Sign-off" tone="good" />
+                  <span className="flex-1">
+                    <span className="font-semibold">{q.signoffs.length} cases</span> are settled and wait only for a sign-off:{" "}
+                    <span className="text-muted-foreground">{q.signoffs.slice(0, 4).map((c) => c.reference).join(", ")}{q.signoffs.length > 4 ? "…" : ""}</span>
+                  </span>
+                  <Button size="sm" variant="outline" onClick={() => setUnfold(true)}>
+                    Show all
+                  </Button>
+                </li>
+              )}
               {show("signoff") &&
+                !folded &&
                 q.signoffs.map((c) => {
                   const as = workflows?.find((w) => w.key === c.workflow)?.signoff_as ?? "Finance Admin"
                   return (
@@ -188,7 +204,7 @@ export function MyQueuePage() {
           </>
         )}
       </Card>
-    </AppPage>
+    </PodPage>
   )
 }
 

@@ -171,7 +171,7 @@ export function AiCard({
   return (
     <section
       className={cn(
-        "relative rounded-xl border border-violet-200/80 bg-gradient-to-b from-card to-violet-50/20 p-4 shadow-sm dark:border-violet-900/50 dark:to-violet-950/10",
+        "relative overflow-hidden rounded-xl border border-ai-border bg-gradient-to-b from-card to-ai-soft/60 p-4 pl-5 shadow-[0_1px_2px_rgb(76_47_184/0.05),0_10px_28px_-14px_rgb(76_47_184/0.25)] before:absolute before:inset-y-0 before:left-0 before:w-1 before:bg-gradient-to-b before:from-ai before:to-indigo-400 dark:border-violet-900/50 dark:to-violet-950/10",
         className,
       )}
       aria-label={title}
@@ -205,11 +205,17 @@ export function Card({
   className?: string
 }) {
   return (
-    <section className={cn("rounded-lg border border-border/70 bg-card p-4 shadow-2xs", className)} aria-label={title}>
-      <div className="mb-2.5 flex flex-wrap items-start justify-between gap-2 border-b border-border/60 pb-2.5">
+    <section
+      className={cn(
+        "rounded-xl border border-border/80 bg-card p-4 shadow-[0_1px_2px_rgb(15_33_66/0.04),0_8px_24px_-12px_rgb(15_33_66/0.10)]",
+        className,
+      )}
+      aria-label={title}
+    >
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-2 border-b border-border/70 pb-2.5">
         <div>
-          <h2 className="text-sm font-semibold tracking-tight text-foreground">{title}</h2>
-          {hint && <p className="mt-0.5 text-xs text-muted-foreground leading-normal">{hint}</p>}
+          <h2 className="text-[13px] font-semibold tracking-tight text-brand-navy">{title}</h2>
+          {hint && <p className="mt-0.5 max-w-3xl text-xs leading-normal text-muted-foreground">{hint}</p>}
         </div>
         {actions}
       </div>

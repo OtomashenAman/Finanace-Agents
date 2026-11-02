@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { ChevronDown, Download, Search, Sparkles } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -8,7 +8,7 @@ import { apiDownload } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 import type { CaseDetail } from "../../api"
-import { Card, Empty, Pill } from "../../components/bits"
+import { AiBadge, AiCard, Card, Empty, Pill } from "../../components/bits"
 import { OwnedActions, ReviewTasks } from "../../components/case-sections"
 import { TaskRow } from "../../components/case-extras"
 import { TaskActions } from "../../components/task-actions"
@@ -517,6 +517,11 @@ function FactChips({ ids, facts }: { ids: string[]; facts: Map<string, FpaFact> 
   )
 }
 
+/** A card that wears the AI look when the AI wrote its content */
+function Framed({ ai, badge, ...props }: { ai: boolean; badge: ReactNode; title: string; hint?: ReactNode; actions?: ReactNode; children: ReactNode }) {
+  return ai ? <AiCard badge={badge} {...props} /> : <Card {...props} />
+}
+
 export function Commentary({ c, s, title = "Finance Head commentary" }: { c: CaseDetail; s: FpaState; title?: string }) {
   const draft = useFpaCommentary()
   const { run, pending } = useRunAction(c)
@@ -535,7 +540,9 @@ export function Commentary({ c, s, title = "Finance Head commentary" }: { c: Cas
     ).then((r) => r && setEditing(false))
 
   return (
-    <Card
+    <Framed
+      ai={cm?.by === "ai"}
+      badge={<AiBadge label="AI drafted · cited" />}
       title={title}
       hint="AI findings cite the engine's facts and never state a figure themselves; the cited values are shown beside them."
       actions={
@@ -588,7 +595,7 @@ export function Commentary({ c, s, title = "Finance Head commentary" }: { c: Cas
           </p>
         </>
       )}
-    </Card>
+    </Framed>
   )
 }
 
@@ -611,7 +618,7 @@ export function FollowUps({ c, s }: { c: CaseDetail; s: FpaState }) {
   if (!items.length) return null
   const taken = new Set(c.owned_actions.map((a) => a.title))
   return (
-    <Card title="Questions and follow-ups" hint="From the AI, for the reviewers. They don't block the sign-off; track one if someone should act on it.">
+    <AiCard badge={<AiBadge label="AI suggestions" />} title="Questions and follow-ups" hint="From the AI, for the reviewers. They don't block the sign-off; track one if someone should act on it.">
       <ul className="divide-y">
         {items.map((r) => {
           const [label, tone] = FOLLOW_UP[r.kind] ?? ["Follow-up", "neutral"]
@@ -637,7 +644,7 @@ export function FollowUps({ c, s }: { c: CaseDetail; s: FpaState }) {
           )
         })}
       </ul>
-    </Card>
+    </AiCard>
   )
 }
 

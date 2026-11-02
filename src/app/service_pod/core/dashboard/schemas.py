@@ -55,6 +55,41 @@ class EmailHealth(BaseModel):
     avg_reply_hours: float | None  # sent -> reply, over the replies of the last 30 days
 
 
+AiKind = Literal["reply_read", "reply_not_read", "commentary", "reply_imported"]
+
+
+class AiEvent(BaseModel):
+    at: datetime
+    kind: AiKind
+    summary: str
+    case_reference: str | None
+
+
+class AiActivity(BaseModel):
+    """What the automation did (from the audit trail): counts over 7 days and the latest."""
+
+    last_7_days: dict[AiKind, int]
+    recent: list[AiEvent]
+
+
+class CashWeek(BaseModel):
+    to: date
+    ending_cash: Decimal
+
+
+class CashRunway(BaseModel):
+    """The base scenario of the latest Treasury forecast."""
+
+    case_id: uuid.UUID
+    case_reference: str
+    currency: str
+    opening: Decimal
+    buffer: Decimal
+    ending_cash: Decimal
+    first_breach: date | None
+    weeks: list[CashWeek]
+
+
 class Dashboard(BaseModel):
     """The Service POD at a glance; every figure is counted from the cases, never estimated."""
 
@@ -67,3 +102,5 @@ class Dashboard(BaseModel):
     aging: list[AgingBucket]
     open: list[OpenCase]  # every open case, oldest first
     email: EmailHealth
+    ai_activity: AiActivity
+    cash: CashRunway | None

@@ -384,7 +384,23 @@ export interface PromiseItem {
   expected_date: string
 }
 
+export type AiKind = "reply_read" | "reply_not_read" | "commentary" | "reply_imported"
+
 export interface Dashboard {
+  ai_activity: {
+    last_7_days: Record<AiKind, number>
+    recent: { at: string; kind: AiKind; summary: string; case_reference: string | null }[]
+  }
+  cash: {
+    case_id: string
+    case_reference: string
+    currency: string
+    opening: string
+    buffer: string
+    ending_cash: string
+    first_breach: string | null
+    weeks: { to: string; ending_cash: string }[]
+  } | null
   open_cases: number
   closed_30d: number
   phases: Record<DashboardPhase, number>

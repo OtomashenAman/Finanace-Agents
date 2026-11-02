@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import type { FpaPeriodSource } from "../../api"
 import { Card, DemoBadge, Empty, LoadError, Loading, Pill } from "../../components/bits"
 import { JourneyStrip } from "../../components/case-steps"
+import { snapshotKey, splitLatest } from "../../components/latest"
 import { WorkflowWorkspace } from "../../components/workspace"
 import { useCreateCase, useFpaPeriods } from "../../hooks"
 import { CASE_STATUS } from "../../labels"
@@ -79,6 +80,10 @@ function StartAnalysis({ source }: { source: FpaPeriodSource }) {
 
 export function FpaPeriodsPage() {
   const { data, isPending, isError } = useFpaPeriods()
+  const [allSnapshots, setAllSnapshots] = useState(false)
+  const groups = splitLatest(data?.sources ?? [], (s) => snapshotKey(s.snapshot))
+  const hidden = [...groups.older.values()].reduce((n, list) => n + list.length, 0)
+  const visible = allSnapshots ? (data?.sources ?? []) : groups.latest
   return (
     <WorkflowWorkspace workflow="fpa_trend" homeLabel={HOME_LABEL}>
       <JourneyStrip workflow="fpa_trend" home={HOME_LABEL} steps={FPA_STEPS} />
@@ -96,7 +101,7 @@ export function FpaPeriodsPage() {
         </Card>
       )}
       <div className="space-y-6">
-        {data?.sources.map((src) => (
+        {visible.map((src) => (
           <Card
             key={src.snapshot.id}
             title={`${src.snapshot.company_name} · ${src.snapshot.entity.code}`}
@@ -106,6 +111,11 @@ export function FpaPeriodsPage() {
             <StartAnalysis source={src} />
           </Card>
         ))}
+        {hidden > 0 && (
+          <button type="button" className="text-xs text-primary hover:underline" onClick={() => setAllSnapshots(!allSnapshots)}>
+            {allSnapshots ? "Show only the latest snapshot of each company" : `Show ${hidden} older snapshot${hidden > 1 ? "s" : ""}`}
+          </button>
+        )}
         {data && data.cases.length > 0 && (
           <Card title="FP&A cases">
             <ul className="divide-y">

@@ -1,18 +1,18 @@
 import { useState } from "react"
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router"
-import { ArrowRight, Plus, Search } from "lucide-react"
+import { ArrowRight, FlaskConical, Plus, Search } from "lucide-react"
 
-import { AppPage } from "@/components/layout/app-page"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
 import type { CaseSummary, Workflow, WorkflowKey } from "./api"
-import { Card, DemoBadge, Empty, Field, LoadError, Loading, Pill, PodTabs } from "./components/bits"
+import { Card, Empty, Field, LoadError, Loading, Pill, PodTabs } from "./components/bits"
 import { WorkflowWorkspace } from "./components/workspace"
 import { FLOW_UI } from "./flows"
 import { useCases, useCreateCase, useSnapshots, useWorkflows } from "./hooks"
 import { CASE_STATUS, COLLECTION_LABEL, formatDateTime, WORKFLOW_SHORT, WORKFLOW_SLUG, workflowFromSlug } from "./labels"
 import { attempt, selectClass } from "./ui"
+import { PodPage } from "./components/pod-page"
 
 /** Opening a case by hand: only for workflows without their own home screen yet, where the
  *  case starts from a snapshot that supplies the workflow's data. */
@@ -171,8 +171,8 @@ function CaseTable({
                   </Link>
                   <span className="ml-2 font-medium">{c.title}</span>
                   {c.is_demo && (
-                    <span className="ml-2">
-                      <DemoBadge />
+                    <span className="ml-1.5 inline-flex align-middle text-amber-700" title="Demo data: fictional, never the company's books">
+                      <FlaskConical className="size-3.5" aria-label="Demo data" />
                     </span>
                   )}
                 </td>
@@ -237,7 +237,7 @@ export function CasesPage() {
     (cases.data ?? []).filter((c) => (!key || c.workflow === key) && STATUS_FILTER[status].match(c)).length
 
   return (
-    <AppPage title="Service POD" subtitle="Cases categorized by workflow. Track progress, steps, and required sign-offs.">
+    <PodPage title="Cases" subtitle="Cases categorized by workflow. Track progress, steps, and required sign-offs.">
       <PodTabs />
       <div className="space-y-6">
         <Card
@@ -363,7 +363,7 @@ export function CasesPage() {
           </div>
         )}
       </div>
-    </AppPage>
+    </PodPage>
   )
 }
 
@@ -371,14 +371,15 @@ export function CasesPage() {
 export function LegacyWorkflowCases() {
   const { slug } = useParams()
   const key = workflowFromSlug(slug)
-  if (!key) return <Navigate to="/pod" replace />
-
+  // Hooks first, every render (an unknown slug redirects below)
   const { data: workflows = [] } = useWorkflows()
-  const spec = workflows.find((w) => w.key === key)
-  const flow = FLOW_UI[key]
-  const cases = useCases({ workflow: key })
+  const cases = useCases({ workflow: key ?? null })
   const [status, setStatus] = useState<StatusFilter>("open")
   const [q, setQ] = useState("")
+  if (!key) return <Navigate to="/pod" replace />
+
+  const spec = workflows.find((w) => w.key === key)
+  const flow = FLOW_UI[key]
 
   const needle = q.trim().toLowerCase()
   const rows = (cases.data ?? []).filter(

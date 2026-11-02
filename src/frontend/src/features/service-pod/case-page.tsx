@@ -1,7 +1,6 @@
 import { Link, useParams } from "react-router"
 import { ArrowLeft, ChevronRight } from "lucide-react"
 
-import { AppPage } from "@/components/layout/app-page"
 
 import type { CaseDetail } from "./api"
 import { DemoBadge, LoadError, Loading, Pill, PodTabs } from "./components/bits"
@@ -15,6 +14,7 @@ import { FLOW_UI } from "./flows"
 import { useCase } from "./hooks"
 import type { NextAction } from "./flows/types"
 import { CASE_PHASE, CASE_STATUS, formatDateTime, WORKFLOW_SHORT, WORKFLOW_SLUG } from "./labels"
+import { PodPage } from "./components/pod-page"
 
 function Header({ c, next }: { c: CaseDetail; next?: NextAction }) {
   // Workflows with steps say where the work stands; others show the case's own status
@@ -55,7 +55,7 @@ export function CasePage() {
   const flow = c ? FLOW_UI[c.workflow] : undefined
   const next = c && flow?.steps && flow.nextAction ? flow.nextAction(c) : undefined
   return (
-    <AppPage title="Service POD" subtitle={c ? `${c.reference} · updated ${formatDateTime(c.updated_at)}` : undefined}>
+    <PodPage title={c ? `${c.reference} · ${c.title}` : "Case"} subtitle={c ? `${WORKFLOW_SHORT[c.workflow]} · updated ${formatDateTime(c.updated_at)}` : undefined}>
       <PodTabs />
       {isPending && <Loading what="the case" />}
       {isError && <LoadError what="this case (it may not exist or isn't yours)" />}
@@ -86,6 +86,6 @@ export function CasePage() {
           )}
         </div>
       )}
-    </AppPage>
+    </PodPage>
   )
 }

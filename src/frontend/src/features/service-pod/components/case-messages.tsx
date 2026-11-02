@@ -1,5 +1,5 @@
 import { useState, type ComponentType, type ReactNode } from "react"
-import { Bot, Download, Mail, Send, Sparkles } from "lucide-react"
+import { Download, Mail, Send, Sparkles } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -19,7 +19,7 @@ import {
   useUploadArtifact,
 } from "../hooks"
 import { ARTIFACT_KIND, formatDateTime, MESSAGE_STATUS, THREAD_EVIDENCE } from "../labels"
-import { Card, Empty, Field, Pill } from "./bits"
+import { AiBadge, Card, Empty, Field, Pill } from "./bits"
 import { attempt, selectClass } from "../ui"
 
 const CHECK_LABELS: Record<keyof ApprovalChecks, string> = {
@@ -34,9 +34,9 @@ export function Extraction({ m }: { m: Message }) {
   const notes = m.extraction?.notes ?? []
   const output = m.extraction?.output
   return (
-    <div className="mt-2 rounded border border-sky-200 bg-sky-50/60 p-2 text-xs">
-      <p className="flex items-center gap-1 font-semibold text-sky-900">
-        <Bot className="size-3.5" aria-hidden /> AI reading:{" "}
+    <div className="mt-2 rounded-lg border border-ai-border bg-ai-soft/70 p-2.5 text-xs">
+      <p className="flex flex-wrap items-center gap-1.5 font-semibold text-ai-foreground">
+        <AiBadge label="AI reading" />
         {m.extraction_status === "pending" && "in progress…"}
         {m.extraction_status === "done" && "done (checked against the customer's words)"}
         {m.extraction_status === "failed" && "couldn't be read reliably, a person reads it"}
@@ -279,7 +279,15 @@ function DraftForm({
           </Button>
         )}
       </div>
-      {composedNote && <p className="text-xs text-amber-800">{composedNote}</p>}
+      {composedNote &&
+        (composedNote.startsWith("Draft suggested") ? (
+          <p className="flex flex-wrap items-center gap-1.5 text-xs text-ai-foreground">
+            <AiBadge label="AI wording" />
+            {composedNote}
+          </p>
+        ) : (
+          <p className="text-xs text-amber-800">{composedNote}</p>
+        ))}
       <div className="grid gap-2 sm:grid-cols-[140px_1fr]">
         <select
           className={selectClass}

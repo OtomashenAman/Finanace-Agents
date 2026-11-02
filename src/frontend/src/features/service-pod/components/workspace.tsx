@@ -2,13 +2,13 @@ import type { ReactNode } from "react"
 import { Link, NavLink } from "react-router"
 import { ChevronRight } from "lucide-react"
 
-import { AppPage } from "@/components/layout/app-page"
 import { cn } from "@/lib/utils"
 
 import type { WorkflowKey } from "../api"
 import { useWorkflows } from "../hooks"
 import { WORKFLOW_SHORT, WORKFLOW_SLUG } from "../labels"
 import { PodTabs } from "./bits"
+import { PodPage } from "./pod-page"
 
 interface WorkflowWorkspaceProps {
   workflow: WorkflowKey
@@ -29,7 +29,7 @@ export function WorkflowWorkspace({ workflow, homeLabel, children }: WorkflowWor
   const spec = workflows?.find((w) => w.key === workflow)
   const slug = WORKFLOW_SLUG[workflow]
   return (
-    <AppPage title="Service POD" subtitle={spec?.description}>
+    <PodPage title={spec?.name ?? WORKFLOW_SHORT[workflow]} subtitle={spec?.description}>
       <PodTabs />
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <p className="flex items-center gap-1 text-sm">
@@ -51,6 +51,6 @@ export function WorkflowWorkspace({ workflow, homeLabel, children }: WorkflowWor
         </nav>
       </div>
       {children}
-    </AppPage>
+    </PodPage>
   )
 }
