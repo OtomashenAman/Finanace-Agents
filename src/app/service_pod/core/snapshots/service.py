@@ -11,10 +11,12 @@ from src.app.audit.service import record_event
 from src.app.common.clock import utcnow
 from src.app.common.context import RequestContext
 from src.app.core.config import get_settings
+from src.app.data_sources import erpnext_service
 from src.app.data_sources import service as data_sources
 from src.app.data_sources.exceptions import AppCredentialsError
-from src.app.data_sources.models import DataSource, SourceKind
+from src.app.data_sources.models import DataSource, IntegrationEnvironment, SourceKind
 from src.app.data_sources.providers import quickbooks as qb
+from src.app.data_sources.providers.erpnext import ErpNextError
 from src.app.entities import service as entities
 from src.app.entities.models import LegalEntity
 from src.app.entities.schemas import EntityRef
@@ -24,6 +26,7 @@ from src.app.service_pod.core.access.service import PodAccess
 from src.app.service_pod.core.cases.models import PodCase
 from src.app.service_pod.core.snapshots import importers
 from src.app.service_pod.core.snapshots.contract import (
+    AP_COLLECTIONS,
     Basis,
     Collection,
     Provenance,
@@ -43,12 +46,23 @@ from src.app.service_pod.core.snapshots.models import (
     SourceType,
 )
 from src.app.service_pod.core.snapshots.schemas import (
+    ErpNextSnapshotRequest,
     QuickBooksSnapshotRequest,
     SnapshotImportResult,
     SnapshotRows,
     SnapshotSummary,
 )
 from src.app.service_pod.core.tasks.models import PodPostingTask
+
+
+def stored_payload(doc: SnapshotDocument) -> dict[str, Any]:
+    """The canonical payload, without the Finance POD collections a source didn't supply (so
+    an export's digest is the same as before they existed)."""
+    payload: dict[str, Any] = plain(doc)
+    for collection in AP_COLLECTIONS:
+        if payload.get(collection.value) is None:
+            payload.pop(collection.value, None)
+    return payload
 
 
 def document(snapshot: PodSnapshot) -> SnapshotDocument:
@@ -145,7 +159,7 @@ async def _store(
     is_demo = doc.provenance == Provenance.SYNTHETIC_DEMO
     if is_demo and not get_settings().demo_snapshots_allowed:
         raise DemoSnapshotNotAllowedError
-    payload = plain(doc)
+    payload = stored_payload(doc)
     sha256 = fingerprint(payload)
 
     existing = await session.scalar(
@@ -269,6 +283,41 @@ async def import_quickbooks(
         session.add(PodSnapshotSource(snapshot_id=result.snapshot.id, data_source_id=source.id))
         await session.commit()
     return result
+
+
+async def import_erpnext(
+    session: AsyncSession, access: PodAccess, body: ErpNextSnapshotRequest, ctx: RequestContext
+) -> SnapshotImportResult:
+    """Freeze one ERPNext company's Procure-to-Pay data into a snapshot (read only). A
+    sandbox connection holds demo data, so its snapshots are labelled demo."""
+    entity = await _entity(session, body.entity_id)
+    source = await session.get(DataSource, body.data_source_id)
+    if source is None or source.owner_id != access.user.id:
+        raise SnapshotNotFoundError("ERPNext connection not found.")
+    if source.kind != SourceKind.ERPNEXT:
+        raise SnapshotInvalidError("Choose an ERPNext connection.")
+    try:
+        async with erpnext_service.erpnext_api(source) as api:
+            doc = await importers.from_erpnext(
+                api,
+                company=source.external_id or "",
+                entity_code=entity.code,
+                as_of=utcnow().date(),
+                demo=source.environment == IntegrationEnvironment.SANDBOX,
+            )
+    except ErpNextError as exc:
+        raise SnapshotInvalidError(f"Couldn't read ERPNext: {exc}") from exc
+    result = await _store(session, access, entity, doc, SourceType.ERPNEXT, ctx)
+    if await session.get(PodSnapshotSource, result.snapshot.id) is None:
+        session.add(PodSnapshotSource(snapshot_id=result.snapshot.id, data_source_id=source.id))
+        await session.commit()
+    return result
+
+
+async def source_of(session: AsyncSession, snapshot_id: uuid.UUID) -> DataSource | None:
+    """The connected data source a snapshot was read from (None: a file or a bank CSV)."""
+    link = await session.get(PodSnapshotSource, snapshot_id)
+    return None if link is None else await session.get(DataSource, link.data_source_id)
 
 
 async def _read_pnl(

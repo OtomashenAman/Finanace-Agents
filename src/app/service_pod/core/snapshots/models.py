@@ -22,6 +22,7 @@ class SourceType(StrEnum):
     BANK_CSV = "bank_csv"  # a bank statement added to an earlier snapshot (new snapshot)
     QUICKBOOKS_ONLINE = "quickbooks_online"  # frozen copy of a connected company's records
     QBXML = "qbxml"  # QuickBooks Desktop / Enterprise qbXML query responses
+    ERPNEXT = "erpnext"  # frozen read of a connected ERPNext company (Finance POD)
 
 
 class PodSnapshot(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):

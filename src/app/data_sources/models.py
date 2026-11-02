@@ -22,11 +22,12 @@ from src.app.data_sources.records import RecordType
 class SourceKind(StrEnum):
     QUICKBOOKS = "quickbooks"
     UPLOAD = "upload"
+    ERPNEXT = "erpnext"  # Finance POD: an ERPNext site, read over its REST API
 
 
 class SourceStatus(StrEnum):
     PENDING_AUTH = "pending_auth"  # created, waiting for the user to authorize
-    CONNECTED = "connected"  # QuickBooks authorized
+    CONNECTED = "connected"  # QuickBooks authorized / ERPNext reachable with its key
     NEEDS_REAUTH = "needs_reauth"  # refresh token expired or revoked
     ERROR = "error"  # last sync failed for another reason
     READY = "ready"  # upload imported
@@ -74,7 +75,10 @@ class DataSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     environment: Mapped[IntegrationEnvironment | None] = mapped_column(
         string_enum(IntegrationEnvironment, 16)
     )
+    # QuickBooks: the authorized company (realmId); ERPNext: the company read
     external_id: Mapped[str | None] = mapped_column(String(100))
+    # ERPNext: the site's address (client_id holds the API key, client_secret_enc the secret)
+    base_url: Mapped[str | None] = mapped_column(String(500))
     # Encrypted JSON: {"refresh_token", "access_token", "access_expires_at"}
     credentials_enc: Mapped[str | None] = mapped_column(Text)
     # One-time value bound into the OAuth state; cleared when the callback consumes it

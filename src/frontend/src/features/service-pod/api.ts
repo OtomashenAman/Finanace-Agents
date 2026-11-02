@@ -14,6 +14,21 @@ export type Collection =
   | "cash_position"
   | "balance_sheets"
   | "close_status"
+  // Procure-to-Pay (Finance POD, from an ERP such as ERPNext)
+  | "vendors"
+  | "items"
+  | "item_prices"
+  | "vendor_contracts"
+  | "cost_centres"
+  | "labs"
+  | "grants"
+  | "budgets"
+  | "budget_actuals"
+  | "purchase_requests"
+  | "supplier_quotations"
+  | "purchase_orders"
+  | "purchase_receipts"
+  | "bills"
 export type CaseStatus = "draft" | "approved" | "completed" | "cancelled"
 export type MessageStatus = "draft" | "sending" | "sent" | "send_failed" | "send_unknown" | "received"
 export type TaskStatus = "proposed" | "recorded_unverified" | "verified" | "cancelled"
@@ -47,8 +62,8 @@ export interface Snapshot {
   id: string
   entity: EntityRef
   parent_id: string | null
-  source_type: "json_export" | "bank_csv" | "quickbooks_online"
-  provenance: "QUICKBOOKS_READONLY_EXPORT" | "SYNTHETIC_DEMO"
+  source_type: "json_export" | "bank_csv" | "quickbooks_online" | "qbxml" | "erpnext"
+  provenance: "QUICKBOOKS_READONLY_EXPORT" | "SYNTHETIC_DEMO" | "ERP_READONLY_EXPORT"
   is_demo: boolean
   company_id: string
   company_name: string
@@ -308,7 +323,7 @@ export interface PostingTask {
   case_id: string
   case_reference: string
   workflow: WorkflowKey
-  kind: "receive_payment" | "journal_entry"
+  kind: "receive_payment" | "journal_entry" | "create_supplier" | "create_purchase_order"
   reference: string
   status: TaskStatus
   version: number
@@ -586,6 +601,9 @@ export const podApi = {
   },
   importQuickBooks: (body: { data_source_id: string; entity_id: string; currency: string; basis: string }) =>
     apiRequest<SnapshotImportResult>("/pod/snapshots/quickbooks", { method: "POST", json: body }),
+  /** Freeze a connected ERPNext company's purchasing data (Finance POD) */
+  importErpNext: (body: { data_source_id: string; entity_id: string }) =>
+    apiRequest<SnapshotImportResult>("/pod/snapshots/erpnext", { method: "POST", json: body }),
   importQbxml: ({
     file,
     entityId,

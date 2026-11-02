@@ -25,11 +25,13 @@ from src.app.service_pod.core.cases.models import LOCKED_STATUSES, CaseStatus, P
 from src.app.service_pod.core.hooks import hooks_for
 from src.app.service_pod.core.snapshots import service as snapshots
 from src.app.service_pod.core.snapshots.models import PodSnapshot
+from src.app.service_pod.core.tasks import erp_posting
+from src.app.service_pod.core.tasks.erp_posting import ERP_KINDS
 from src.app.service_pod.core.tasks.models import PodPostingTask, TaskStatus
 from src.app.service_pod.core.tasks.schemas import TaskAction, TaskCreate, TaskOut
 from src.app.service_pod.core.workflows import PodKey, keys_in
 
-ACTIONS = ("record", "verify", "cancel")
+ACTIONS = ("record", "post", "verify", "cancel")
 
 
 class TaskNotFoundError(AppError):
@@ -49,6 +51,13 @@ def _guard(task: PodPostingTask, action: str) -> str | None:
         case "record":
             if task.status != TaskStatus.PROPOSED:
                 return "Only a proposed posting can be recorded."
+            if task.kind in ERP_KINDS:
+                return "The app posts this to the ERP: use post."
+        case "post":
+            if task.kind not in ERP_KINDS:
+                return "Post this one in QuickBooks yourself, then record it."
+            if task.status != TaskStatus.PROPOSED:
+                return "Only a proposed posting can be posted."
         case "verify":
             if task.status != TaskStatus.RECORDED_UNVERIFIED:
                 return "Verify after the posting is recorded."
@@ -216,12 +225,16 @@ async def _verification(
         problems.append("The snapshot was imported before the posting was recorded.")
     doc = snapshots.document(fresh)
     txn = task.external_txn_id
-    found = any(p.id == txn or p.reference == txn for p in doc.payments or []) or any(
-        # a journal's lines are "<txn>:<n>" (one row per account); QuickBooks users
-        # usually know a transaction by its number
-        (t.id == txn or t.id.startswith(f"{txn}:") or t.document_ref == txn)
-        and t.status == "Posted"
-        for t in doc.transactions or []
+    found = (
+        erp_posting.present(task, doc)
+        or any(p.id == txn or p.reference == txn for p in doc.payments or [])
+        or any(
+            # a journal's lines are "<txn>:<n>" (one row per account); QuickBooks users
+            # usually know a transaction by its number
+            (t.id == txn or t.id.startswith(f"{txn}:") or t.document_ref == txn)
+            and t.status == "Posted"
+            for t in doc.transactions or []
+        )
     )
     if not found:
         problems.append(f"Transaction {txn} isn't in the fresh snapshot.")
@@ -258,6 +271,15 @@ async def run_action(
         task.external_txn_id = body.external_txn_id.strip()
         task.recorded_by, task.recorded_at = access.user.id, now
         summary = f"recorded QuickBooks transaction {task.external_txn_id} (not yet verified)"
+    elif body.action == "post":
+        try:
+            name = await erp_posting.post(session, task, case)
+        except erp_posting.PostingError as exc:
+            raise TaskRefusedError(str(exc)) from exc
+        task.status = TaskStatus.RECORDED_UNVERIFIED
+        task.external_txn_id = name
+        task.recorded_by, task.recorded_at = access.user.id, now
+        summary = f"posted {task.reference} to the ERP as {name} (not yet verified)"
     elif body.action == "verify":
         if body.snapshot_id is None:
             raise TaskRefusedError("Choose the fresh snapshot that shows the posting.")
@@ -278,6 +300,7 @@ async def run_action(
                 "imported after recording",
                 "transaction present",
             ],
+            "posted_by_app": task.kind in ERP_KINDS,
         }
         summary = f"verified transaction {task.external_txn_id} against a fresh snapshot"
     else:

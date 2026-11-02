@@ -20,6 +20,7 @@ from src.app.data_sources.schemas import (
     AdminDataSourceOut,
     AuthorizeResponse,
     DataSourceOut,
+    ErpNextConnect,
     QuickBooksApp,
     QuickBooksAppUpdate,
     RecordOut,
@@ -104,6 +105,17 @@ async def connect_quickbooks(
 ) -> AuthorizeResponse:
     """Connect a company with your own Intuit app; returns the Intuit sign-in URL."""
     return await service.connect_quickbooks(session, user, body, ctx)
+
+
+@router.post(
+    "/erpnext", response_model=DataSourceOut, status_code=status.HTTP_201_CREATED, responses=_ERRORS
+)
+async def connect_erpnext(
+    body: ErpNextConnect, session: SessionDep, user: CurrentUser, ctx: RequestContextDep
+) -> DataSourceOut:
+    """Connect an ERPNext site with an API user's key and secret (checked before saving),
+    then sync its vendors, supplier invoices, purchase orders and accounts."""
+    return await service.connect_erpnext(session, user, body, ctx)
 
 
 @router.get("/quickbooks/callback", include_in_schema=False)
@@ -276,7 +288,8 @@ async def update_app(
 async def sync_source(
     source_id: uuid.UUID, session: SessionDep, user: CurrentUser, ctx: RequestContextDep
 ) -> DataSourceOut:
-    """Pull the latest vendors, bills, purchase orders and accounts from QuickBooks."""
+    """QuickBooks: pull the latest vendors, bills, POs and accounts. ERPNext: check the
+    connection still works (snapshots read the site directly)."""
     return await service.sync_source(session, user, source_id, ctx)
 
 

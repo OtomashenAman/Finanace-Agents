@@ -4,6 +4,7 @@ and shows in the snapshot's coverage."""
 
 from src.app.service_pod.core.snapshots.importers.bank_csv import parse_bank_csv, with_bank_receipts
 from src.app.service_pod.core.snapshots.importers.base import check_row_limits
+from src.app.service_pod.core.snapshots.importers.erpnext import from_erpnext
 from src.app.service_pod.core.snapshots.importers.json_export import parse_json_export
 from src.app.service_pod.core.snapshots.importers.qbxml import parse_qbxml
 from src.app.service_pod.core.snapshots.importers.quickbooks_online import from_quickbooks
@@ -11,6 +12,7 @@ from src.app.service_pod.core.snapshots.importers.workbook import parse_workbook
 
 __all__ = [
     "check_row_limits",
+    "from_erpnext",
     "from_quickbooks",
     "parse_bank_csv",
     "parse_json_export",

@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react"
 import { useSearchParams } from "react-router"
-import { CircleCheck, Database, Landmark, LoaderCircle, Upload } from "lucide-react"
+import { CircleCheck, Database, Landmark, LoaderCircle, Server, Upload } from "lucide-react"
 
 import { AppPage } from "@/components/layout/app-page"
 import { Alert } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Panel } from "@/features/agent-catalog/workspace/components/panel"
 
+import { ErpNextForm } from "./components/erpnext-form"
 import { QuickBooksAppForm } from "./components/quickbooks-app-form"
 import { SourceCard } from "./components/source-card"
 import { UploadWizard } from "./components/upload-wizard"
@@ -37,7 +38,7 @@ function useOAuthResult(): [Banner | null, () => void] {
 
 export function DataSourcesPage() {
   const sources = useDataSources()
-  const [panel, setPanel] = useState<"connect" | "upload" | null>(null)
+  const [panel, setPanel] = useState<"connect" | "erpnext" | "upload" | null>(null)
   const [banner, dismiss] = useOAuthResult()
 
   return (
@@ -69,6 +70,10 @@ export function DataSourcesPage() {
             <Landmark aria-hidden />
             Connect QuickBooks
           </Button>
+          <Button type="button" variant="outline" onClick={() => setPanel("erpnext")} disabled={panel === "erpnext"}>
+            <Server aria-hidden />
+            Connect ERPNext
+          </Button>
           <Button type="button" variant="outline" onClick={() => setPanel("upload")} disabled={panel === "upload"}>
             <Upload aria-hidden />
             Upload file
@@ -78,6 +83,11 @@ export function DataSourcesPage() {
         {panel === "connect" && (
           <Panel title="Connect your QuickBooks company">
             <QuickBooksAppForm onDone={() => setPanel(null)} />
+          </Panel>
+        )}
+        {panel === "erpnext" && (
+          <Panel title="Connect an ERPNext site (Finance POD)">
+            <ErpNextForm onDone={() => setPanel(null)} />
           </Panel>
         )}
         {panel === "upload" && <UploadWizard onDone={() => setPanel(null)} />}

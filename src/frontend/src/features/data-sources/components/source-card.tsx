@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { FileSpreadsheet, KeyRound, Landmark, LoaderCircle, Pencil, RefreshCw, Settings2, Trash2 } from "lucide-react"
+import { FileSpreadsheet, KeyRound, Landmark, LoaderCircle, Pencil, RefreshCw, Server, Settings2, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -80,13 +80,18 @@ export function SourceCard({ source }: { source: DataSource }) {
   const podCount = dependents.data ? dependents.data.snapshots.length : 0
 
   const isQuickBooks = source.kind === "quickbooks"
+  const isErpNext = source.kind === "erpnext"
+  const connected = isQuickBooks || isErpNext
   const needsAuth = source.status === "needs_reauth" || source.status === "pending_auth"
   const counts = (Object.entries(source.record_counts) as [RecordType, number][]).filter(([, n]) => n > 0)
-  const Icon = isQuickBooks ? Landmark : FileSpreadsheet
+  const Icon = isQuickBooks ? Landmark : isErpNext ? Server : FileSpreadsheet
 
   const onSync = () =>
     sync.mutate(source.id, {
-      onSuccess: () => toast.success(`${source.name} synced`),
+      onSuccess: (synced) =>
+        synced.status === "error"
+          ? toast.error(synced.last_error ?? "Sync failed")
+          : toast.success(`${source.name} synced`),
       onError: (error) => toast.error(errorMessage(error, "Sync failed")),
     })
 
@@ -95,7 +100,7 @@ export function SourceCard({ source }: { source: DataSource }) {
 
   const onDelete = () =>
     remove.mutate({ id: source.id, withDependents }, {
-      onSuccess: () => toast.success(isQuickBooks ? `${source.name} disconnected` : `${source.name} removed`),
+      onSuccess: () => toast.success(connected ? `${source.name} disconnected` : `${source.name} removed`),
       onError: (error) => toast.error(errorMessage(error, "Couldn't remove the data source")),
       onSettled: () => setConfirmingDelete(false),
     })
@@ -126,7 +131,11 @@ export function SourceCard({ source }: { source: DataSource }) {
                 ]
                   .filter(Boolean)
                   .join(" · ")
-              : `Upload · ${source.filename ?? "file"}`}
+              : isErpNext
+                ? ["ERPNext", source.environment === "sandbox" && "demo data", source.external_id, source.base_url]
+                    .filter(Boolean)
+                    .join(" · ")
+                : `Upload · ${source.filename ?? "file"}`}
           </p>
         </div>
       </div>
@@ -154,11 +163,17 @@ export function SourceCard({ source }: { source: DataSource }) {
       )}
 
       <p className="mt-3 text-xs text-muted-foreground">
-        {isQuickBooks ? "Last synced" : "Imported"}: {source.last_synced_at ? formatDateTime(source.last_synced_at) : "never"}
+        {connected ? "Last synced" : "Imported"}: {source.last_synced_at ? formatDateTime(source.last_synced_at) : "never"}
       </p>
       {isQuickBooks && source.history_status && <HistoryLine source={source} />}
 
       <div className="mt-auto flex flex-wrap gap-2 pt-4">
+        {isErpNext && (
+          <Button type="button" size="sm" variant="outline" onClick={onSync} disabled={sync.isPending}>
+            {sync.isPending ? <LoaderCircle className="animate-spin" aria-hidden /> : <RefreshCw aria-hidden />}
+            {sync.isPending ? "Syncing…" : "Sync now"}
+          </Button>
+        )}
         {isQuickBooks && !needsAuth && (
           <Button type="button" size="sm" variant="outline" onClick={onSync} disabled={sync.isPending}>
             {sync.isPending ? <LoaderCircle className="animate-spin" aria-hidden /> : <RefreshCw aria-hidden />}
@@ -205,7 +220,7 @@ export function SourceCard({ source }: { source: DataSource }) {
               </label>
             )}
             <Button type="button" size="sm" variant="destructive" onClick={onDelete} disabled={remove.isPending || dependents.isFetching}>
-              {isQuickBooks ? "Yes, disconnect" : "Yes, remove"}
+              {connected ? "Yes, disconnect" : "Yes, remove"}
             </Button>
             <Button type="button" size="sm" variant="ghost" onClick={() => setConfirmingDelete(false)}>
               Cancel
@@ -217,7 +232,7 @@ export function SourceCard({ source }: { source: DataSource }) {
             size="sm"
             variant="ghost"
             onClick={() => setConfirmingDelete(true)}
-            aria-label={isQuickBooks ? `Disconnect ${source.name}` : `Remove ${source.name}`}
+            aria-label={connected ? `Disconnect ${source.name}` : `Remove ${source.name}`}
           >
             <Trash2 aria-hidden />
           </Button>

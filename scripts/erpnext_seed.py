@@ -38,9 +38,12 @@ FY = "2026"
 STORES = f"Stores - {ABBR}"
 MARKER = "finance-acc-demo-seed"
 API_USER = "finance-acc@example.com"
+# What the app reads (suppliers, prices, budgets, GL, the Lab dimension's doctype) and
+# writes after approval (suppliers, POs, receipts, invoices, journals)
 API_ROLES = (
-    "Purchase Manager", "Purchase User", "Accounts Manager", "Accounts User",
-    "Stock Manager", "Stock User", "Item Manager", "Projects Manager", "Projects User",
+    "Purchase Manager", "Purchase User", "Purchase Master Manager", "Accounts Manager",
+    "Accounts User", "Stock Manager", "Stock User", "Item Manager", "Projects Manager",
+    "Projects User", "HR User",
 )  # fmt: skip
 
 
@@ -639,6 +642,8 @@ def api_user(erp: Erp, new_keys: bool) -> None:
              "roles": [{"role": r} for r in API_ROLES]}
         )  # fmt: skip
         new_keys = True
+    else:  # keep its roles current
+        erp.update("User", API_USER, {"roles": [{"role": r} for r in API_ROLES]})
     if not new_keys:
         print(f"\nAPI user {API_USER} exists. Run with --new-keys for a new secret.")
         return

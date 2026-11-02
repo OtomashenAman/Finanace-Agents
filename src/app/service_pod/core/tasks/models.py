@@ -19,6 +19,9 @@ from src.app.common.models import (
 class TaskKind(StrEnum):
     RECEIVE_PAYMENT = "receive_payment"  # apply a cleared receipt to invoices
     JOURNAL_ENTRY = "journal_entry"  # an approved correction
+    # Finance POD: the app posts these to the ERP when a person approves it (post action)
+    CREATE_SUPPLIER = "create_supplier"
+    CREATE_PURCHASE_ORDER = "create_purchase_order"
 
 
 class TaskStatus(StrEnum):

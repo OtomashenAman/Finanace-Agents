@@ -1,6 +1,6 @@
 import { apiRequest } from "@/lib/api"
 
-export type SourceKind = "quickbooks" | "upload"
+export type SourceKind = "quickbooks" | "upload" | "erpnext"
 export type SourceStatus = "pending_auth" | "connected" | "needs_reauth" | "error" | "ready"
 export type RecordType =
   | "vendor"
@@ -25,6 +25,8 @@ export interface DataSource {
   client_id: string | null
   environment: IntegrationEnvironment | null
   external_id: string | null
+  /** ERPNext: the site's address (external_id is the company read) */
+  base_url: string | null
   last_synced_at: string | null
   last_error: string | null
   record_counts: Partial<Record<RecordType, number>>
@@ -152,7 +154,19 @@ function workbookForm({ file, sheets, name, skipInvalid }: WorkbookRequest): For
   return form
 }
 
+export interface ErpNextConnect {
+  name: string
+  base_url: string
+  api_key: string
+  api_secret: string
+  company: string
+  environment: IntegrationEnvironment
+}
+
 export const dataSourcesApi = {
+  /** Connect an ERPNext site with an API user's key and secret (checked before saving) */
+  connectErpNext: (body: ErpNextConnect) =>
+    apiRequest<DataSource>("/data-sources/erpnext", { method: "POST", json: body }),
   list: () => apiRequest<DataSource[]>("/data-sources"),
   recordTypes: () => apiRequest<RecordTypeInfo[]>("/data-sources/record-types"),
   redirectUri: () => apiRequest<{ redirect_uri: string }>("/data-sources/quickbooks/redirect-uri"),

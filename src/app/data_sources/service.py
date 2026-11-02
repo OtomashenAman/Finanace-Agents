@@ -27,7 +27,7 @@ from src.app.common.context import RequestContext
 from src.app.common.text_extraction.base import ExtractionError
 from src.app.core.config import get_settings
 from src.app.core.llm.factory import get_llm_provider
-from src.app.data_sources import crypto
+from src.app.data_sources import crypto, erpnext_service
 from src.app.data_sources import uploads as upload_parser
 from src.app.data_sources.access import to_record
 from src.app.data_sources.exceptions import (
@@ -52,6 +52,7 @@ from src.app.data_sources.schemas import (
     AdminDataSourceOut,
     AuthorizeResponse,
     DataSourceOut,
+    ErpNextConnect,
     FieldSpec,
     QuickBooksApp,
     QuickBooksAppUpdate,
@@ -562,12 +563,56 @@ async def sync_source(
     session: AsyncSession, user: User, source_id: uuid.UUID, ctx: RequestContext
 ) -> DataSourceOut:
     source = await _owned(session, user, source_id, lock=True)
+    if source.kind == SourceKind.ERPNEXT:
+        return await sync_erpnext(session, user, source, ctx)
     if source.kind != SourceKind.QUICKBOOKS:
         raise SourceNotSyncableError("Uploads don't sync: upload a new file instead.")
     if source.status in (SourceStatus.PENDING_AUTH, SourceStatus.NEEDS_REAUTH):
         raise SourceNotSyncableError("Re-authorize this QuickBooks connection first.")
     await _sync(session, source, _app_for(source), ctx, user.id)
     return DataSourceOut.model_validate(source)
+
+
+async def sync_erpnext(
+    session: AsyncSession, user: User, source: DataSource, ctx: RequestContext
+) -> DataSourceOut:
+    """Vendors, supplier invoices, purchase orders and accounts from ERPNext, replacing the
+    source's records (like a QuickBooks sync). A failure keeps the last records and says why."""
+    try:
+        records, skipped = await erpnext_service.fetch_records(source)
+    except erpnext_service.ErpNextConnectionError as exc:
+        source.status, source.last_error = SourceStatus.ERROR, exc.message[:500]
+        await session.commit()
+        await session.refresh(source)
+        return DataSourceOut.model_validate(source)
+    await _replace_records(session, source, records)
+    source.status = SourceStatus.CONNECTED
+    source.last_synced_at = utcnow()
+    source.last_error = (
+        f"{skipped} ERPNext record(s) couldn't be read and were skipped." if skipped else None
+    )
+    record_event(
+        session,
+        "data_source.synced",
+        ctx,
+        actor_id=user.id,
+        source_id=str(source.id),
+        kind=SourceKind.ERPNEXT.value,
+        counts=source.record_counts,
+        skipped=skipped,
+        summary=f"Synced ERPNext {source.name}",
+    )
+    await session.commit()
+    await session.refresh(source)
+    return DataSourceOut.model_validate(source)
+
+
+async def connect_erpnext(
+    session: AsyncSession, user: User, body: ErpNextConnect, ctx: RequestContext
+) -> DataSourceOut:
+    """Connect (the key is checked first), then the first sync."""
+    connected = await erpnext_service.connect(session, user, body, ctx)
+    return await sync_erpnext(session, user, await _owned(session, user, connected.id), ctx)
 
 
 # --- uploads ----------------------------------------------------------------------------

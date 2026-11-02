@@ -50,6 +50,11 @@ class QuickBooksSnapshotRequest(BaseModel):
     basis: Basis
 
 
+class ErpNextSnapshotRequest(BaseModel):
+    data_source_id: uuid.UUID  # your ERPNext connection
+    entity_id: uuid.UUID
+
+
 class SnapshotRemoval(BaseModel):
     reason: str = Field(min_length=3, max_length=1000)
 

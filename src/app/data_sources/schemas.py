@@ -25,6 +25,7 @@ class DataSourceOut(BaseModel):
     client_id: str | None
     environment: IntegrationEnvironment | None
     external_id: str | None
+    base_url: str | None  # ERPNext: the site's address
     last_synced_at: datetime | None
     last_error: str | None
     record_counts: dict[str, int]
@@ -60,6 +61,18 @@ class QuickBooksApp(BaseModel):
     client_id: str = Field(min_length=1, max_length=255)
     client_secret: str = Field(min_length=1, max_length=500)
     environment: IntegrationEnvironment
+
+
+class ErpNextConnect(BaseModel):
+    """An ERPNext site: an API user's key and secret (User → API Access → Generate Keys)
+    and the company to read. Sandbox: demo data (snapshots are labelled demo)."""
+
+    name: str = Field(min_length=1, max_length=200)
+    base_url: str = Field(min_length=8, max_length=500)
+    api_key: str = Field(min_length=1, max_length=255)
+    api_secret: str = Field(min_length=1, max_length=500)
+    company: str = Field(min_length=1, max_length=100)
+    environment: IntegrationEnvironment = IntegrationEnvironment.SANDBOX
 
 
 class QuickBooksAppUpdate(BaseModel):

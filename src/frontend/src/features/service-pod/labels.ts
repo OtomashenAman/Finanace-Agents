@@ -185,6 +185,20 @@ export const COLLECTION_LABEL: Record<Collection, string> = {
   cash_position: "Cash position",
   balance_sheets: "Balance sheets",
   close_status: "Close status",
+  vendors: "Vendors",
+  items: "Items",
+  item_prices: "Item prices",
+  vendor_contracts: "Vendor contracts",
+  cost_centres: "Cost centres",
+  labs: "Labs",
+  grants: "Grants",
+  budgets: "Budgets",
+  budget_actuals: "Budget actuals",
+  purchase_requests: "Purchase requests",
+  supplier_quotations: "Supplier quotations",
+  purchase_orders: "Purchase orders",
+  purchase_receipts: "Purchase receipts",
+  bills: "Supplier invoices",
 }
 
 export function formatDateTime(value: string | null): string {

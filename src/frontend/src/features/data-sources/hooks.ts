@@ -47,6 +47,10 @@ function goToIntuit({ url }: AuthorizeResponse): Promise<never> {
   return new Promise<never>(() => {})
 }
 
+export function useConnectErpNext() {
+  return useMutation({ mutationFn: dataSourcesApi.connectErpNext, meta: { invalidates } })
+}
+
 export function useConnectQuickBooks() {
   return useMutation({ mutationFn: (app: QuickBooksApp) => dataSourcesApi.connect(app).then(goToIntuit) })
 }

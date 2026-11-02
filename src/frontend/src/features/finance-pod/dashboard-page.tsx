@@ -5,6 +5,7 @@ import { Card, Empty, LoadError, Loading } from "@/features/service-pod/componen
 
 import { useFinanceDashboard, useFinanceMe } from "./hooks"
 import { formatMeasure, KIND_META } from "./labels"
+import { ErpSnapshots } from "./components/erp-snapshots"
 import { FinancePage } from "./components/finance-page"
 import { cn } from "@/lib/utils"
 
@@ -37,6 +38,7 @@ function MyAccess() {
 
 export function FinanceDashboardPage() {
   const { data, isLoading, isError } = useFinanceDashboard()
+  const { data: me } = useFinanceMe()
 
   return (
     <FinancePage
@@ -122,6 +124,8 @@ export function FinanceDashboardPage() {
               </div>
             )}
           </Card>
+
+          {me?.is_admin && <ErpSnapshots />}
 
           <MyAccess />
         </div>

@@ -17,6 +17,7 @@ from src.app.service_pod.core.snapshots.exceptions import (
     SnapshotTooLargeError,
 )
 from src.app.service_pod.core.snapshots.schemas import (
+    ErpNextSnapshotRequest,
     PurgePreview,
     PurgeRequest,
     QuickBooksSnapshotRequest,
@@ -109,6 +110,18 @@ async def import_qbxml(
         ctx,
     )
     return _status(result, response)
+
+
+@router.post("/erpnext", response_model=SnapshotImportResult, responses=_ERRORS)
+async def import_erpnext(
+    body: ErpNextSnapshotRequest,
+    session: SessionDep,
+    access: PodAccessDep,
+    ctx: RequestContextDep,
+    response: Response,
+) -> SnapshotImportResult:
+    """Freeze your connected ERPNext company's purchasing data into a snapshot (read only)."""
+    return _status(await service.import_erpnext(session, access, body, ctx), response)
 
 
 @router.post("/quickbooks", response_model=SnapshotImportResult, responses=_ERRORS)

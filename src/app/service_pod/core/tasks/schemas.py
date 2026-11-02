@@ -40,7 +40,7 @@ class TaskCreate(BaseModel):
 
 
 class TaskAction(BaseModel):
-    action: Literal["record", "verify", "cancel"]
+    action: Literal["record", "post", "verify", "cancel"]
     expected_version: int = Field(ge=1)
     external_txn_id: str | None = Field(default=None, min_length=1, max_length=100)
     snapshot_id: uuid.UUID | None = None  # the fresh snapshot that proves the posting

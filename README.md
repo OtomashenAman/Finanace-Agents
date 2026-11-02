@@ -189,6 +189,19 @@ receipt, a duplicate bill, a non-PO invoice and goods received but not invoiced.
 "Maintain same rate" is off in Buying Settings so differing invoices can arrive as drafts.
 `erpnext-down` stops it; `erpnext-reset` deletes its data. It needs about 600 MB of Docker memory.
 
+Connect it under Data Sources → Connect ERPNext (address, company, the API key and secret the
+seed prints; from the app in Docker use `http://host.docker.internal:8090`). The key is checked
+before saving and the secret is encrypted with `DATA_ENCRYPTION_KEY`; in production the address
+must be https and listed in `ERPNEXT_ALLOWED_HOSTS`. A Finance Admin then takes a read-only
+snapshot on the Finance POD dashboard (`POST /api/v1/pod/snapshots/erpnext`): vendors (status and
+verified email), items, buying and contract prices, vendor contracts, cost centres, labs, grants,
+budgets and their GL actuals, and the last 400 days of purchase requests, supplier quotations,
+POs, receipts and supplier invoices with their lines and links. A "demo data" connection makes
+demo-labelled snapshots. Approved `create_supplier` / `create_purchase_order` posting tasks are
+posted by the app (`post` action): created with `finance_acc_ref` set to the task key (a retry
+finds the first attempt's document), submitted when submittable, and verified, like a manual
+posting, only by a later snapshot that contains them.
+
 ### Viewing the database
 - **VS Code:** accept the recommended extensions (*SQLTools* + *SQLTools PostgreSQL*), open the
   SQLTools sidebar and pick **FinanceACC (local docker)**. It's preconfigured in `.vscode/settings.json`.
