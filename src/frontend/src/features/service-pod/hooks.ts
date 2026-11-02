@@ -100,6 +100,10 @@ export function useFpaDrill(args: { caseId: string; accountId: string; period: s
   })
 }
 
+export function useTreasurySources() {
+  return useQuery({ queryKey: [POD_TAG, "treasury-sources"], queryFn: podApi.treasurySources })
+}
+
 export function useReportMonths() {
   return useQuery({ queryKey: [POD_TAG, "report-months"], queryFn: podApi.reportMonths })
 }

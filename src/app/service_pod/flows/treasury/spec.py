@@ -12,4 +12,5 @@ SPEC = WorkflowSpec(
     required=frozenset(
         {Collection.CASH_POSITION, Collection.INVOICES, Collection.PLANNED_OUTFLOWS}
     ),
+    signoffs=("Treasury Head", "CFO"),
 )

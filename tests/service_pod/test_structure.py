@@ -15,6 +15,7 @@ def test_every_workflow_is_registered_in_key_order() -> None:
         WorkflowKey.BANK_RECON,
         WorkflowKey.FPA_TREND,
         WorkflowKey.REPORTING,
+        WorkflowKey.TREASURY,
     }
 
 

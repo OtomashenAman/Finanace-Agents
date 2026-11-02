@@ -457,6 +457,18 @@ export interface ReportPack {
   created_at: string
 }
 
+export interface TreasurySources {
+  sources: {
+    snapshot: Snapshot
+    opening_cash: string | null
+    policy_buffer: string | null
+    checks: string[]
+    approved_outflows: string
+    commitments: number
+  }[]
+  cases: { id: string; reference: string; title: string; status: CaseStatus; as_of: string }[]
+}
+
 export interface ReviewQueueItem {
   task: ReviewTask
   case_id: string
@@ -499,6 +511,7 @@ export const podApi = {
   dashboard: () => apiRequest<Dashboard>("/pod/dashboard"),
   fpaPeriods: () => apiRequest<FpaPeriods>("/pod/fpa/periods"),
   reportMonths: () => apiRequest<ReportMonths>("/pod/reporting/months"),
+  treasurySources: () => apiRequest<TreasurySources>("/pod/treasury/sources"),
   reportPacks: (caseId: string) => apiRequest<ReportPack[]>(`/pod/reporting/cases/${caseId}/packs`),
   exportPack: (caseId: string) => apiRequest<ReportPack>(`/pod/reporting/cases/${caseId}/packs`, { method: "POST" }),
   fpaCommentary: ({ caseId, version }: { caseId: string; version: number }) =>

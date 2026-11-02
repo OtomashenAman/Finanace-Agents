@@ -10,6 +10,7 @@ import { arCollections } from "./ar-collections"
 import { bankRecon } from "./bank-recon"
 import { fpaTrend } from "./fpa-trend"
 import { reporting } from "./reporting"
+import { treasury } from "./treasury"
 import type { FlowUi } from "./types"
 
 export const FLOW_UI: Partial<Record<WorkflowKey, FlowUi>> = {
@@ -17,4 +18,5 @@ export const FLOW_UI: Partial<Record<WorkflowKey, FlowUi>> = {
   bank_recon: bankRecon,
   fpa_trend: fpaTrend,
   reporting,
+  treasury,
 }
