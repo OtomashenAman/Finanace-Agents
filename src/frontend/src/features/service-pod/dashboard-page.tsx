@@ -180,53 +180,73 @@ function DashboardKpis({
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
       <Link
         to="/pod/queue"
-        className="group flex flex-col justify-between rounded-xl border border-border/80 bg-card p-4 shadow-2xs transition-all hover:border-amber-400 hover:shadow-xs"
+        className="group flex flex-col justify-between rounded-xl border border-border/80 bg-card p-4 shadow-2xs transition-all duration-200 hover:-translate-y-0.5 hover:border-amber-400/80 hover:shadow-md"
       >
-        <div>
-          <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Needs You Now</span>
-          <p className="mt-1 text-2xl font-bold tracking-tight text-amber-600 dark:text-amber-400 tabular-nums">
-            {waitingCount}
-          </p>
+        <div className="flex items-start justify-between">
+          <div>
+            <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Needs You Now</span>
+            <p className="mt-1 text-2xl font-bold tracking-tight text-amber-600 dark:text-amber-400 tabular-nums">
+              {waitingCount}
+            </p>
+          </div>
+          <span className="rounded-md bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-950/50 dark:text-amber-300">
+            Action
+          </span>
         </div>
-        <span className="mt-2 text-xs font-medium text-amber-700 dark:text-amber-300 group-hover:underline">
-          Go to queue →
+        <span className="mt-3 flex items-center gap-1 text-xs font-medium text-amber-700 dark:text-amber-300 group-hover:underline">
+          Go to queue <ArrowRight className="size-3 transition-transform group-hover:translate-x-0.5" />
         </span>
       </Link>
 
       <Link
         to="/pod/cases"
-        className="group flex flex-col justify-between rounded-xl border border-border/80 bg-card p-4 shadow-2xs transition-all hover:border-primary hover:shadow-xs"
+        className="group flex flex-col justify-between rounded-xl border border-border/80 bg-card p-4 shadow-2xs transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/80 hover:shadow-md"
       >
-        <div>
-          <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Open Cases</span>
-          <p className="mt-1 text-2xl font-bold tracking-tight text-foreground tabular-nums">
-            {openCases}
-          </p>
+        <div className="flex items-start justify-between">
+          <div>
+            <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Open Cases</span>
+            <p className="mt-1 text-2xl font-bold tracking-tight text-foreground tabular-nums">
+              {openCases}
+            </p>
+          </div>
+          <span className="rounded-md bg-sky-50 px-2 py-0.5 text-[10px] font-semibold text-sky-800 dark:bg-sky-950/50 dark:text-sky-300">
+            Categorized
+          </span>
         </div>
-        <span className="mt-2 text-xs font-medium text-primary group-hover:underline">
-          View all cases →
+        <span className="mt-3 flex items-center gap-1 text-xs font-medium text-primary group-hover:underline">
+          View all cases <ArrowRight className="size-3 transition-transform group-hover:translate-x-0.5" />
         </span>
       </Link>
 
-      <div className="flex flex-col justify-between rounded-xl border border-border/80 bg-card p-4 shadow-2xs">
-        <div>
-          <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Payment Promises</span>
-          <p className="mt-1 text-xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400 tabular-nums truncate" title={promised}>
-            {promised}
-          </p>
+      <div className="flex flex-col justify-between rounded-xl border border-border/80 bg-card p-4 shadow-2xs transition-all duration-200 hover:shadow-xs">
+        <div className="flex items-start justify-between">
+          <div>
+            <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Payment Promises</span>
+            <p className="mt-1 text-xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400 tabular-nums truncate" title={promised}>
+              {promised}
+            </p>
+          </div>
+          <span className="rounded-md bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300">
+            Commitments
+          </span>
         </div>
-        <span className="mt-2 text-xs text-muted-foreground">Approved commitments</span>
+        <span className="mt-3 text-xs text-muted-foreground">Approved customer promises</span>
       </div>
 
-      <div className="flex flex-col justify-between rounded-xl border border-border/80 bg-card p-4 shadow-2xs">
-        <div>
-          <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">QuickBooks Status</span>
-          <div className="mt-1.5 flex items-center gap-2">
-            <LivePulse color="emerald" />
-            <span className="text-sm font-bold text-foreground">Read-Only Live</span>
+      <div className="flex flex-col justify-between rounded-xl border border-border/80 bg-card p-4 shadow-2xs transition-all duration-200 hover:shadow-xs">
+        <div className="flex items-start justify-between">
+          <div>
+            <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">QuickBooks Status</span>
+            <div className="mt-1.5 flex items-center gap-2">
+              <LivePulse color="emerald" />
+              <span className="text-sm font-bold text-foreground">Read-Only Live</span>
+            </div>
           </div>
+          <span className="rounded-md bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300">
+            Governed
+          </span>
         </div>
-        <span className="mt-2 text-xs text-muted-foreground">5 Governed Workflows</span>
+        <span className="mt-3 text-xs text-muted-foreground">5 Autonomous Workflows Active</span>
       </div>
     </div>
   )

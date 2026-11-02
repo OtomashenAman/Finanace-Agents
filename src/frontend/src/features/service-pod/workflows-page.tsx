@@ -26,7 +26,7 @@ export function WorkflowCards() {
               <Link
                 to={`/pod/${WORKFLOW_SLUG[w.key]}`}
                 title={w.description}
-                className="group relative flex h-full flex-col justify-between overflow-hidden rounded-xl border border-border/80 bg-card p-4.5 shadow-2xs transition-all hover:border-violet-400/60 hover:shadow-md dark:hover:border-violet-700/60"
+                className="group relative flex h-full flex-col justify-between overflow-hidden rounded-xl border border-border/80 bg-card p-4.5 shadow-2xs transition-all duration-200 hover:-translate-y-1 hover:border-violet-400/80 hover:shadow-lg dark:hover:border-violet-600/60"
               >
                 <div>
                   <div className="flex items-start justify-between gap-2 border-b border-border/50 pb-2.5">

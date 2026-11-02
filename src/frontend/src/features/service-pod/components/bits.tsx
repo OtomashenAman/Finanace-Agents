@@ -53,7 +53,7 @@ export function PodTabs() {
     tab.to === "/pod" ? !SHARED.some((to) => pathname.startsWith(to)) : pathname.startsWith(tab.to)
   return (
     <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-border/60">
-      <nav aria-label="Service POD" className="flex gap-1 overflow-x-auto">
+      <nav aria-label="Service POD" className="flex flex-wrap sm:flex-nowrap gap-1">
         {TABS.map((tab) => (
           <Link
             key={tab.to}
@@ -207,14 +207,14 @@ export function Card({
   return (
     <section
       className={cn(
-        "rounded-xl border border-border/80 bg-card p-4 shadow-[0_1px_2px_rgb(15_33_66/0.04),0_8px_24px_-12px_rgb(15_33_66/0.10)]",
+        "rounded-xl border border-border/80 bg-card p-4 shadow-[0_1px_3px_rgba(15,33,66,0.04),0_8px_24px_-12px_rgba(15,33,66,0.08)] transition-shadow duration-200",
         className,
       )}
       aria-label={title}
     >
       <div className="mb-3 flex flex-wrap items-start justify-between gap-2 border-b border-border/70 pb-2.5">
         <div>
-          <h2 className="text-[13px] font-semibold tracking-tight text-brand-navy">{title}</h2>
+          <h2 className="text-sm font-bold tracking-tight text-brand-navy dark:text-foreground">{title}</h2>
           {hint && <p className="mt-0.5 max-w-3xl text-xs leading-normal text-muted-foreground">{hint}</p>}
         </div>
         {actions}
@@ -226,9 +226,9 @@ export function Card({
 
 export function Loading({ what }: { what: string }) {
   return (
-    <div className="flex justify-center py-12" role="status">
+    <div className="flex flex-col items-center justify-center py-12 gap-2 text-xs text-muted-foreground" role="status">
       <LoaderCircle className="size-6 animate-spin text-primary" aria-hidden />
-      <span className="sr-only">Loading {what}…</span>
+      <span>Loading {what}…</span>
     </div>
   )
 }
@@ -237,8 +237,15 @@ export function LoadError({ what }: { what: string }) {
   return <Alert>Couldn't load {what}. Refresh the page to try again.</Alert>
 }
 
-export function Empty({ children }: { children: ReactNode }) {
-  return <p className="py-6 text-center text-sm text-muted-foreground">{children}</p>
+export function Empty({ children, icon }: { children: ReactNode; icon?: ReactNode }) {
+  return (
+    <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border/80 bg-muted/20 py-8 px-4 text-center">
+      <div className="flex size-10 items-center justify-center rounded-full bg-muted/60 text-muted-foreground mb-2 shadow-2xs">
+        {icon ?? <Sparkles className="size-5 text-violet-500/70" />}
+      </div>
+      <p className="text-sm font-medium text-muted-foreground max-w-sm">{children}</p>
+    </div>
+  )
 }
 
 /** A button for a server-guarded action: disabled with the server's reason as its tooltip. */
