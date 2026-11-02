@@ -33,7 +33,16 @@ export type CaseStatus = "draft" | "approved" | "completed" | "cancelled"
 export type MessageStatus = "draft" | "sending" | "sent" | "send_failed" | "send_unknown" | "received"
 export type TaskStatus = "proposed" | "recorded_unverified" | "verified" | "cancelled"
 export type ReviewTaskKind = "unknown_date" | "dispute" | "missing_document" | "ambiguity" | "scope" | "other"
-export type ArtifactKind = "timesheet" | "invoice_copy" | "msa" | "supporting" | "other"
+export type ArtifactKind =
+  | "timesheet"
+  | "invoice_copy"
+  | "msa"
+  | "supporting"
+  | "other"
+  | "quote"
+  | "tax_form"
+  | "bank_letter"
+  | "compliance"
 
 export interface EntityRef {
   id: string
@@ -169,7 +178,7 @@ export interface Message {
   case_id: string
   case_reference: string
   direction: "outbound" | "inbound"
-  audience: "customer" | "internal" | null
+  audience: "customer" | "internal" | "vendor" | "invite" | null
   purpose: string
   status: MessageStatus
   version: number
@@ -311,12 +320,14 @@ export interface Artifact {
   sha256: string
   status: "pending" | "approved" | "rejected"
   uploaded_by: string
+  /** How it arrived: bank details only ever count from the vendor portal */
+  channel: "upload" | "vendor_portal" | "email"
   decided_by: string | null
   decided_at: string | null
   created_at: string
 }
 
-export type TaskActionName = "record" | "verify" | "cancel"
+export type TaskActionName = "record" | "post" | "verify" | "cancel"
 
 export interface PostingTask {
   id: string

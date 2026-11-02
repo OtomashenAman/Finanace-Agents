@@ -151,10 +151,17 @@ async def propose_task(
 
 
 async def add_task(
-    session: AsyncSession, case: PodCase, body: TaskCreate, proposed_by: uuid.UUID
+    session: AsyncSession,
+    case: PodCase,
+    body: TaskCreate,
+    proposed_by: uuid.UUID,
+    *,
+    approved_by_step: bool = False,
 ) -> PodPostingTask:
-    """Queue a posting for the Finance Admin (caller records and commits)."""
-    if case.status != CaseStatus.APPROVED:
+    """Queue a posting (caller records and commits). It comes from an approved case, or
+    (approved_by_step) from a person's own step that authorises exactly this posting, e.g. a
+    receiver confirming a delivery creates its receipt."""
+    if case.status != CaseStatus.APPROVED and not approved_by_step:
         raise TaskRefusedError("A posting task can only come from an approved case.")
     snapshot = await session.get(PodSnapshot, case.snapshot_id)
     assert snapshot is not None  # noqa: S101 - RESTRICT foreign key
@@ -244,6 +251,36 @@ async def _verification(
     return problems
 
 
+async def _post(
+    session: AsyncSession, access: PodAccess, task: PodPostingTask, case: PodCase
+) -> str:
+    try:
+        name = await erp_posting.post(session, task, case)
+    except erp_posting.PostingError as exc:
+        raise TaskRefusedError(str(exc)) from exc
+    task.status = TaskStatus.RECORDED_UNVERIFIED
+    task.external_txn_id = name
+    task.recorded_by, task.recorded_at = access.user.id, utcnow()
+    return f"posted {task.reference} to the ERP as {name} (not yet verified)"
+
+
+async def post_now(
+    session: AsyncSession,
+    access: PodAccess,
+    task: PodPostingTask,
+    case: PodCase,
+    ctx: RequestContext,
+) -> None:
+    """A workflow step posts its approved task right away (caller commits). Raises
+    TaskRefusedError, leaving the task proposed (retrying is safe)."""
+    reason = _guard(task, "post")
+    if reason is not None:
+        raise TaskRefusedError(reason)
+    summary = await _post(session, access, task, case)
+    task.version += 1
+    _event(session, ctx, access, case, task, summary)
+
+
 async def run_action(
     session: AsyncSession,
     access: PodAccess,
@@ -272,14 +309,7 @@ async def run_action(
         task.recorded_by, task.recorded_at = access.user.id, now
         summary = f"recorded QuickBooks transaction {task.external_txn_id} (not yet verified)"
     elif body.action == "post":
-        try:
-            name = await erp_posting.post(session, task, case)
-        except erp_posting.PostingError as exc:
-            raise TaskRefusedError(str(exc)) from exc
-        task.status = TaskStatus.RECORDED_UNVERIFIED
-        task.external_txn_id = name
-        task.recorded_by, task.recorded_at = access.user.id, now
-        summary = f"posted {task.reference} to the ERP as {name} (not yet verified)"
+        summary = await _post(session, access, task, case)
     elif body.action == "verify":
         if body.snapshot_id is None:
             raise TaskRefusedError("Choose the fresh snapshot that shows the posting.")

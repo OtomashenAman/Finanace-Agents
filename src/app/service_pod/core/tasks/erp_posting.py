@@ -32,6 +32,7 @@ class ErpTarget:
 ERP_KINDS: dict[TaskKind, ErpTarget] = {
     TaskKind.CREATE_SUPPLIER: ErpTarget("Supplier", submit=False),
     TaskKind.CREATE_PURCHASE_ORDER: ErpTarget("Purchase Order", submit=True),
+    TaskKind.CREATE_PURCHASE_RECEIPT: ErpTarget("Purchase Receipt", submit=True),
 }
 
 
@@ -82,4 +83,6 @@ def present(task: PodPostingTask, doc: SnapshotDocument) -> bool:
         return any(v.id == txn for v in doc.vendors or [])
     if task.kind == TaskKind.CREATE_PURCHASE_ORDER:
         return any(o.id == txn and o.doc_status == "Submitted" for o in doc.purchase_orders or [])
+    if task.kind == TaskKind.CREATE_PURCHASE_RECEIPT:
+        return any(r.id == txn and r.doc_status == "Submitted" for r in doc.purchase_receipts or [])
     return False

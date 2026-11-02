@@ -162,6 +162,58 @@ folder gets an `input_schema`, `run_model` and `analyze()` (see `agents/ap_invoi
   `finance_pod/requirements/` holds the requirement as data; `test_requirement_coverage.py`
   fails when a built phase misses any L4/L5 step, checkpoint, rule (each needs a test marked
   `@pytest.mark.requirement("AP1.R1")`) or measure. The two PODs never serve each other's cases.
+- Finance POD AP-1 (Purchase Request & PO, `finance_pod/flows/ap_purchase_request`; Vendor
+  Onboarding, `.../ap_vendor_onboarding`), every To-Be L4/L5 step of GIA pages 3-4:
+  - Request: the requester describes the need (catalogue items; a quote if any). The request agent
+    codes it (from the requester or earlier orders; a grant is never assumed), prices it
+    (contract, then catalogue, then estimate), and fails while the cost centre or lab is missing.
+    A past "needed by" date raises a blocking review task.
+  - Budget: the budget agent computes budget − GL actual − committed (open POs and requests, and
+    released requests not yet in ERPNext) per department and grant, checks the grant's period,
+    status and allowed item groups, and routes by the authority matrix. The budget owner
+    approves, rejects (case cancelled) or queries (sent back to the requester, counted as rework).
+  - Sourcing: the sourcing agent lists active vendors with a contract or history. Above the quote
+    threshold it drafts RFQs for a buyer to send and waits for enough quotes (ERPNext supplier
+    quotations of the request, or quotes the buyer records with their document). The buyer
+    chooses: an on-hold or disabled vendor is refused, and not taking the cheapest quote needs a
+    reason. A new vendor opens a linked onboarding case, and its PO waits for it.
+  - PO: the PO agent drafts the PO (quote, then contract, then catalogue price) with the coding.
+    Above the PO limit the buyer approves it. The case is then **released** (no separate
+    sign-off; the people's steps are the checkpoints). After the release the PO agent posts the
+    PO to ERPNext, drafts its email for the buyer to send, and waits for the logged
+    acknowledgement. The case completes once a fresh snapshot verifies the PO.
+  - Onboarding: the vendor gets a signed portal link (`/vendor/<token>`, no account), drafted and
+    sent by a person. They upload the W-9/W-8, bank letter and compliance papers. Text documents
+    are read (scanned ones: an AP analyst enters them by hand). Numbers are encrypted in the case
+    and only masked forms are shown. The tax ID's form and IRS prefix and the name are checked
+    (no IRS TIN matching, which needs GIA's registration). Names are screened against the OFAC
+    SDN list (`SANCTIONS_LIST_URL`, a daily job or "Load now"); a hit is a blocking review task.
+    The AP analyst confirms the bank by phone from an independent number (the last 4 digits must
+    match). A different person activates the vendor. On release the supplier (with its contact
+    email) is posted to ERPNext and verified by a fresh snapshot. Bank details in an email reply
+    raise a blocking review task, and are never used.
+- Finance POD AP-3 (Invoice Matching, `finance_pod/flows/ap_invoice_match`), GIA pages 7-8. One
+  case per incoming supplier invoice (an ERPNext draft; "open a case for every new invoice" at
+  `POST /api/v1/finance/apm/intake`):
+  - 3.2: the posting agent validates it and attaches the vendor's document. The duplicate guard
+    flags the same vendor with a near-identical number and the same amount, blocking with the
+    reason until a person cancels the case or clears the review task.
+  - 3.4: the match agent matches each line to its PO line and the submitted receipts within the
+    tolerances (price %, quantity, amount; demo values). It routes the invoice: matched, or a
+    non-PO invoice, goes to coding (AP-4: released); a variance becomes an exception.
+  - 3.5: the exception agent lays the PO, receipt and invoice side by side and drafts the vendor
+    query. The buyer accepts, asks for a credit, or amends the PO in ERPNext (no agent ever
+    writes a PO). The agent re-matches on a fresh snapshot (it waits for the credit note or the
+    amended PO).
+  - 3.6: a missing or short receipt goes to the receivers' queue. Their confirmation (a
+    phone-friendly form) posts the Purchase Receipt to ERPNext, verified by a fresh snapshot
+    before the re-match.
+  - A daily job raises a review task on any held invoice untouched for 7 days.
+  - Measures: first-pass match rate, exception ageing, duplicates stopped.
+  - Every email is drafted by an agent and sent by a person holding the purpose's capacity.
+    Postings are handled by the task kind's capacity. Thresholds are versioned policies
+    (`PrqPolicy` / `VndPolicy`), **demo values until GIA's**; each case records the version it
+    was opened with.
 - Demo users from `uv run poe seed` (password = `DEMO_ADMIN_PASSWORD`): `finance.admin@example.com`
   and `demo.user@example.com` (runs AP Invoice; the admin approves).
 - Each agent stores its fields as typed columns in its own table (`ap_invoice_runs`); the common

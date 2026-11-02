@@ -25,6 +25,8 @@ class Direction(StrEnum):
 class Audience(StrEnum):
     CUSTOMER = "customer"  # only the verified contact from the snapshot
     INTERNAL = "internal"  # only the configured internal recipients
+    VENDOR = "vendor"  # only a vendor's verified contact from the snapshot (Finance POD)
+    INVITE = "invite"  # a typed address, only for a new vendor's portal invitation (no figures)
 
 
 class MessageStatus(StrEnum):
@@ -109,6 +111,19 @@ class ArtifactKind(StrEnum):
     MSA = "msa"
     SUPPORTING = "supporting"
     OTHER = "other"
+    # Finance POD
+    QUOTE = "quote"
+    TAX_FORM = "tax_form"  # W-9 / W-8
+    BANK_LETTER = "bank_letter"
+    COMPLIANCE = "compliance"  # insurance or compliance papers
+
+
+class ArtifactChannel(StrEnum):
+    """How a document arrived: bank details are only ever taken from the vendor portal."""
+
+    UPLOAD = "upload"  # a signed-in person uploaded it
+    VENDOR_PORTAL = "vendor_portal"  # the vendor, through their signed portal link
+    EMAIL = "email"  # an attachment of an imported reply
 
 
 class ArtifactStatus(StrEnum):
@@ -127,6 +142,7 @@ class PodArtifact(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
         UniqueConstraint("case_id", "sha256"),
         enum_check("kind", ArtifactKind),
         enum_check("status", ArtifactStatus),
+        enum_check("channel", ArtifactChannel),
     )
 
     case_id: Mapped[uuid.UUID] = mapped_column(
@@ -142,7 +158,13 @@ class PodArtifact(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     status: Mapped[ArtifactStatus] = mapped_column(
         string_enum(ArtifactStatus, 16), default=ArtifactStatus.PENDING
     )
-    uploaded_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+    # None: the vendor uploaded it through the portal (channel says how it arrived)
+    uploaded_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT")
+    )
+    channel: Mapped[ArtifactChannel] = mapped_column(
+        string_enum(ArtifactChannel, 16), default=ArtifactChannel.UPLOAD
+    )
     decided_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT")
     )

@@ -5,12 +5,12 @@ import subprocess
 import sys
 
 from src.app.service_pod.core.hooks import HOOKS
-from src.app.service_pod.core.workflows import WORKFLOWS, WorkflowKey
+from src.app.service_pod.core.workflows import WORKFLOWS, PodKey, WorkflowKey, keys_in
 
 
 def test_every_workflow_is_registered_in_key_order() -> None:
     assert list(WORKFLOWS) == list(WorkflowKey)
-    assert set(HOOKS) == {
+    assert set(HOOKS) & set(keys_in(PodKey.SERVICE)) == {
         WorkflowKey.AR_COLLECTIONS,
         WorkflowKey.BANK_RECON,
         WorkflowKey.FPA_TREND,

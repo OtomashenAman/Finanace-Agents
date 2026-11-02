@@ -104,6 +104,7 @@ AP1 = Phase(
         MeasureReq("AP1.M2", "Requests needing rework"),
         MeasureReq("AP1.M3", "Vendor set-up time"),
     ),
+    workflows=("ap_purchase_request", "ap_vendor_onboarding"),
 )  # fmt: skip
 
 AP3 = Phase(
@@ -172,6 +173,7 @@ AP3 = Phase(
         MeasureReq("AP3.M2", "Exception ageing"),
         MeasureReq("AP3.M3", "Duplicates stopped"),
     ),
+    workflows=("ap_invoice_match",),
 )  # fmt: skip
 
 AP6 = Phase(

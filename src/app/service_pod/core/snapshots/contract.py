@@ -223,6 +223,8 @@ DocStatus = Literal["Draft", "Submitted", "Cancelled"]
 Day = date  # for fields declared after a field named `date`
 Qty = Annotated[Decimal, Field(max_digits=18, decimal_places=6, ge=0, allow_inf_nan=False)]
 Rate = Annotated[Decimal, Field(max_digits=18, decimal_places=6, allow_inf_nan=False)]
+# A credit note's lines (ERPNext: a return) carry negative quantities
+SignedQty = Annotated[Decimal, Field(max_digits=18, decimal_places=6, allow_inf_nan=False)]
 
 
 class Coding(_Row):
@@ -394,7 +396,7 @@ class PurchaseReceipt(_Row):
 
 class BillLine(Coding):
     item_code: Id
-    qty: Qty
+    qty: SignedQty
     rate: Rate
     amount: Money
     order_id: Id | None = None
@@ -417,6 +419,8 @@ class Bill(_Row):
     total: Money
     outstanding: Money
     lines: list[BillLine]
+    # A credit note (debit note in ERPNext: a return) points at the bill it reduces
+    return_against: Id | None = None
 
 
 def _unique(rows: Sequence[_Row] | None, key: str, what: str) -> set[str]:

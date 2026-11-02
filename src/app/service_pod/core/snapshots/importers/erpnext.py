@@ -403,6 +403,7 @@ def _bills(docs: list[dict[str, Any]]) -> list[Bill]:
             doc_status=DOC_STATUS[d["docstatus"]],
             total=money(d.get("grand_total")),
             outstanding=money(d.get("outstanding_amount")),
+            return_against=(d.get("return_against") or None) if d.get("is_return") else None,
             lines=[
                 BillLine(
                     item_code=i["item_code"],

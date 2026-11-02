@@ -7,7 +7,7 @@ left out. The engine (steps.service) enforces order, capacity and segregation of
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import StrEnum
@@ -67,6 +67,9 @@ class L5Spec:
 Applies = Callable[["Ctx"], Awaitable[str | None]]
 # An agent step's work: returns each L5 code's result; raise to fail the step
 AgentHandler = Callable[["Ctx", "StepSpec"], Awaitable[dict[str, BaseModel]]]
+# After a step is done: the workflow reacts to its outcome (e.g. a budget owner's query sends
+# the request back); returns a line for the audit summary, or None
+OnDone = Callable[["Ctx", "StepSpec"], Awaitable[str | None]]
 
 
 @dataclass(frozen=True)
@@ -82,6 +85,13 @@ class StepSpec:
     distinct_from: tuple[str, ...] = ()
     not_applicable_when: Applies | None = None
     handler: AgentHandler | None = None  # AGENT steps
+    on_done: OnDone | None = None
+    # Who may start an AGENT step (besides the case's owner, an admin and the holders of a
+    # later step's capacity), e.g. the buyer runs the sourcing agent
+    run_by: frozenset[str] = frozenset()
+    # Runs once the case is released (approved), e.g. sending the approved PO; such steps
+    # aren't part of what the approval binds, and the case can't complete until they're done
+    after_approval: bool = False
 
 
 @dataclass(frozen=True)
@@ -115,6 +125,12 @@ class StepPlan:
     viewers: frozenset[str] = field(default_factory=frozenset)
     # Capacities that may open a case
     openers: frozenset[str] = field(default_factory=frozenset)
+    # When the case is released (every checkpoint passed, workflows without sign-offs)
+    on_release: Callable[[Ctx], Awaitable[None]] | None = None
+    # Who sends the case's mail, by purpose (agents draft it), and who posts or verifies its
+    # ERP postings, by task kind: capacities
+    senders: Mapping[str, frozenset[str]] = field(default_factory=dict)
+    posters: Mapping[str, frozenset[str]] = field(default_factory=dict)
 
     def step(self, key: str) -> StepSpec | None:
         return next((s for s in self.steps if s.key == key), None)

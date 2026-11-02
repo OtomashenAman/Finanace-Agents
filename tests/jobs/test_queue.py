@@ -156,7 +156,8 @@ async def test_create_run_is_idempotent(me: AsyncClient) -> None:
 async def test_daily_jobs_are_queued_once_per_day(db: AsyncSession, fake_llm: FakeLLM) -> None:
     import src.app.audit.jobs  # noqa: F401 - registers the daily purge
 
-    assert await queue.schedule_daily(db) == 1
+    daily = await queue.schedule_daily(db)
+    assert daily == len(queue._DAILY)  # the purge, the sanctions list refresh...
     assert await queue.schedule_daily(db) == 0  # another worker, same day: nothing new
     job = await db.scalar(select(Job).where(Job.kind == "audit.purge"))
     assert job is not None and job.dedupe_key == f"audit.purge:{utcnow().date().isoformat()}"

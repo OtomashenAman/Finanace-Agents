@@ -60,6 +60,8 @@ from src.app.core.llm.factory import get_llm_provider  # noqa: E402
 from src.app.main import app  # noqa: E402
 
 TABLES = (
+    "finance_sanctions_entries",
+    "finance_sanctions_loads",
     "pod_case_steps",
     "finance_capacity_assignments",
     "pod_commitments",

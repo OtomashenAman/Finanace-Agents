@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils"
 import { useCaseAction, useFinanceCase, useFinanceWorkflows } from "./hooks"
 import { CASE_STATUS, capacityLabel, KIND_META } from "./labels"
 import { FinancePage } from "./components/finance-page"
+import { ActionsPanel, DocumentsPanel, MessagesPanel, PostingsPanel } from "./components/case-panels"
 import { StepCard } from "./components/step-card"
 
 function Legend() {
@@ -86,7 +87,14 @@ export function FinanceCasePage() {
             )}
           </Card>
 
-          <Card title="Sign-offs" hint={workflow ? `Needed: ${workflow.signoffs.map((s) => capacityLabel(s)).join(", then ")}` : undefined}>
+          <Card
+            title="Sign-offs"
+            hint={
+              workflow && workflow.signoffs.length > 0
+                ? `Needed: ${workflow.signoffs.map((s) => capacityLabel(s)).join(", then ")}`
+                : "Released automatically once every person's checkpoint has passed and nothing blocks."
+            }
+          >
             {c.approvals.length === 0 ? (
               <p className="text-sm text-muted-foreground">None yet.</p>
             ) : (
@@ -103,6 +111,11 @@ export function FinanceCasePage() {
               </ul>
             )}
           </Card>
+
+          <ActionsPanel c={c} />
+          <MessagesPanel c={c} />
+          <PostingsPanel c={c} />
+          <DocumentsPanel c={c} />
 
           {c.review_tasks.length > 0 && (
             <Card title="Review tasks">

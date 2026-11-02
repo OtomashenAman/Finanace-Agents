@@ -22,6 +22,7 @@ import { DataSourcesPage } from "@/features/data-sources/data-sources-page"
 import { FinanceCasePage } from "@/features/finance-pod/case-page"
 import { FinanceCasesPage } from "@/features/finance-pod/cases-page"
 import { FinanceDashboardPage } from "@/features/finance-pod/dashboard-page"
+import { VendorPortalPage } from "@/features/finance-pod/vendor-portal-page"
 import { AiMonitoringPage } from "@/features/monitoring/ai-monitoring-page"
 import { OverviewPage } from "@/features/overview/overview-page"
 import { CasePage } from "@/features/service-pod/case-page"
@@ -34,6 +35,8 @@ import { queryClient } from "@/lib/query-client"
 
 const router = createBrowserRouter([
   { element: <GuestOnly />, children: [{ path: "/login", element: <LoginPage /> }] },
+  // A vendor's secure upload page: no account, the signed link is the access
+  { path: "/vendor/:token", element: <VendorPortalPage /> },
   {
     element: <RequireAuth />,
     children: [

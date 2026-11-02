@@ -170,6 +170,10 @@ export const ARTIFACT_KIND: Record<ArtifactKind, string> = {
   msa: "MSA / contract",
   supporting: "Supporting document",
   other: "Other",
+  quote: "Quote",
+  tax_form: "Tax form (W-9 / W-8)",
+  bank_letter: "Bank letter",
+  compliance: "Insurance / compliance",
 }
 
 export const COLLECTION_LABEL: Record<Collection, string> = {

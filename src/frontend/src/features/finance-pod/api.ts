@@ -1,3 +1,4 @@
+import type { Artifact, Message, PostingTask, Snapshot } from "@/features/service-pod/api"
 import { apiRequest } from "@/lib/api"
 
 /** Finance POD: the AP / AR agents of the GIA requirement on the shared case engine.
@@ -102,6 +103,8 @@ export interface JsonSchema {
   anyOf?: JsonSchema[]
   default?: unknown
   maxLength?: number
+  format?: string
+  const?: unknown
   $ref?: string
   $defs?: Record<string, JsonSchema>
 }
@@ -170,6 +173,10 @@ export interface ReviewTask {
 }
 
 export interface CaseDetail extends CaseSummary {
+  snapshot_id: string
+  messages: Message[]
+  artifacts: Artifact[]
+  posting_tasks: PostingTask[]
   selection: Record<string, unknown>
   state: Record<string, unknown>
   fingerprint: string
@@ -187,6 +194,39 @@ export interface CaseAction {
   version: number
   action: string
   payload?: Record<string, unknown>
+}
+
+export interface CatalogueEntry {
+  id: string
+  name: string
+  detail: string | null
+}
+
+export interface Catalogue {
+  currency: string
+  items: { code: string; name: string; group: string; catalogue_rate: string | null; contract_rates: Record<string, string> }[]
+  vendors: CatalogueEntry[]
+  cost_centres: CatalogueEntry[]
+  labs: CatalogueEntry[]
+  grants: CatalogueEntry[]
+  purchase_requests: CatalogueEntry[]
+  incoming_invoices: CatalogueEntry[]
+}
+
+export interface SanctionsStatus {
+  loaded: boolean
+  list_name: string | null
+  entries: number
+  loaded_at: string | null
+  source_url: string | null
+}
+
+export interface PortalView {
+  vendor_name: string
+  expires_at: string
+  required: string[]
+  optional: string[]
+  uploaded: { kind: string; filename: string; uploaded_at: string }[]
 }
 
 const base = "/finance"
@@ -208,10 +248,54 @@ export const financeApi = {
       method: "POST",
       json: { action, expected_version: version, payload },
     }),
+  open: (body: { workflow: string; snapshot_id: string; title: string; selection: Record<string, unknown> }) =>
+    apiRequest<CaseDetail>(`${base}/cases`, { method: "POST", json: body }),
+  sources: (workflow: string) => apiRequest<Snapshot[]>(`${base}/sources?workflow=${encodeURIComponent(workflow)}`),
+  sourceCatalogue: (snapshotId: string, workflow: string) =>
+    apiRequest<Catalogue>(`${base}/sources/${snapshotId}/catalogue?workflow=${encodeURIComponent(workflow)}`),
+  caseCatalogue: (caseId: string) => apiRequest<Catalogue>(`${base}/cases/${caseId}/catalogue`),
+  upload: ({ caseId, kind, file }: { caseId: string; kind: string; file: File }) => {
+    const form = new FormData()
+    form.append("file", file)
+    form.append("kind", kind)
+    return apiRequest<Artifact>(`${base}/cases/${caseId}/artifacts`, { method: "POST", form })
+  },
+  documentUrl: (id: string) => `${base}/artifacts/${id}/content`,
+  sendMessage: ({ id, version }: { id: string; version: number }) =>
+    apiRequest<Message>(`${base}/messages/${id}/send`, {
+      method: "POST",
+      json: { expected_version: version, checks: { recipient: true, mapping: true, tone: true } },
+    }),
+  taskAction: ({ id, version, action, snapshotId }: { id: string; version: number; action: string; snapshotId?: string }) =>
+    apiRequest<PostingTask>(`${base}/tasks/${id}/actions`, {
+      method: "POST",
+      json: { action, expected_version: version, ...(snapshotId ? { snapshot_id: snapshotId } : {}) },
+    }),
+  intake: (snapshotId: string) =>
+    apiRequest<{ opened: string[]; already: number }>(`${base}/apm/intake`, {
+      method: "POST",
+      json: { snapshot_id: snapshotId },
+    }),
+  sanctions: () => apiRequest<SanctionsStatus>(`${base}/sanctions`),
+  refreshSanctions: () => apiRequest<SanctionsStatus>(`${base}/sanctions/refresh`, { method: "POST" }),
   catalog: () => apiRequest<CapacityInfo[]>(`${base}/capacities/catalog`),
   assignments: () => apiRequest<Assignment[]>(`${base}/capacities`),
   grant: (body: { user_id: string; capacity: FinanceCapacity; entity_id: string | null }) =>
     apiRequest<Assignment>(`${base}/capacities`, { method: "POST", json: body }),
   revoke: (id: string) =>
     apiRequest<void>(`${base}/capacities/${encodeURIComponent(id)}`, { method: "DELETE" }),
+}
+
+/** The vendor's public portal: the signed link is the only access (no session). */
+export const portalApi = {
+  view: (token: string) => apiRequest<PortalView>(`/vendor-portal/${encodeURIComponent(token)}`, { skipAuthRefresh: true }),
+  upload: ({ token, kind, file }: { token: string; kind: string; file: File }) => {
+    const form = new FormData()
+    form.append("file", file)
+    form.append("kind", kind)
+    return apiRequest<{ kind: string; filename: string; uploaded_at: string }>(
+      `/vendor-portal/${encodeURIComponent(token)}/documents`,
+      { method: "POST", form, skipAuthRefresh: true },
+    )
+  },
 }

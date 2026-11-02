@@ -11,7 +11,7 @@ from openpyxl import load_workbook
 from scripts.pod_samples import main as build_samples
 
 from src.app.entities.models import LegalEntity
-from src.app.service_pod.core.workflows import WorkflowKey
+from src.app.service_pod.core.workflows import PodKey, keys_in
 from tests.conftest import FakeLLM
 
 # The sample files, freshly built (docs/ isn't in the repository)
@@ -50,7 +50,7 @@ async def test_sample_workbook_opens_every_workflow(pod: AsyncClient, entity: Le
         "fpa_trend": {"start": "2026-04", "end": "2026-09"},
         "reporting": {"month": "2026-09"},
     }
-    for workflow in WorkflowKey:
+    for workflow in keys_in(PodKey.SERVICE):
         r = await pod.post(
             "/api/v1/pod/cases",
             json={

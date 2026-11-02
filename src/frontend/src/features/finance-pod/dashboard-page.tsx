@@ -6,6 +6,8 @@ import { Card, Empty, LoadError, Loading } from "@/features/service-pod/componen
 import { useFinanceDashboard, useFinanceMe } from "./hooks"
 import { formatMeasure, KIND_META } from "./labels"
 import { ErpSnapshots } from "./components/erp-snapshots"
+import { NewCase } from "./components/new-case"
+import { SanctionsCard } from "./components/sanctions-card"
 import { FinancePage } from "./components/finance-page"
 import { cn } from "@/lib/utils"
 
@@ -49,6 +51,7 @@ export function FinanceDashboardPage() {
       {isError && <LoadError what="the Finance POD" />}
       {data && (
         <div className="space-y-4">
+          <NewCase />
           <Card title="Waiting on me" hint="Steps you can act on now, oldest case first.">
             {data.my_queue.length === 0 ? (
               <Empty icon={<User className="size-5" />}>Nothing waits on you right now.</Empty>
@@ -126,6 +129,7 @@ export function FinanceDashboardPage() {
           </Card>
 
           {me?.is_admin && <ErpSnapshots />}
+          {me?.is_admin && <SanctionsCard />}
 
           <MyAccess />
         </div>

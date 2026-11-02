@@ -13,9 +13,9 @@ so this builds what the AP agents need, every figure fictional and every email @
   email); a framework contract; budgets per department and grant (one nearly used up).
 - AP-1: purchase requests (approved, draft, urgent, without a grant), and a high-value
   request with three supplier quotations waiting for the buyer.
-- AP-3: purchase orders and receipts, and incoming supplier invoices (drafts) that match,
-  carry a price variance, bill more than was received, have no receipt, duplicate a posted
-  one, or have no PO at all.
+- AP-3: purchase orders and receipts, and incoming supplier invoices (drafts) that match
+  cleanly, carry a price variance, bill more than was received, have no receipt, duplicate a
+  posted one, or have no PO at all.
 - AP-6: goods received and not invoiced (accruals), posted invoices and a payment.
 
 Masters are get-or-create, so reruns are safe; transactions are created once (a Note named
@@ -517,7 +517,7 @@ def pay(erp: Erp, ref: str, pi: str, date: str) -> None:
 
 
 def transactions(erp: Erp, grants: dict[str, str]) -> None:
-    if erp.find("Note", {"title": MARKER}):
+    if erp.find("Note", {"title": MARKER}) and seeded(erp, "Purchase Invoice", "PI-BAGS"):
         print("Transactions already seeded (Note finance-acc-demo-seed): skipped.")
         return
     print("Transactions: purchase requests, quotations, POs, receipts, invoices, payment...")
@@ -610,6 +610,13 @@ def transactions(erp: Erp, grants: dict[str, str]) -> None:
     first = invoice(erp, "PI-GLOVES", gloves, "LC-INV-4502", "2026-09-10", submit=True)
     resend(erp, "PI-GLOVES-DUP", first, "2026-10-28")  # the supplier sent the same bill again
 
+    po_bags = order(
+        erp, "PO-BAGS", "LabChem Supply Co", "2026-10-12",
+        [line("LC-BAGS", 25, 32, "Grading Operations", "Mumbai Lab", None, "2026-10-20")],
+    )  # fmt: skip
+    pr_bags = receive(erp, "PR-BAGS", po_bags, "2026-10-19")
+    invoice(erp, "PI-BAGS", ("Purchase Receipt", pr_bags), "LC-INV-4611", "2026-10-21")  # clean
+
     order(  # open: nothing received or billed yet
         erp, "PO-PAPER", "Summit Office Supplies", "2026-10-25",
         [line("OF-PAPER", 20, 38, "Facilities", "New York Lab", None, "2026-11-15")],
@@ -627,8 +634,9 @@ def transactions(erp: Erp, grants: dict[str, str]) -> None:
                         "expense_account": acct("Professional Services")}]}
         )  # fmt: skip
 
-    erp.insert({"doctype": "Note", "title": MARKER, "public": 0,
-                "content": "Demo transactions created by scripts/erpnext_seed.py"})  # fmt: skip
+    if not erp.find("Note", {"title": MARKER}):
+        erp.insert({"doctype": "Note", "title": MARKER, "public": 0,
+                    "content": "Demo transactions created by scripts/erpnext_seed.py"})  # fmt: skip
 
 
 # --- the app's API user --------------------------------------------------------------------

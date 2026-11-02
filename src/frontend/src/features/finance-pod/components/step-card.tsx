@@ -11,21 +11,24 @@ import { cn } from "@/lib/utils"
 import type { CaseDetail, Step, StepStatus } from "../api"
 import { useCaseAction } from "../hooks"
 import { KIND_META, STEP_STATUS, capacityLabel } from "../labels"
+import { ChoiceForm } from "./choice-form"
+import { NeedForm } from "./need-form"
+import { ReceiptForm } from "./receipt-form"
 import { ResultForm } from "./result-form"
+import { ResultView } from "./result-view"
+
+/** Steps whose form is more than the generic one (lists, pickers from the case's catalogue) */
+const FORMS: Record<string, typeof NeedForm> = {
+  "ap_purchase_request:1.1.1": NeedForm,
+  "ap_purchase_request:1.3.2": ChoiceForm,
+  "ap_invoice_match:3.6.2": ReceiptForm,
+}
 
 const STATUS_ICON: Record<StepStatus, typeof CircleCheck> = {
   pending: CircleDashed,
   done: CircleCheck,
   not_applicable: CircleSlash,
   failed: CircleX,
-}
-
-function formatResult(result: Record<string, unknown> | null): string | null {
-  if (!result) return null
-  const parts = Object.entries(result)
-    .filter(([, v]) => v !== null && v !== "")
-    .map(([k, v]) => `${k.replace(/_/g, " ")}: ${typeof v === "object" ? JSON.stringify(v) : String(v)}`)
-  return parts.length ? parts.join(" · ") : null
 }
 
 /** One L4 task as the requirement draws it: a box in its kind's colour with its L5 steps,
@@ -72,7 +75,6 @@ export function StepCard({ c, step, open }: { c: CaseDetail; step: Step; open: b
       <ul className="mt-2 space-y-1.5">
         {step.l5.map((l5) => {
           const Icon = STATUS_ICON[l5.status]
-          const shown = formatResult(l5.result)
           return (
             <li key={l5.code} className="flex gap-2 text-sm">
               <Icon
@@ -86,7 +88,7 @@ export function StepCard({ c, step, open }: { c: CaseDetail; step: Step; open: b
                 <p>
                   <span className="font-mono text-xs text-muted-foreground">{l5.code}</span> {l5.text}
                 </p>
-                {shown && <p className="text-xs text-foreground/80">{shown}</p>}
+                {l5.result && <ResultView value={l5.result} />}
                 {l5.note && <p className="text-xs italic text-muted-foreground">{l5.note}</p>}
                 {l5.done_at && (
                   <p className="text-[11px] text-muted-foreground">
@@ -113,12 +115,16 @@ export function StepCard({ c, step, open }: { c: CaseDetail; step: Step; open: b
 
       {canAct && (step.kind === "person" || step.kind === "manual") && mode === "none" && (
         <div className="mt-3 space-y-2">
-          <ResultForm
-            l5={step.l5}
-            busy={action.isPending}
-            submitLabel={`Complete ${step.key}`}
-            onSubmit={(results) => run("complete_step", { step: step.key, results }, `Step ${step.key} done`)}
-          />
+          {(() => {
+            const Custom = FORMS[`${c.workflow}:${step.key}`]
+            const submit = (results: Record<string, Record<string, unknown>>) =>
+              run("complete_step", { step: step.key, results }, `Step ${step.key} done`)
+            return Custom ? (
+              <Custom c={c} busy={action.isPending} onSubmit={submit} />
+            ) : (
+              <ResultForm l5={step.l5} busy={action.isPending} submitLabel={`Complete ${step.key}`} onSubmit={submit} />
+            )
+          })()}
           <Button variant="outline" size="sm" onClick={() => setMode("fail")}>
             Record as failed…
           </Button>

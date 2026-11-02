@@ -5,6 +5,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, EmailStr, Field, model_validator
 
 from src.app.service_pod.core.messaging.models import (
+    ArtifactChannel,
     ArtifactKind,
     ArtifactStatus,
     Audience,
@@ -135,7 +136,8 @@ class ArtifactOut(BaseModel):
     size: int
     sha256: str
     status: ArtifactStatus
-    uploaded_by: str
+    uploaded_by: str  # "the vendor (portal)" for portal uploads
+    channel: ArtifactChannel
     decided_by: str | None
     decided_at: datetime | None
     created_at: datetime

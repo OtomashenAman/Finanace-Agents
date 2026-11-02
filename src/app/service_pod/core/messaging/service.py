@@ -35,6 +35,7 @@ from src.app.service_pod.core.hooks import Composed, hooks_for
 from src.app.service_pod.core.messaging import providers
 from src.app.service_pod.core.messaging.inbound import ReplyInvalidError, normalize_id, parse_eml
 from src.app.service_pod.core.messaging.models import (
+    ArtifactChannel,
     ArtifactKind,
     ArtifactStatus,
     Audience,
@@ -181,7 +182,10 @@ async def _artifact_outs(session: AsyncSession, artifacts: list[PodArtifact]) ->
             size=a.size,
             sha256=a.sha256,
             status=a.status,
-            uploaded_by=people.get(a.uploaded_by, DELETED),
+            uploaded_by=(
+                people.get(a.uploaded_by, DELETED) if a.uploaded_by else "the vendor (portal)"
+            ),
+            channel=a.channel,
             decided_by=name_of(people, a.decided_by),
             decided_at=a.decided_at,
             created_at=a.created_at,
@@ -229,10 +233,36 @@ def _source_contacts(snapshot: PodSnapshot, case: PodCase) -> set[str]:
     }
 
 
+def _vendor_contacts(snapshot: PodSnapshot) -> set[str]:
+    """Active vendors' verified emails as the source states them (Finance POD)."""
+    return {
+        v.email.lower()
+        for v in snapshots.document(snapshot).vendors or []
+        if v.email and v.status == "Active"
+    }
+
+
+INVITE_PURPOSE = "vendor_invite"
+
+
 async def _check_recipient(
-    session: AsyncSession, case: PodCase, audience: Audience, to_email: str
+    session: AsyncSession, case: PodCase, audience: Audience, to_email: str, purpose: str = ""
 ) -> None:
     address = to_email.strip().lower()
+    if audience == Audience.INVITE:
+        # A new vendor isn't in the source yet: the invitation (a portal link, no figures)
+        # is the only mail that may go to a typed address
+        if purpose != INVITE_PURPOSE:
+            raise MessageRefusedError("Only a vendor portal invitation goes to a typed address.")
+        return
+    if audience == Audience.VENDOR:
+        snapshot = await session.get(PodSnapshot, case.snapshot_id)
+        assert snapshot is not None  # noqa: S101 - RESTRICT foreign key
+        if address not in _vendor_contacts(snapshot):
+            raise MessageRefusedError(
+                "Vendor mail goes only to an active vendor's verified contact from the source."
+            )
+        return
     if audience == Audience.INTERNAL:
         allowed = {r.strip().lower() for r in get_settings().pod_internal_recipients}
         if address not in allowed:
@@ -350,16 +380,13 @@ def _event(
 # --- outbound --------------------------------------------------------------------------
 
 
-async def create_draft(
-    session: AsyncSession,
-    access: PodAccess,
-    case_id: uuid.UUID,
-    body: MessageDraftIn,
-    ctx: RequestContext,
-) -> MessageOut:
-    case = await load_case(session, case_id, access=access)
+async def add_draft(
+    session: AsyncSession, case: PodCase, body: MessageDraftIn, user_id: uuid.UUID
+) -> PodMessage:
+    """A checked outbound draft (caller audits and commits); a workflow's agent drafts mail
+    this way, and a person still approves and sends it."""
     _require_open(case)
-    await _check_recipient(session, case, body.audience, body.to_email)
+    await _check_recipient(session, case, body.audience, body.to_email, body.purpose)
     await _approved_artifacts(session, case, body.artifact_ids)
     fact_block = await _facts_for(session, case, body.purpose)
     _require_facts(fact_block, body.body)
@@ -376,10 +403,22 @@ async def create_draft(
         artifact_ids=[str(a) for a in body.artifact_ids],
         fact_block=fact_block,
         internet_message_id=f"<{uuid.uuid4()}@finance-pod>",
-        created_by=access.user.id,
+        created_by=user_id,
     )
     session.add(message)
     await session.flush()
+    return message
+
+
+async def create_draft(
+    session: AsyncSession,
+    access: PodAccess,
+    case_id: uuid.UUID,
+    body: MessageDraftIn,
+    ctx: RequestContext,
+) -> MessageOut:
+    case = await load_case(session, case_id, access=access)
+    message = await add_draft(session, case, body, access.user.id)
     _event(
         session,
         "pod.message_drafted",
@@ -416,7 +455,7 @@ async def update_message(
         await _approved_artifacts(session, case, body.artifact_ids)
         message.artifact_ids = [str(a) for a in body.artifact_ids]
     assert message.audience is not None  # noqa: S101 - outbound messages have one
-    await _check_recipient(session, case, message.audience, message.to_email)
+    await _check_recipient(session, case, message.audience, message.to_email, message.purpose)
     _require_facts(message.fact_block, message.body)
     message.status = MessageStatus.DRAFT  # an edit always needs a fresh approval
     message.approval_hash = message.approved_by = message.approved_at = None
@@ -449,11 +488,11 @@ async def send_message(
     if message.direction != Direction.OUTBOUND or message.status not in EDITABLE:
         raise MessageRefusedError(f"A {message.status.value} message can't be sent.")
     assert message.audience is not None  # noqa: S101
-    if message.audience == Audience.CUSTOMER and not body.checks.all_confirmed:
+    if message.audience in (Audience.CUSTOMER, Audience.VENDOR) and not body.checks.all_confirmed:
         raise MessageRefusedError(
             "Confirm the recipient, the invoice mapping and the tone before sending."
         )
-    await _check_recipient(session, case, message.audience, message.to_email)
+    await _check_recipient(session, case, message.audience, message.to_email, message.purpose)
     if message.fact_block is not None:
         # The case may have moved to a newer source since the draft: figures must be current
         if await _facts_for(session, case, message.purpose) != message.fact_block:
@@ -468,6 +507,14 @@ async def send_message(
     problem = await provider.readiness()
     if problem is not None:
         raise MessageRefusedError(f"Email can't be sent yet: {problem}")
+    if message.audience in (Audience.VENDOR, Audience.INVITE) and not provider.simulated:
+        snapshot = await session.get(PodSnapshot, case.snapshot_id)
+        assert snapshot is not None  # noqa: S101 - RESTRICT foreign key
+        if snapshot.is_demo and not get_settings().email_test_recipient:
+            raise MessageRefusedError(
+                "This case is on demo data: real mail from it goes only to a test address "
+                "(EMAIL_TEST_RECIPIENT)."
+            )
     if message.audience == Audience.CUSTOMER and not provider.simulated:
         snapshot = await session.get(PodSnapshot, case.snapshot_id)
         assert snapshot is not None  # noqa: S101 - RESTRICT foreign key
@@ -697,6 +744,29 @@ async def upload_artifact(
     ctx: RequestContext,
 ) -> ArtifactOut:
     case = await load_case(session, case_id, access=access)
+    artifact = await add_artifact(
+        session, case, kind, invoice_refs, filename, content_type, data, ctx,
+        uploaded_by=access.user.id,
+    )  # fmt: skip
+    await session.commit()
+    return (await _artifact_outs(session, [artifact]))[0]
+
+
+async def add_artifact(
+    session: AsyncSession,
+    case: PodCase,
+    kind: ArtifactKind,
+    invoice_refs: list[str],
+    filename: str,
+    content_type: str,
+    data: bytes,
+    ctx: RequestContext,
+    *,
+    uploaded_by: uuid.UUID | None,
+    channel: ArtifactChannel = ArtifactChannel.UPLOAD,
+) -> PodArtifact:
+    """A checked document on the case, audited (caller commits). uploaded_by None: the
+    vendor, through the portal."""
     _require_open(case)
     content_type = content_type.split(";")[0].strip().lower()
     if content_type not in ARTIFACT_TYPES:
@@ -726,23 +796,25 @@ async def upload_artifact(
         size=len(data),
         sha256=sha256,
         content=data,
-        uploaded_by=access.user.id,
+        uploaded_by=uploaded_by,
+        channel=channel,
     )
     session.add(artifact)
     await session.flush()
+    who = "" if uploaded_by else " (the vendor, through the portal)"
     record_event(
         session,
         "pod.artifact_uploaded",
         ctx,
-        actor_id=access.user.id,
+        actor_id=uploaded_by,
         run=case.reference,
         case_id=str(case.id),
         artifact_id=str(artifact.id),
         sha256=sha256,
-        summary=f"{case.reference}: added {kind.value.replace('_', ' ')} {artifact.filename}",
+        channel=channel.value,
+        summary=f"{case.reference}: added {kind.value.replace('_', ' ')} {artifact.filename}{who}",
     )
-    await session.commit()
-    return (await _artifact_outs(session, [artifact]))[0]
+    return artifact
 
 
 async def decide_artifact(

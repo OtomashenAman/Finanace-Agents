@@ -60,3 +60,57 @@ export function useGrant() {
 export function useRevoke() {
   return useMutation({ mutationFn: financeApi.revoke, meta: { invalidates } })
 }
+
+export function useOpenCase() {
+  return useMutation({ mutationFn: financeApi.open, meta: { invalidates } })
+}
+
+export function useSources(workflow: string | null) {
+  return useQuery({
+    queryKey: [FINANCE_TAG, "sources", workflow],
+    queryFn: () => financeApi.sources(workflow!),
+    enabled: Boolean(workflow),
+  })
+}
+
+export function useSourceCatalogue(snapshotId: string | null, workflow: string | null) {
+  return useQuery({
+    queryKey: [FINANCE_TAG, "source-catalogue", snapshotId, workflow],
+    queryFn: () => financeApi.sourceCatalogue(snapshotId!, workflow!),
+    enabled: Boolean(snapshotId && workflow),
+    staleTime: 5 * 60_000,
+  })
+}
+
+export function useCaseCatalogue(caseId: string | undefined) {
+  return useQuery({
+    queryKey: [FINANCE_TAG, "catalogue", caseId],
+    queryFn: () => financeApi.caseCatalogue(caseId!),
+    enabled: Boolean(caseId),
+    staleTime: 5 * 60_000,
+  })
+}
+
+export function useUpload() {
+  return useMutation({ mutationFn: financeApi.upload, meta: { invalidates } })
+}
+
+export function useSendMessage() {
+  return useMutation({ mutationFn: financeApi.sendMessage, meta: { invalidates } })
+}
+
+export function useTaskAction() {
+  return useMutation({ mutationFn: financeApi.taskAction, meta: { invalidates } })
+}
+
+export function useSanctions(enabled: boolean) {
+  return useQuery({ queryKey: [FINANCE_TAG, "sanctions"], queryFn: financeApi.sanctions, enabled })
+}
+
+export function useRefreshSanctions() {
+  return useMutation({ mutationFn: financeApi.refreshSanctions, meta: { invalidates } })
+}
+
+export function useIntake() {
+  return useMutation({ mutationFn: financeApi.intake, meta: { invalidates } })
+}

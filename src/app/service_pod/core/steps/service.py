@@ -16,9 +16,11 @@ from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.app.audit.service import record_event
 from src.app.common.clock import utcnow
 from src.app.service_pod.common.people import DELETED, names
 from src.app.service_pod.core.cases.exceptions import CaseActionError, InvalidActionPayloadError
+from src.app.service_pod.core.cases.models import CaseStatus
 from src.app.service_pod.core.steps.models import PodCaseStep
 from src.app.service_pod.core.steps.schemas import L5Out, StepOut
 from src.app.service_pod.core.steps.spec import (
@@ -60,9 +62,11 @@ async def load_steps(session: AsyncSession, case: PodCase) -> list[PodCaseStep]:
     return sorted(rows, key=lambda r: order.get(r.l5_code, len(order)))
 
 
-def fingerprint_part(rows: list[PodCaseStep]) -> list[list[Any]]:
-    """What an approval binds of the steps: their outcome, not who or when."""
-    return [[r.l5_code, r.status, r.result, r.note] for r in rows]
+def fingerprint_part(case: PodCase, rows: list[PodCaseStep]) -> list[list[Any]]:
+    """What an approval binds of the steps: their outcome, not who or when. Steps that run
+    after the release (e.g. sending the approved PO) aren't part of what was approved."""
+    later = {s.key for s in plan_of(case).steps if s.after_approval}
+    return [[r.l5_code, r.status, r.result, r.note] for r in rows if r.step_key not in later]
 
 
 def _rows_of(rows: list[PodCaseStep], key: str) -> list[PodCaseStep]:
@@ -87,11 +91,12 @@ def _settled(rows: list[PodCaseStep], key: str) -> bool:
     return status_of(rows, key) in SETTLED
 
 
-def blockers(case: PodCase, rows: list[PodCaseStep]) -> list[str]:
-    """Why the case can't be approved yet as far as its steps go."""
-    plan = plan_of(case)
-    failed = [s for s in plan.steps if status_of(rows, s.key) == StepStatus.FAILED]
-    pending = [s for s in plan.steps if status_of(rows, s.key) == StepStatus.PENDING]
+def blockers(case: PodCase, rows: list[PodCaseStep], *, after_approval: bool = False) -> list[str]:
+    """Why the case can't be approved yet (after_approval: completed yet) as far as its
+    steps go."""
+    plan = [s for s in plan_of(case).steps if s.after_approval == after_approval]
+    failed = [s for s in plan if status_of(rows, s.key) == StepStatus.FAILED]
+    pending = [s for s in plan if status_of(rows, s.key) == StepStatus.PENDING]
     problems = []
     if failed:
         problems.append(f"Failed step(s) must be redone: {_names(failed)}.")
@@ -142,12 +147,23 @@ def _sod_problem(c: Ctx, step: StepSpec, user_id: uuid.UUID) -> str | None:
     return None
 
 
+def _phase_problem(c: Ctx, step: StepSpec) -> str | None:
+    approved = c.case.status == CaseStatus.APPROVED
+    if step.after_approval and not approved:
+        return f"Step {step.key} runs once the case is released."
+    if not step.after_approval and approved:
+        return "The case is released; send a step back to change what was approved."
+    return None
+
+
 def person_problem(c: Ctx, step: StepSpec) -> str | None:
     """Why the current user can't complete this PERSON / MANUAL step now (None: they can)."""
     if step.kind not in (StepKind.PERSON, StepKind.MANUAL):
         return f"Step {step.key} isn't done by a person."
     if _settled(c.children.steps, step.key):
         return f"Step {step.key} is already done; redo it to change it."
+    if problem := _phase_problem(c, step):
+        return problem
     if step.capacity and not c.access.holds(step.capacity, c.case.entity_id):
         return f"Step {step.key} needs the {step.capacity.replace('_', ' ')} capacity."
     return _order_problem(c.children.steps, step) or _sod_problem(c, step, c.user.id)
@@ -158,6 +174,8 @@ def agent_problem(c: Ctx, step: StepSpec) -> str | None:
         return f"Step {step.key} isn't run by an agent."
     if _settled(c.children.steps, step.key):
         return f"Step {step.key} is already done; redo it to run it again."
+    if problem := _phase_problem(c, step):
+        return problem
     if not _may_drive(c, step):
         return "Only someone working on this case can run its agents."
     return _order_problem(c.children.steps, step)
@@ -168,7 +186,9 @@ def _may_drive(c: Ctx, step: StepSpec) -> bool:
     holder of the step's capacity, or a holder of a capacity of a later step."""
     if c.access.is_admin or c.case.owner_id == c.user.id:
         return True
-    caps = {step.capacity} | {s.capacity for s in _dependents(plan_of(c.case), step.key)}
+    caps = {step.capacity, *step.run_by} | {
+        s.capacity for s in _dependents(plan_of(c.case), step.key)
+    }
     return c.access.holds_any({x for x in caps if x}, c.case.entity_id)
 
 
@@ -259,12 +279,15 @@ async def complete_step(c: Ctx, p: BaseModel) -> tuple[str, bool]:
     step = _spec(c, p.step)
     if problem := person_problem(c, step):
         raise CaseActionError(problem)
+    changed = not step.after_approval
     if p.failed_reason:
         _settle(c.children.steps, step, None, StepStatus.FAILED, p.failed_reason, c.user.id)
-        return f"Step {step.key} {step.title}: failed ({p.failed_reason})", True
+        return f"Step {step.key} {step.title}: failed ({p.failed_reason})", changed
     _settle(c.children.steps, step, _validated(step, p.results), StepStatus.DONE, None, c.user.id)
+    reaction = await step.on_done(c, step) if step.on_done else None
     skipped = await settle_not_applicable(c)
-    return f"Step {step.key} {step.title}: done" + _skipped(skipped), True
+    summary = f"Step {step.key} {step.title}: done" + (f"; {reaction}" if reaction else "")
+    return summary + _skipped(skipped), changed
 
 
 async def run_agent_step(c: Ctx, p: BaseModel) -> tuple[str, bool]:
@@ -282,10 +305,17 @@ async def run_agent_step(c: Ctx, p: BaseModel) -> tuple[str, bool]:
             raise StepFailedError("The agent's output doesn't match the step's declared results.")
     except StepFailedError as exc:
         _settle(c.children.steps, step, None, StepStatus.FAILED, str(exc), None)
-        return f"Step {step.key} {step.title}: the agent couldn't finish ({exc})", True
+        return (
+            f"Step {step.key} {step.title}: the agent couldn't finish ({exc})",
+            not step.after_approval,
+        )
     _settle(c.children.steps, step, produced, StepStatus.DONE, None, None)
+    reaction = await step.on_done(c, step) if step.on_done else None
     skipped = await settle_not_applicable(c)
-    return f"Step {step.key} {step.title}: run by the agent" + _skipped(skipped), True
+    summary = f"Step {step.key} {step.title}: run by the agent" + (
+        f"; {reaction}" if reaction else ""
+    )
+    return summary + _skipped(skipped), not step.after_approval
 
 
 async def redo_step(c: Ctx, p: BaseModel) -> tuple[str, bool]:
@@ -297,14 +327,37 @@ async def redo_step(c: Ctx, p: BaseModel) -> tuple[str, bool]:
         raise CaseActionError(f"Step {step.key} isn't done yet.")
     if not _may_drive(c, step):
         raise CaseActionError("Only someone working on this case can send a step back.")
+    skipped = await send_back(c, step.key, p.reason)
+    summary = f"Step {step.key} {step.title} sent back: {p.reason}" + _skipped(skipped)
+    # Sending back a step that runs after the release changes nothing that was approved
+    return summary, not (step.after_approval and c.case.status == CaseStatus.APPROVED)
+
+
+async def send_back(c: Ctx, key: str, reason: str) -> list[str]:
+    """Reset a step and every step after it to pending (rework, counted by the measures);
+    returns the steps that then turned out not to apply."""
+    step = _spec(c, key)
     reset = [step, *_dependents(plan_of(c.case), step.key)]
+    if c.case.status == CaseStatus.APPROVED and step.after_approval:
+        reset = [s for s in reset if s.after_approval]
     for s in reset:
         for r in _rows_of(c.children.steps, s.key):
             r.status, r.result, r.note, r.done_by, r.done_at = (
                 StepStatus.PENDING, None, None, None, None,
             )  # fmt: skip
-    skipped = await settle_not_applicable(c)
-    return f"Step {step.key} {step.title} sent back: {p.reason}" + _skipped(skipped), True
+    if c.request is not None:
+        record_event(
+            c.session,
+            "finance.step_sent_back",
+            c.request,
+            actor_id=c.user.id,
+            run=c.case.reference,
+            case_id=str(c.case.id),
+            step=step.key,
+            reason=reason,
+            summary=f"{c.case.reference}: step {step.key} sent back ({reason})",
+        )
+    return await settle_not_applicable(c)
 
 
 def _skipped(keys: list[str]) -> str:

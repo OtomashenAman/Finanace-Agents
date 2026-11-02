@@ -1,14 +1,20 @@
 import uuid
+from datetime import datetime
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, status
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 import src.app.finance_pod.flows  # noqa: F401 - registers every Finance POD workflow
+from src.app.audit.service import record_event
 from src.app.auth.dependencies import AdminUser
 from src.app.common.context import RequestContextDep
 from src.app.common.schemas import ErrorResponse
 from src.app.core.db import SessionDep
-from src.app.finance_pod import service
+from src.app.core.errors import AppError
+from src.app.finance_pod import case_api, sanctions, service
 from src.app.finance_pod.access import FinanceAccessDep, get_finance_access
 from src.app.finance_pod.schemas import (
     AssignmentCreate,
@@ -78,6 +84,61 @@ async def revoke_capacity(
     await service.revoke(session, admin, assignment_id, ctx)
 
 
+class SanctionsStatus(BaseModel):
+    loaded: bool
+    list_name: str | None
+    entries: int
+    loaded_at: datetime | None
+    source_url: str | None
+
+
+async def _sanctions_status(session: AsyncSession) -> SanctionsStatus:
+    current = await sanctions.current(session)
+    if current is None:
+        return SanctionsStatus(
+            loaded=False, list_name=None, entries=0, loaded_at=None, source_url=None
+        )
+    return SanctionsStatus(
+        loaded=True, list_name=current.list_name, entries=current.entries,
+        loaded_at=current.created_at, source_url=current.source_url,
+    )  # fmt: skip
+
+
+@own.get("/sanctions", response_model=SanctionsStatus)
+async def sanctions_status(session: SessionDep, _: FinanceAccessDep) -> SanctionsStatus:
+    """The sanctions list vendors are screened against (a daily job refreshes it)."""
+    return await _sanctions_status(session)
+
+
+@own.post("/sanctions/refresh", response_model=SanctionsStatus, responses=_ERRORS)
+async def refresh_sanctions(
+    session: SessionDep, admin: AdminUser, ctx: RequestContextDep
+) -> SanctionsStatus:
+    """Download the OFAC SDN list now (Finance Admin)."""
+    try:
+        data, url = await sanctions.download()
+        loaded = await sanctions.load(session, data, url)
+    except (httpx.HTTPError, ValueError) as exc:
+        raise SanctionsRefreshError(f"Couldn't load the sanctions list: {exc}") from exc
+    summary = f"Loaded {loaded.list_name} ({loaded.entries} entries)"
+    record_event(
+        session,
+        "finance.sanctions_loaded",
+        ctx,
+        actor_id=admin.id,
+        entries=loaded.entries,
+        summary=summary,
+    )
+    await session.commit()
+    return await _sanctions_status(session)
+
+
+class SanctionsRefreshError(AppError):
+    status_code = 422
+    code = "sanctions_refresh_failed"
+
+
 router.include_router(own)
+router.include_router(case_api.router)
 for workflow_router in ROUTERS[PodKey.FINANCE]:
     router.include_router(workflow_router)

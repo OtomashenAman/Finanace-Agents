@@ -74,7 +74,7 @@ from src.app.service_pod.core.steps import service as steps
 from src.app.service_pod.core.steps.models import PodCaseStep
 from src.app.service_pod.core.tasks import service as tasks
 from src.app.service_pod.core.tasks.models import PodPostingTask, TaskStatus
-from src.app.service_pod.core.workflows import WORKFLOWS, PodKey, keys_in
+from src.app.service_pod.core.workflows import RELEASED, WORKFLOWS, PodKey, WorkflowKey, keys_in
 
 MAX_CASE_DATA = 256 * 1024  # selection / state JSON
 DRAFT = frozenset({CaseStatus.DRAFT})
@@ -127,14 +127,16 @@ def case_fingerprint(case: PodCase, children: Children) -> str:
     """What an approval vouches for. Timestamps and who-did-it are left out on purpose:
     they don't change what is being approved. Steps join the content only for workflows
     that have them, so the Service POD's existing approvals keep their fingerprints."""
-    step_part = {"steps": steps.fingerprint_part(children.steps)} if children.steps else {}
+    step_part = {"steps": steps.fingerprint_part(case, children.steps)} if children.steps else {}
     return fingerprint(
         {
             **step_part,
             "snapshot": case.snapshot_sha,
             "title": case.title,
             "selection": case.selection,
-            "state": case.state,
+            # Keys starting with "_" are execution details recorded after a release (e.g. a
+            # vendor's acknowledgement of the PO): not part of what was approved
+            "state": {k: v for k, v in case.state.items() if not k.startswith("_")},
             "review_tasks": [
                 [str(t.id), t.kind, t.subject, t.detail, t.blocking, t.status, t.resolution]
                 for t in children.review_tasks
@@ -201,6 +203,10 @@ async def _completion_blockers(session: AsyncSession, case: PodCase) -> list[str
     workflow_checks = hooks_for(case.workflow).completion_blockers
     if workflow_checks is not None and case.status not in LOCKED_STATUSES:
         problems.extend(await workflow_checks(session, case))
+    if steps.has_steps(case) and case.status not in LOCKED_STATUSES:
+        problems.extend(
+            steps.blockers(case, await steps.load_steps(session, case), after_approval=True)
+        )
     return problems
 
 
@@ -599,6 +605,25 @@ async def create_case(
         set(spec.plan.openers), snapshot.entity_id
     ):
         raise CaseActionError(f"Opening a {spec.name} case needs a capacity that may open one.")
+    case = await open_case(session, access, spec.key, snapshot, body.title, body.selection, ctx)
+    await session.commit()
+    return await get_case(session, access, case.id)
+
+
+async def open_case(
+    session: AsyncSession,
+    access: PodAccess,
+    workflow: WorkflowKey,
+    snapshot: PodSnapshot,
+    title: str,
+    selection: dict[str, Any],
+    ctx: RequestContext | None,
+    *,
+    opened_from: PodCase | None = None,
+) -> PodCase:
+    """A new case on a snapshot that supplies what the workflow needs (caller commits).
+    opened_from: the case whose step opened it (e.g. a vendor onboarding for a request)."""
+    spec = WORKFLOWS[workflow]
     missing = sorted(spec.required - {Collection(c) for c in snapshot.coverage})
     if missing:
         raise SourceCoverageError(
@@ -612,9 +637,9 @@ async def create_case(
         snapshot_id=snapshot.id,
         snapshot_sha=snapshot.sha256,
         owner_id=access.user.id,
-        title=body.title,
+        title=title,
         status=CaseStatus.DRAFT,
-        selection=bounded(body.selection, "selection"),
+        selection=bounded(selection, "selection"),
         state={},
     )
     on_create = hooks_for(spec.key).on_create
@@ -629,19 +654,21 @@ async def create_case(
     after_create = hooks_for(spec.key).after_create
     if after_create is not None:
         await after_create(session, case)
-    record_event(
-        session,
-        "pod.case_created",
-        ctx,
-        actor_id=access.user.id,
-        run=case.reference,
-        case_id=str(case.id),
-        workflow=spec.key.value,
-        snapshot_sha=snapshot.sha256,
-        summary=f"Opened {case.reference} ({spec.name}): {case.title}",
-    )
-    await session.commit()
-    return await get_case(session, access, case.id)
+    if ctx is not None:
+        origin = f", opened from {opened_from.reference}" if opened_from else ""
+        record_event(
+            session,
+            "pod.case_created",
+            ctx,
+            actor_id=access.user.id,
+            run=case.reference,
+            case_id=str(case.id),
+            workflow=spec.key.value,
+            snapshot_sha=snapshot.sha256,
+            opened_from=str(opened_from.id) if opened_from else None,
+            summary=f"Opened {case.reference} ({spec.name}): {case.title}{origin}",
+        )
+    return case
 
 
 async def run_action(
@@ -672,6 +699,7 @@ async def run_action(
     reopened = changed and case.status == CaseStatus.APPROVED
     if reopened:
         case.status = CaseStatus.DRAFT
+    released = await _release_if_ready(session, access, case, request)
     case.version += 1
     record_event(
         session,
@@ -694,8 +722,43 @@ async def run_action(
             case_id=str(case.id),
             summary=f"{case.reference}: content changed after approval, back to draft",
         )
+    if released:
+        record_event(
+            session,
+            "pod.case_released",
+            request,
+            actor_id=access.user.id,
+            run=case.reference,
+            case_id=str(case.id),
+            summary=f"{case.reference}: every checkpoint passed, released",
+        )
     await session.commit()
     return await get_case(session, access, case.id)
+
+
+async def _release_if_ready(
+    session: AsyncSession, access: PodAccess, case: PodCase, request: RequestContext
+) -> bool:
+    """A workflow without sign-offs is released (approved) once its steps before approval
+    are settled and nothing blocks; the approval binds the content and names the person whose
+    action completed it. Its on_release hook then runs (e.g. queue the ERP posting)."""
+    spec = WORKFLOWS[case.workflow]
+    if not (spec.released and spec.plan.steps) or case.status != CaseStatus.DRAFT:
+        return False
+    await session.flush()
+    c = await _ctx(session, access, case, request)
+    if c.blockers:
+        return False
+    session.add(
+        PodApproval(
+            case_id=case.id, user_id=access.user.id, content_hash=c.fingerprint, capacity=RELEASED
+        )
+    )
+    case.status = CaseStatus.APPROVED
+    if spec.plan.on_release is not None:
+        await session.flush()
+        await spec.plan.on_release(await _ctx(session, access, case, request))
+    return True
 
 
 async def _summaries(session: AsyncSession, cases: list[PodCase]) -> list[CaseSummary]:

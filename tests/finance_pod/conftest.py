@@ -9,12 +9,16 @@ from collections.abc import Callable, Iterator
 from decimal import Decimal
 from typing import Any
 
+import httpx
 import pytest
 from httpx import AsyncClient
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.auth.models import User, UserRole
+from src.app.data_sources import crypto
+from src.app.data_sources.models import DataSource, IntegrationEnvironment, SourceKind, SourceStatus
+from src.app.data_sources.providers import erpnext as provider
 from src.app.entities.models import LegalEntity
 from src.app.finance_pod.capacities import FinanceCapacity
 from src.app.finance_pod.models import FinanceCapacityAssignment
@@ -33,6 +37,7 @@ from src.app.service_pod.core.steps.spec import (
 )
 from src.app.service_pod.core.workflows import WORKFLOWS, PodKey, WorkflowKey, WorkflowSpec
 from tests.conftest import ClientFactory, MakeUser
+from tests.finance_pod.fake_erpnext import COMPANY, KEY, SECRET, FakeErpNext
 from tests.service_pod.conftest import import_snapshot
 
 DEMO_KEY = WorkflowKey.TREASURY  # borrowed for the test's duration (see the module doc)
@@ -205,3 +210,61 @@ async def act(client: AsyncClient, case: dict[str, Any], action: str, **payload:
 def step(case: dict[str, Any], key: str) -> dict[str, Any]:
     found: dict[str, Any] = next(s for s in case["steps"] if s["key"] == key)
     return found
+
+
+# --- the AP world: people with each capacity, and an ERPNext connection (a stand-in) ---
+
+
+@pytest.fixture
+def erp(monkeypatch: pytest.MonkeyPatch) -> Iterator[FakeErpNext]:
+    fake = FakeErpNext()
+    monkeypatch.setattr(provider, "transport", httpx.MockTransport(fake.handler))
+    yield fake
+
+
+class World:
+    def __init__(self) -> None:
+        self.users: dict[str, User] = {}
+        self.clients: dict[str, AsyncClient] = {}
+        self.source: DataSource | None = None
+        self.admin: AsyncClient | None = None
+        self.entity: LegalEntity | None = None
+
+    def __getitem__(self, who: str) -> AsyncClient:
+        return self.clients[who]
+
+
+@pytest.fixture
+async def world(
+    admin: AsyncClient,
+    admin_user: User,
+    entity: LegalEntity,
+    person: PersonFn,
+    db: AsyncSession,
+    erp: FakeErpNext,
+) -> World:
+    w = World()
+    w.admin, w.entity = admin, entity
+    for who, caps in (
+        ("req", (Cap.REQUESTER,)),
+        ("bo", (Cap.BUDGET_OWNER,)),
+        ("buyer", (Cap.BUYER,)),
+        ("analyst", (Cap.AP_ANALYST,)),
+        ("approver", (Cap.VENDOR_APPROVER,)),
+    ):
+        w.users[who], w.clients[who] = await person(f"{who}@example.com", *caps)
+    w.source = DataSource(
+        owner_id=admin_user.id,
+        kind=SourceKind.ERPNEXT,
+        name="ERPNext",
+        status=SourceStatus.CONNECTED,
+        base_url="http://erp.example.test",
+        client_id=KEY,
+        client_secret_enc=crypto.encrypt(SECRET),
+        external_id=COMPANY,
+        environment=IntegrationEnvironment.SANDBOX,
+        record_counts={},
+    )
+    db.add(w.source)
+    await db.commit()
+    return w

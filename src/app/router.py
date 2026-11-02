@@ -8,6 +8,7 @@ from src.app.auth.router import router as auth_router
 from src.app.data_sources.router import admin_router as data_sources_admin_router
 from src.app.data_sources.router import router as data_sources_router
 from src.app.entities.router import router as entities_router
+from src.app.finance_pod.flows.ap_vendor_onboarding.portal import router as vendor_portal_router
 from src.app.finance_pod.router import router as finance_pod_router
 from src.app.governance.router import router as governance_router
 from src.app.jobs.router import router as jobs_router
@@ -37,3 +38,4 @@ api_router.include_router(worklist_router)
 api_router.include_router(search_router)
 api_router.include_router(service_pod_router)
 api_router.include_router(finance_pod_router)
+api_router.include_router(vendor_portal_router)  # public: the signed link is the access

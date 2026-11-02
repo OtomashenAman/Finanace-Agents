@@ -13,6 +13,8 @@ from enum import StrEnum
 from src.app.service_pod.core.snapshots.contract import Collection
 from src.app.service_pod.core.steps.spec import StepPlan
 
+RELEASED = "released"  # the approval capacity of a release (no sign-off)
+
 
 class PodKey(StrEnum):
     SERVICE = "service"
@@ -25,6 +27,10 @@ class WorkflowKey(StrEnum):
     FPA_TREND = "fpa_trend"
     TREASURY = "treasury"
     REPORTING = "reporting"
+    # Finance POD: Procure-to-Pay
+    AP_PURCHASE_REQUEST = "ap_purchase_request"
+    AP_VENDOR_ONBOARDING = "ap_vendor_onboarding"
+    AP_INVOICE_MATCH = "ap_invoice_match"
 
 
 @dataclass(frozen=True)
@@ -45,9 +51,16 @@ class WorkflowSpec:
     signoff_sod: bool = False
 
     @property
+    def released(self) -> bool:
+        """Finance POD workflows without sign-offs are released (approved) by the engine as
+        soon as every step before approval is settled and nothing blocks: the checkpoints
+        are the people's own steps."""
+        return not self.signoffs
+
+    @property
     def signoff_as(self) -> str:
         """The first (usually only) sign-off's capacity."""
-        return self.signoffs[0]
+        return self.signoffs[0] if self.signoffs else RELEASED
 
 
 # Filled by core.registry.register() as each flow package is imported (in import order)

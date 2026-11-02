@@ -77,6 +77,11 @@ class Settings(BaseSettings):
     # Finance POD: hosts an ERPNext connection may point at (comma separated). Required in
     # production, where the address must also be https; empty elsewhere: any host
     erpnext_allowed_hosts: str = ""
+    # The OFAC SDN list, downloaded daily for vendor screening (empty: no download; screening
+    # then refuses to answer rather than pass a vendor unscreened)
+    sanctions_list_url: str = (
+        "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.CSV"
+    )
     # Snapshots labelled SYNTHETIC_DEMO (or from a QuickBooks sandbox). Unset: allowed outside
     # production only, so a client installation never shows demo figures as its books
     pod_allow_demo_snapshots: bool | None = None

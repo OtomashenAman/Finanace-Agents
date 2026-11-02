@@ -22,6 +22,7 @@ class TaskKind(StrEnum):
     # Finance POD: the app posts these to the ERP when a person approves it (post action)
     CREATE_SUPPLIER = "create_supplier"
     CREATE_PURCHASE_ORDER = "create_purchase_order"
+    CREATE_PURCHASE_RECEIPT = "create_purchase_receipt"  # a receiver confirmed the delivery
 
 
 class TaskStatus(StrEnum):

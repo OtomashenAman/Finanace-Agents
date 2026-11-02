@@ -26,6 +26,7 @@ function resolve(schema: JsonSchema, root: JsonSchema): { schema: JsonSchema; op
 
 function convert(raw: string | boolean, schema: JsonSchema): unknown {
   if (typeof raw === "boolean") return raw
+  if (schema.format === "date-time") return new Date(raw).toISOString()
   if (schema.type === "integer") return Number.parseInt(raw, 10)
   if (schema.type === "number") return Number(raw)
   return raw
@@ -77,7 +78,7 @@ export function ResultForm({
               const label = `${schema.title ?? field}${required.has(field) && !optional ? " *" : ""}`
               const value = values[step.code]?.[field]
               const id = `${step.code}-${field}`
-              if (schema.type === "boolean") {
+              if (schema.type === "boolean" || schema.const === true) {
                 return (
                   <label key={field} htmlFor={id} className="flex items-center gap-2 text-sm">
                     <input
@@ -117,7 +118,15 @@ export function ResultForm({
                   ) : (
                     <Input
                       id={id}
-                      type={schema.type === "integer" || schema.type === "number" ? "number" : "text"}
+                      type={
+                        schema.format === "date-time"
+                          ? "datetime-local"
+                          : schema.format === "date"
+                            ? "date"
+                            : schema.type === "integer" || schema.type === "number"
+                              ? "number"
+                              : "text"
+                      }
                       value={typeof value === "string" ? value : ""}
                       onChange={(e) => set(step.code, field, e.target.value)}
                     />
