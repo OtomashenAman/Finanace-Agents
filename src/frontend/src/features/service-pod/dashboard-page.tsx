@@ -20,14 +20,14 @@ const PHASE_LABEL = (p: DashboardPhase) => (p === "closed" ? "Closed (30 days)" 
 function Tile({ label, value, hint, to }: { label: string; value: string; hint?: string; to?: string }) {
   const body = (
     <>
-      <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{label}</p>
-      <p className="mt-1 text-2xl font-bold text-brand-navy tabular-nums">{value}</p>
-      {hint && <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>}
+      <p className="text-[11px] font-semibold tracking-wider text-muted-foreground uppercase">{label}</p>
+      <p className="mt-1 text-xl font-bold tracking-tight text-foreground tabular-nums">{value}</p>
+      {hint && <p className="mt-0.5 text-xs text-muted-foreground/80">{hint}</p>}
     </>
   )
-  const cls = "block rounded-lg border bg-card p-4"
+  const cls = "block rounded-lg border border-border/70 bg-card px-3.5 py-3 shadow-2xs"
   return to ? (
-    <Link to={to} className={cn(cls, "transition-colors hover:border-primary/50")}>
+    <Link to={to} className={cn(cls, "transition-all hover:border-primary/60 hover:shadow-xs")}>
       {body}
     </Link>
   ) : (

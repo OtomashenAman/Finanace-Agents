@@ -45,9 +45,7 @@ async def on_create(
     if refresh and figures(previous) == figures(pack):
         # Same figures from the newer source: the commentary and mapping review still hold
         kept |= {
-            k: previous[k]
-            for k in ("commentary", "recommended_actions", "mapping_review")
-            if k in previous
+            k: previous[k] for k in ("commentary", "follow_ups", "mapping_review") if k in previous
         }
     case.state = {**pack, **kept}
 
@@ -137,6 +135,27 @@ async def summary(session: AsyncSession, case: PodCase) -> str | None:
 # --- the facts commentary may cite -------------------------------------------------------
 
 
+MONTH_NAMES = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+]
+
+
+def _month(period: str) -> str:
+    """'2026-09' -> 'September 2026'"""
+    return f"{MONTH_NAMES[int(period[5:7]) - 1]} {period[:4]}"
+
+
 def _money(value: Any, currency: str) -> str:
     return f"{currency} {Decimal(str(value)):,.0f}"
 
@@ -149,31 +168,61 @@ def facts(state: dict[str, Any]) -> list[Fact]:
     """Deterministic, formatted figures (and their IDs) for the commentary to cite."""
     cur = str(state.get("currency", ""))
     out: list[Fact] = []
-    for r in state.get("metrics", []):
+    metrics = state.get("metrics", [])
+    change = engine.latest_change(state)
+    # Every month stays citable; the trend facts give the longer run in one line each, and the
+    # prompt keeps the commentary on the latest comparison
+    for r in metrics:
         p = r["period"]
         m = r.get("margin_pct")
+        name = _month(p)
         out += [
-            Fact(f"revenue.{p}", f"Revenue {p}", _money(r["revenue"], cur)),
+            Fact(f"revenue.{p}", f"Revenue {name}", _money(r["revenue"], cur)),
             Fact(
-                f"cost_of_services.{p}", f"Cost of services {p}", _money(r["cost_of_services"], cur)
+                f"cost_of_services.{p}",
+                f"Cost of services {name}",
+                _money(r["cost_of_services"], cur),
             ),
             Fact(
                 f"operating_expense.{p}",
-                f"Operating expenses {p}",
+                f"Operating expenses {name}",
                 _money(r["operating_expense"], cur),
             ),
             Fact(
-                f"operating_profit.{p}", f"Operating profit {p}", _money(r["operating_profit"], cur)
+                f"operating_profit.{p}",
+                f"Operating profit {name}",
+                _money(r["operating_profit"], cur),
             ),
             Fact(
                 f"margin.{p}",
-                f"Operating margin {p}",
+                f"Operating margin {name}",
                 "undefined (no revenue)" if m is None else f"{Decimal(m):.1f}%",
             ),
         ]
-    change = engine.latest_change(state)
+    if len(metrics) > 2:
+        for key, label in (("revenue", "Revenue"), ("operating_profit", "Operating profit")):
+            out.append(
+                Fact(
+                    f"trend.{key}",
+                    f"{label} by month",
+                    " · ".join(
+                        f"{_month(r['period'])[:3]} {Decimal(str(r[key])):,.0f}" for r in metrics
+                    ),
+                )
+            )
+        out.append(
+            Fact(
+                "trend.margin",
+                "Operating margin by month",
+                " · ".join(
+                    f"{_month(r['period'])[:3]} "
+                    + ("-" if r.get("margin_pct") is None else f"{Decimal(r['margin_pct']):.1f}%")
+                    for r in metrics
+                ),
+            )
+        )
     if change:
-        span = f"{change['from']} → {change['to']}"
+        span = f"{_month(change['from']).split()[0]} → {_month(change['to'])}"
         out += [
             Fact(
                 "change.revenue",
@@ -214,7 +263,8 @@ def facts(state: dict[str, Any]) -> list[Fact]:
         ]
         if change.get("outlier"):
             out.append(Fact("change.outlier", "Revenue outlier flag", "revenue moved 10% or more"))
-        for i, d in enumerate(change.get("revenue_drivers", []), start=1):
+        movers = [d for d in change.get("revenue_drivers", []) if Decimal(str(d["change"])) != 0]
+        for i, d in enumerate(movers, start=1):
             docs = ", ".join(
                 t["document_ref"] or t["id"]
                 for t in d["transactions"]
@@ -228,6 +278,8 @@ def facts(state: dict[str, Any]) -> list[Fact]:
                 )
             )
         for d in change.get("cost_drivers", []):
+            if Decimal(str(d["change"])) == 0:
+                continue  # unchanged: nothing to explain
             vendors = ", ".join(
                 f"{v['counterparty']} {_money(v['change'], cur)}"
                 for v in d["contributors"][:3]

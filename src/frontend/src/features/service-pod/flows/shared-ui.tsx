@@ -36,9 +36,9 @@ export function InvoiceTable({ rows, currency }: { rows: InvoiceState[]; currenc
 
 export function Kpi({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="rounded-lg border bg-card p-4">
-      <p className="text-xs tracking-wide text-muted-foreground uppercase">{label}</p>
-      <p className="mt-1 text-2xl font-bold text-brand-navy tabular-nums">{value}</p>
+    <div className="rounded-lg border border-border/70 bg-card px-3.5 py-3 shadow-2xs">
+      <p className="text-[11px] font-semibold tracking-wider text-muted-foreground uppercase">{label}</p>
+      <p className="mt-1 text-xl font-bold tracking-tight text-foreground tabular-nums">{value}</p>
     </div>
   )
 }
@@ -46,8 +46,8 @@ export function Kpi({ label, value }: { label: string; value: string | number })
 export function SourceLine({ snapshot }: { snapshot: Snapshot | null }) {
   if (!snapshot) return null
   return (
-    <p className="mb-4 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-      Source: {snapshot.company_name} · {snapshot.entity.code} · as of {snapshot.as_of} · {snapshot.basis}
+    <p className="mb-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+      Source: <span className="font-medium text-foreground">{snapshot.company_name}</span> · {snapshot.entity.code} · as of {snapshot.as_of} · {snapshot.basis}
       {snapshot.is_demo && <DemoBadge />}
     </p>
   )
@@ -55,18 +55,18 @@ export function SourceLine({ snapshot }: { snapshot: Snapshot | null }) {
 
 export type Check = "done" | "waiting" | "na" | "failed"
 const ICON: Record<Check, ReactNode> = {
-  done: <CircleCheck className="size-4 text-emerald-700" aria-label="done" />,
-  waiting: <CircleDashed className="size-4 text-amber-700" aria-label="waiting" />,
-  na: <CircleMinus className="size-4 text-muted-foreground" aria-label="not applicable" />,
-  failed: <CircleX className="size-4 text-red-700" aria-label="failed" />,
+  done: <CircleCheck className="size-3.5 text-emerald-600 mt-0.5" aria-label="done" />,
+  waiting: <CircleDashed className="size-3.5 text-amber-600 mt-0.5" aria-label="waiting" />,
+  na: <CircleMinus className="size-3.5 text-muted-foreground mt-0.5" aria-label="not applicable" />,
+  failed: <CircleX className="size-3.5 text-red-600 mt-0.5" aria-label="failed" />,
 }
 
 /** One line of a checklist: state icon, what, detail. */
 export function CheckRow({ state, label, children }: { state: Check; label: string; children: ReactNode }) {
   return (
-    <li className="grid grid-cols-[20px_120px_1fr] items-start gap-2 py-1.5">
+    <li className="grid grid-cols-[18px_110px_1fr] items-start gap-2 py-1 text-xs">
       {ICON[state]}
-      <span className="font-medium">{label}</span>
+      <span className="font-semibold text-foreground">{label}</span>
       <span className="text-muted-foreground">{children}</span>
     </li>
   )

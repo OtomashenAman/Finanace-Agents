@@ -22,44 +22,65 @@ function OpenReceipt({ row, snapshot }: { row: BankWorklist["rows"][number]; sna
   const customers = useSnapshotRows(row.matched_customer_id ? null : snapshot.id, "customers")
   const [customerId, setCustomerId] = useState(row.matched_customer_id ?? "")
   const [confirmation, setConfirmation] = useState("")
+  const needsConfirmation = !row.matched_customer_id
+  const hasValidConfirmation = !needsConfirmation || confirmation.trim().length >= 10
+
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      {!row.matched_customer_id && (
-        <>
-          <select className={`${selectClass} w-auto`} value={customerId} onChange={(e) => setCustomerId(e.target.value)} aria-label="Customer">
-            <option value="">Which customer paid…</option>
-            {customers.data?.rows.map((c) => (
-              <option key={String(c.id)} value={String(c.id)}>
-                {String(c.name)}
-              </option>
-            ))}
-          </select>
-          <Input className="h-10 max-w-xs" placeholder="How you verified the payer" value={confirmation} onChange={(e) => setConfirmation(e.target.value)} />
-        </>
+    <div className="flex flex-col gap-1.5">
+      <div className="flex flex-wrap items-center gap-2">
+        {!row.matched_customer_id && (
+          <>
+            <select className={`${selectClass} w-auto text-xs h-8`} value={customerId} onChange={(e) => setCustomerId(e.target.value)} aria-label="Customer">
+              <option value="">Which customer paid…</option>
+              {customers.data?.rows.map((c) => (
+                <option key={String(c.id)} value={String(c.id)}>
+                  {String(c.name)}
+                </option>
+              ))}
+            </select>
+            <Input
+              className="h-8 max-w-xs text-xs"
+              placeholder="How verified (e.g. Remittance advice confirms)"
+              value={confirmation}
+              onChange={(e) => setConfirmation(e.target.value)}
+            />
+          </>
+        )}
+        <Button
+          size="sm"
+          disabled={create.isPending || !customerId || !row.cleared || !hasValidConfirmation}
+          title={
+            !row.cleared
+              ? "Only cleared receipts can be applied"
+              : !hasValidConfirmation
+                ? "Enter at least 10 characters explaining how you verified the payer"
+                : undefined
+          }
+          onClick={() =>
+            void attempt(
+              () =>
+                create.mutateAsync({
+                  workflow: "bank_recon",
+                  snapshot_id: snapshot.id,
+                  title: `${row.reference} · ${row.payer}`,
+                  selection: {
+                    receipt_reference: row.reference,
+                    customer_id: customerId,
+                    ...(confirmation.trim() && { payer_confirmation: confirmation.trim() }),
+                  },
+                }),
+              (c) => `${c.reference} opened.`,
+            ).then((c) => c && void navigate(`/pod/cases/${c.id}`))
+          }
+        >
+          Open case
+        </Button>
+      </div>
+      {needsConfirmation && customerId && !hasValidConfirmation && (
+        <span className="text-[11px] text-amber-800 dark:text-amber-300">
+          * Payer name differs from customer. Enter at least 10 characters in verification note ({confirmation.trim().length}/10).
+        </span>
       )}
-      <Button
-        size="sm"
-        disabled={create.isPending || !customerId || !row.cleared}
-        title={row.cleared ? undefined : "Only cleared receipts can be applied"}
-        onClick={() =>
-          void attempt(
-            () =>
-              create.mutateAsync({
-                workflow: "bank_recon",
-                snapshot_id: snapshot.id,
-                title: `${row.reference} · ${row.payer}`,
-                selection: {
-                  receipt_reference: row.reference,
-                  customer_id: customerId,
-                  ...(confirmation.trim() && { payer_confirmation: confirmation }),
-                },
-              }),
-            (c) => `${c.reference} opened.`,
-          ).then((c) => c && void navigate(`/pod/cases/${c.id}`))
-        }
-      >
-        Open case
-      </Button>
     </div>
   )
 }

@@ -10,7 +10,7 @@ const FOLLOW_UP = "follow_up"
 
 export function InvoicesAndEmail({ c }: { c: CaseDetail }) {
   return (
-    <>
+    <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
       <ArInvoices c={c} />
       <Messages
         c={c}
@@ -22,13 +22,13 @@ export function InvoicesAndEmail({ c }: { c: CaseDetail }) {
         defaultPurpose={REQUEST}
         empty="No email yet: suggest a draft below."
       />
-    </>
+    </div>
   )
 }
 
 export function CustomerReply({ c }: { c: CaseDetail }) {
   return (
-    <>
+    <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
       <Messages
         c={c}
         title="Customer replies"
@@ -39,26 +39,30 @@ export function CustomerReply({ c }: { c: CaseDetail }) {
         empty="No reply imported yet."
       />
       <ReviewTasks c={c} />
-    </>
+    </div>
   )
 }
 
 export function ScheduleAndClose({ c }: { c: CaseDetail }) {
   return (
-    <>
+    <div className="space-y-4">
       <Commitments c={c} />
-      <ArFollowThrough c={c} />
-      <ArHandover c={c} />
-      <Messages
-        c={c}
-        title="Follow-up reply"
-        hint="e.g. documents attached, or asking for a missing date."
-        filter={(m) => m.direction === "outbound" && m.purpose === FOLLOW_UP}
-        importReplies={false}
-        purposes={PURPOSES}
-        defaultPurpose={FOLLOW_UP}
-        empty="No follow-up yet."
-      />
-    </>
+      <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+        <div className="space-y-4">
+          <ArFollowThrough c={c} />
+          <ArHandover c={c} />
+        </div>
+        <Messages
+          c={c}
+          title="Follow-up reply"
+          hint="e.g. documents attached, or asking for a missing date."
+          filter={(m) => m.direction === "outbound" && m.purpose === FOLLOW_UP}
+          importReplies={false}
+          purposes={PURPOSES}
+          defaultPurpose={FOLLOW_UP}
+          empty="No follow-up yet."
+        />
+      </div>
+    </div>
   )
 }

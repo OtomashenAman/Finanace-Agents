@@ -72,20 +72,22 @@ class AiStatement(BaseModel):
     fact_ids: list[str] = Field(description="IDs of the facts this sentence relies on")
 
 
-class AiAction(BaseModel):
-    kind: Literal["validate", "investigate", "approve"] = Field(
-        description="validate a business explanation, investigate a movement, approve commentary"
+class AiFollowUp(BaseModel):
+    kind: Literal["question", "validate", "investigate"] = Field(
+        description="question: something the figures can't answer; validate: a business "
+        "explanation to confirm; investigate: a movement to look into"
     )
-    text: str = Field(description="What to do; no digits, currency or percent signs")
+    text: str = Field(description="One sentence; no digits, currency or percent signs")
     fact_ids: list[str] = Field(description="IDs of the facts it concerns")
 
 
 class FpaCommentary(BaseModel):
-    highlights: list[AiStatement] = Field(description="At most 8 cited findings")
-    questions: list[AiStatement] = Field(
-        description="At most 4 open questions the figures can't answer"
+    highlights: list[AiStatement] = Field(
+        description="Two to four findings about the latest month against the month before"
     )
-    actions: list[AiAction] = Field(description="At most 4 recommended follow-ups")
+    follow_ups: list[AiFollowUp] = Field(
+        description="At most three open questions or checks for the Finance Head"
+    )
 
 
 # --- the workflow's home screen ---------------------------------------------------------

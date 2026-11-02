@@ -1,6 +1,6 @@
-"""The Finance Head commentary drafted by AI: findings, open questions and recommended
-follow-ups, each citing the engine's facts. The model never states a figure itself (TDD:
-no digits, currency or percent signs); the screen shows the cited facts' values."""
+"""The Finance Head commentary drafted by AI: a few findings and at most three follow-ups
+(open questions or checks), each citing the engine's facts. The model never states a figure
+itself (TDD: no digits, currency or percent signs); the screen shows the cited values."""
 
 import uuid
 
@@ -15,15 +15,16 @@ from src.app.service_pod.core.access.service import PodAccess
 from src.app.service_pod.core.cases import system
 from src.app.service_pod.core.cases.access import load_case
 from src.app.service_pod.core.cases.exceptions import CaseActionError
-from src.app.service_pod.core.cases.models import CaseStatus, ReviewTaskKind
+from src.app.service_pod.core.cases.models import CaseStatus
 from src.app.service_pod.core.cases.schemas import CaseDetail
 from src.app.service_pod.core.cases.service import get_case
 from src.app.service_pod.core.workflows import WorkflowKey
 from src.app.service_pod.flows.fpa_trend.schemas import AiStatement, FpaCommentary
 from src.app.service_pod.flows.fpa_trend.service import facts
 
-PROMPT_VERSION = "fpa_commentary/v2"
-MAX = {"highlights": 8, "questions": 4, "actions": 4}
+PROMPT_VERSION = "fpa_commentary/v3"
+# Short on purpose: the Finance Head reads the findings, the screens hold the detail
+MAX = {"highlights": 4, "follow_ups": 3}
 
 SYSTEM = (
     "You are an FP&A analyst writing for the Finance Head. You explain month-on-month "
@@ -33,12 +34,15 @@ SYSTEM = (
     "partly offset, and cite the fact; its figure is shown beside your sentence. Refer to "
     "months by name only (August, September), never as dates or with a year. Name the "
     "customers, vendors and accounts the facts name. Don't speculate about causes the facts "
-    "don't show: ask an open question instead. Mention data caveats."
+    "don't show: ask an open question instead. Be brief: only what matters, never a line that "
+    "is zero or unchanged, and cite at most three facts per sentence."
 )
 ASK = (
-    "Write the findings (what moved and which contributors explain it), open questions the "
-    "figures can't answer (e.g. whether new revenue is recurring), and recommended follow-ups "
-    "(validate an explanation, investigate a movement, approve the commentary)."
+    "Write two to four findings about the latest month against the month before: what moved "
+    "and which contributors explain it (use the trend facts only if the longer trend matters). "
+    "Then at most three follow-ups: open questions the figures can't answer (e.g. whether new "
+    "revenue is recurring) or checks to make. Mention a data caveat only if it changes the "
+    "reading. The Finance Head signs off separately: don't suggest approving the commentary."
 )
 
 
@@ -47,7 +51,7 @@ class CommentaryUnavailableError(AppError):
     code = "commentary_unavailable"
 
 
-NAMES = {"highlights": "finding", "questions": "question", "actions": "follow-up"}
+NAMES = {"highlights": "finding", "follow_ups": "follow-up"}
 ATTEMPTS = 2  # a rejected draft is retried once, told what was wrong; never let through
 
 
@@ -127,18 +131,12 @@ async def draft_commentary(
                 "facts": [vars(f) for f in cited],
                 "provenance": result.provenance.as_dict(),
             },
-            "recommended_actions": [a.model_dump() for a in out.actions],
+            # Questions and checks stay with the commentary: they don't block the sign-off
+            # and aren't review tasks; one can be tracked as an owned action
+            "follow_ups": [f.model_dump() for f in out.follow_ups],
+            "recommended_actions": None,
         }
     )
-    for q in out.questions:
-        system.raise_task(
-            session,
-            case,
-            ReviewTaskKind.AMBIGUITY,
-            f"Open question: {q.text}",
-            subject="Finance Head question",
-            blocking=False,
-        )
     system.bump_case(
         session, case, "pod.fpa_commentary", "AI drafted the commentary", actor_id=access.user.id
     )

@@ -40,6 +40,7 @@ export function CaseAudit({ c }: { c: CaseDetail }) {
 export function CaseData({ c }: { c: CaseDetail }) {
   const { run, pending } = useRunAction(c)
   const [editing, setEditing] = useState(false)
+  const [showRaw, setShowRaw] = useState(false)
   const [text, setText] = useState("")
   const json = JSON.stringify({ selection: c.selection, state: c.state }, null, 2)
   return (
@@ -90,7 +91,17 @@ export function CaseData({ c }: { c: CaseDetail }) {
           </div>
         </form>
       ) : (
-        <pre className="max-h-64 overflow-auto rounded bg-secondary/40 p-3 text-xs">{json}</pre>
+        <div className="space-y-2">
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span>State & selections ({Object.keys(c.selection ?? {}).length} selections)</span>
+            <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setShowRaw(!showRaw)}>
+              {showRaw ? "Hide Raw JSON" : "View Raw JSON"}
+            </Button>
+          </div>
+          {showRaw && (
+            <pre className="max-h-64 overflow-auto rounded border border-border/60 bg-muted/40 p-3 text-[11px] font-mono leading-relaxed">{json}</pre>
+          )}
+        </div>
       )}
     </Card>
   )

@@ -192,15 +192,17 @@ COMMENTARY = {
             "fact_ids": ["cost_driver.A5000", "change.margin"],
         },
     ],
-    "questions": [
-        {"text": "Is the new Fabrikam revenue recurring?", "fact_ids": ["revenue_driver.1"]}
-    ],
-    "actions": [
+    "follow_ups": [
+        {
+            "kind": "question",
+            "text": "Is the new Fabrikam revenue recurring?",
+            "fact_ids": ["revenue_driver.1"],
+        },
         {
             "kind": "investigate",
             "text": "Investigate the subcontractor rate increase.",
             "fact_ids": ["cost_driver.A5000"],
-        }
+        },
     ],
 }
 
@@ -252,9 +254,9 @@ async def test_case_runs_from_analysis_to_finance_head_sign_off(
     assert r.status_code == 200, r.text
     case = r.json()
     assert case["state"]["commentary"]["by"] == "ai"
-    assert case["state"]["recommended_actions"][0]["kind"] == "investigate"
-    (question,) = case["review_tasks"]
-    assert question["blocking"] is False and "recurring" in question["detail"]
+    # Questions and checks stay with the commentary: no review tasks, nothing in My Queue
+    assert [f["kind"] for f in case["state"]["follow_ups"]] == ["question", "investigate"]
+    assert case["review_tasks"] == []
     assert case["stage"] == "signoff"
     assert case["allowed_actions"]["approve"] is None
 
@@ -510,3 +512,24 @@ async def test_a_rejected_draft_is_retried_once_with_the_reason(
     assert r.status_code == 200, r.text
     assert "previous draft was rejected" in fake_llm.calls[1][1]
     assert "sixty thousand" in fake_llm.calls[1][1]
+
+
+async def test_commentary_is_short(
+    pod: AsyncClient, fpa_snapshot: dict[str, Any], fake_llm: FakeLLM
+) -> None:
+    case = await _open(pod, fpa_snapshot)
+    long = copy.deepcopy(COMMENTARY)
+    long["highlights"] = long["highlights"] * 3  # six findings: more than four
+    fake_llm.output = long
+    r = await _commentary(pod, case)
+    assert r.status_code == 422
+    assert "more than 4 highlights" in r.json()["detail"]["message"]
+
+
+def test_facts_skip_what_did_not_move() -> None:
+    from src.app.service_pod.common.canonical import plain
+    from src.app.service_pod.flows.fpa_trend.service import facts
+
+    ids = {f.id for f in facts(plain(compute(_doc(), FULL)))}
+    assert {"revenue.2026-04", "revenue.2026-09", "trend.revenue", "trend.margin"} <= ids
+    assert "revenue_driver.4" not in ids  # Harbor didn't move: not a driver to explain

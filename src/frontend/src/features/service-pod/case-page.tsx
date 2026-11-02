@@ -20,25 +20,29 @@ function Header({ c, next }: { c: CaseDetail; next?: NextAction }) {
   // Workflows with steps say where the work stands; others show the case's own status
   const [label, tone] = next ? CASE_PHASE[next.phase] : CASE_STATUS[c.status]
   return (
-    <div className="rounded-lg border bg-card px-5 py-4">
-      <p className="mb-1.5 flex items-center gap-1 text-xs text-muted-foreground">
-        <Link to="/pod/cases" className="inline-flex items-center gap-1 hover:text-foreground">
-          <ArrowLeft className="size-3" aria-hidden /> Cases
-        </Link>
-        <ChevronRight className="size-3" aria-hidden />
-        <Link to={`/pod/cases?workflow=${WORKFLOW_SLUG[c.workflow]}`} className="hover:text-foreground">
-          {WORKFLOW_SHORT[c.workflow]}
-        </Link>
-      </p>
-      <p className="flex flex-wrap items-center gap-2">
-        <span className="text-lg font-bold text-brand-navy">{c.reference}</span>
-        <span className="text-lg">{c.title}</span>
-        <Pill label={label} tone={tone} />
-        {c.is_demo && <DemoBadge />}
-      </p>
-      <p className="mt-1 text-xs text-muted-foreground">
-        {c.entity.code} · opened by {c.owner.name} · data from {c.snapshot.company_name} as of {c.snapshot.as_of}
-      </p>
+    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 rounded-lg border border-border/70 bg-card px-4 py-3 shadow-2xs">
+      <div className="space-y-1">
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Link to="/pod/cases" className="inline-flex items-center gap-1 hover:text-foreground transition-colors">
+            <ArrowLeft className="size-3" aria-hidden /> Cases
+          </Link>
+          <ChevronRight className="size-3 opacity-60" aria-hidden />
+          <Link to={`/pod/cases?workflow=${WORKFLOW_SLUG[c.workflow]}`} className="hover:text-foreground font-medium transition-colors">
+            {WORKFLOW_SHORT[c.workflow]}
+          </Link>
+          <ChevronRight className="size-3 opacity-60" aria-hidden />
+          <span className="font-semibold text-foreground">{c.reference}</span>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <h1 className="text-base font-bold tracking-tight text-brand-navy dark:text-foreground">{c.title}</h1>
+          <Pill label={label} tone={tone} />
+          {c.is_demo && <DemoBadge />}
+        </div>
+      </div>
+      <div className="text-xs text-muted-foreground sm:text-right shrink-0 border-t sm:border-t-0 pt-1.5 sm:pt-0 border-border/40">
+        <div><span className="font-medium text-foreground">{c.entity.code}</span> · {c.snapshot.company_name}</div>
+        <div className="text-[11px] text-muted-foreground/80">Data as of {c.snapshot.as_of} · Opened by {c.owner.name}</div>
+      </div>
     </div>
   )
 }
@@ -56,7 +60,7 @@ export function CasePage() {
       {isPending && <Loading what="the case" />}
       {isError && <LoadError what="this case (it may not exist or isn't yours)" />}
       {c && (
-        <div className="space-y-5">
+        <div className="space-y-4">
           <Header c={c} next={next} />
           <RefreshSource c={c} />
           {flow?.steps && next ? (

@@ -114,7 +114,10 @@ export interface FpaState {
     facts: FpaFact[]
     provenance?: { model: string; prompt_version: string }
   } | null
-  recommended_actions?: (FpaStatement & { kind: "validate" | "investigate" | "approve" })[]
+  /** The AI's open questions and checks (v3 commentary) */
+  follow_ups?: (FpaStatement & { kind: "question" | "validate" | "investigate" })[] | null
+  /** Older commentary's follow-ups (before questions and checks were merged) */
+  recommended_actions?: (FpaStatement & { kind: "validate" | "investigate" | "approve" })[] | null
   mapping_review?: { by: string; at: string; note: string | null; accounts: number } | null
   corrections?: FpaCorrection[]
 }

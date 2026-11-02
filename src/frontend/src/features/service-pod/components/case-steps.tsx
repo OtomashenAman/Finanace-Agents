@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react"
 import { Link, useSearchParams } from "react-router"
-import { ArrowRight, Check, ChevronDown, CircleCheck, Hourglass } from "lucide-react"
+import { ArrowRight, Check, CircleCheck, Hourglass } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -77,37 +77,41 @@ function NextCard({ c, next, onGo }: { c: CaseDetail; next: NextAction; onGo: (s
   const canApprove = c.status === "draft" && a.approve === null
   const canComplete = c.status === "approved" && a.complete === null
   return (
-    <section aria-label="What's next" className={cn("rounded-lg border p-5", next.kind === "do" ? "border-primary/40 bg-primary/5" : "bg-card")}>
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold text-brand-navy">What&apos;s next</h2>
-        <Pill label={label} tone={tone} />
-      </div>
-      <p className="flex gap-2 text-sm">
-        <Icon className={cn("mt-0.5 size-4 shrink-0", next.kind === "do" ? "text-primary" : "text-muted-foreground")} aria-hidden />
-        <span>{next.text}</span>
-      </p>
-      <div className="mt-3 flex flex-wrap gap-2">
-        {canApprove ? (
-          <Button size="sm" disabled={pending} onClick={() => void run("approve", {}, signoff === "Finance Admin" ? "Case approved." : `Signed off as ${signoff}.`)}>
-            {signoff === "Finance Admin" ? "Approve case" : `Sign off as ${signoff}`}
-          </Button>
-        ) : canComplete ? (
-          <Button size="sm" disabled={pending} onClick={() => void run("complete", {}, "Case completed.")}>
-            Complete case
-          </Button>
-        ) : (
-          next.step &&
-          next.kind === "do" && (
-            <Button size="sm" onClick={() => onGo(next.step!)}>
-              Go to it <ArrowRight />
+    <section aria-label="What's next" className={cn("rounded-lg border p-4 shadow-2xs transition-shadow", next.kind === "do" ? "border-primary/50 bg-primary/5 dark:bg-primary/10" : "border-border/70 bg-card")}>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">What&apos;s next</span>
+            <Pill label={label} tone={tone} />
+          </div>
+          <p className="flex items-start gap-2 text-sm">
+            <Icon className={cn("mt-0.5 size-4 shrink-0", next.kind === "do" ? "text-primary" : "text-muted-foreground")} aria-hidden />
+            <span className="font-medium text-foreground">{next.text}</span>
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          {canApprove ? (
+            <Button size="sm" className="shadow-xs font-semibold px-4" disabled={pending} onClick={() => void run("approve", {}, signoff === "Finance Admin" ? "Case approved." : `Signed off as ${signoff}.`)}>
+              {signoff === "Finance Admin" ? "Approve case" : `Sign off as ${signoff}`}
             </Button>
-          )
-        )}
+          ) : canComplete ? (
+            <Button size="sm" className="shadow-xs font-semibold px-4" disabled={pending} onClick={() => void run("complete", {}, "Case completed.")}>
+              Complete case
+            </Button>
+          ) : (
+            next.step &&
+            next.kind === "do" && (
+              <Button size="sm" className="shadow-xs font-medium" onClick={() => onGo(next.step!)}>
+                Go to step <ArrowRight className="size-3.5" />
+              </Button>
+            )
+          )}
+        </div>
       </div>
       {c.status === "draft" && !canApprove && c.blockers.length > 0 && (
-        <div className="mt-4 border-t pt-3 text-xs">
-          <p className="mb-1 font-medium">Before it can be approved:</p>
-          <ul className="list-disc space-y-0.5 pl-4 text-muted-foreground">
+        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50/70 p-2.5 text-xs dark:border-amber-900/60 dark:bg-amber-950/30">
+          <p className="mb-1 font-semibold text-amber-900 dark:text-amber-200">Before approval:</p>
+          <ul className="list-disc space-y-0.5 pl-4 text-amber-800/90 dark:text-amber-300/80">
             {c.blockers.map((b) => (
               <li key={b}>{b}</li>
             ))}
@@ -115,9 +119,9 @@ function NextCard({ c, next, onGo }: { c: CaseDetail; next: NextAction; onGo: (s
         </div>
       )}
       {c.status === "approved" && !canComplete && c.completion_blockers.length > 0 && (
-        <div className="mt-4 border-t pt-3 text-xs">
-          <p className="mb-1 font-medium">Before it can be completed:</p>
-          <ul className="list-disc space-y-0.5 pl-4 text-muted-foreground">
+        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50/70 p-2.5 text-xs dark:border-amber-900/60 dark:bg-amber-950/30">
+          <p className="mb-1 font-semibold text-amber-900 dark:text-amber-200">Before completion:</p>
+          <ul className="list-disc space-y-0.5 pl-4 text-amber-800/90 dark:text-amber-300/80">
             {c.completion_blockers.map((b) => (
               <li key={b}>{b}</li>
             ))}
@@ -125,7 +129,7 @@ function NextCard({ c, next, onGo }: { c: CaseDetail; next: NextAction; onGo: (s
         </div>
       )}
       {c.approvals.length > 0 && (
-        <ul className="mt-4 space-y-1 border-t pt-3 text-xs">
+        <ul className="mt-2.5 space-y-1 border-t border-border/50 pt-2 text-xs text-muted-foreground">
           {c.approvals.map((ap) => (
             <li key={ap.id} className={ap.valid ? "" : "text-muted-foreground line-through"}>
               {ap.capacity === "Finance Admin" ? "Approved" : `Signed off as ${ap.capacity}`} by {ap.user.name} · {formatDateTime(ap.created_at)}
@@ -140,14 +144,7 @@ function NextCard({ c, next, onGo }: { c: CaseDetail; next: NextAction; onGo: (s
 
 type StepState = "done" | "current" | "upcoming"
 
-const STEP_DOT: Record<StepState, string> = {
-  done: "bg-emerald-600 text-white",
-  current: "bg-primary text-primary-foreground ring-4 ring-primary/15",
-  upcoming: "border-2 border-border bg-card text-muted-foreground",
-}
-
-/** A case as one timeline: every step in order, done ones folded with a summary, the current one
- *  open. The "What's next" card beside it holds the one action (and approve / complete). */
+/** One step view at a time with clean top stepper and top action banner. */
 export function CaseSteps({
   c,
   steps,
@@ -162,74 +159,112 @@ export function CaseSteps({
   /** More cards under "What's next" (e.g. related cases) */
   aside?: ReactNode
 }) {
-  // ?step= (from a worklist) opens that step; otherwise the current one is open. A click overrides.
   const [params] = useSearchParams()
   const asked = params.get("step")
-  const [toggled, setToggled] = useState<Record<string, boolean>>({})
-  const current = next.kind === "done" ? steps.length : Math.max(0, steps.findIndex((s) => s.key === next.step))
-  const stateOf = (i: number): StepState => (i < current ? "done" : i === current ? "current" : "upcoming")
-  const isOpen = (key: string, i: number) => toggled[key] ?? (asked ? key === asked : stateOf(i) === "current")
+  const currentIdx = next.kind === "done" ? steps.length - 1 : Math.max(0, steps.findIndex((s) => s.key === next.step))
+  
+  // Default to asked step, or next action step, or first step
+  const initialKey = asked ?? (next.step && steps.some((s) => s.key === next.step) ? next.step : steps[currentIdx]?.key ?? steps[0]?.key ?? "")
+  const [activeKey, setActiveKey] = useState<string>(initialKey)
+  
+  const stateOf = (i: number): StepState => (i < currentIdx ? "done" : i === currentIdx ? "current" : "upcoming")
+  const activeStepIdx = Math.max(0, steps.findIndex((s) => s.key === activeKey))
+  const activeStep = steps[activeStepIdx] ?? steps[0]!
+
   const go = (key: string) => {
-    setToggled((t) => ({ ...t, [key]: true }))
-    requestAnimationFrame(() => document.getElementById(`step-${key}`)?.scrollIntoView({ behavior: "smooth", block: "start" }))
+    setActiveKey(key)
   }
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-      <ol aria-label="Case timeline" className="space-y-0">
+    <div className="space-y-4">
+      {/* 1. TOP PROMINENT ACTION BANNER - Always visible without scrolling */}
+      <NextCard c={c} next={next} onGo={go} />
+
+      {/* 2. INTERACTIVE STEPPER TABS */}
+      <div className="flex items-center gap-1.5 overflow-x-auto rounded-lg border border-border/70 bg-card p-1.5 shadow-2xs">
         {steps.map((s, i) => {
           const state = stateOf(i)
-          const open = isOpen(s.key, i)
-          const count = s.badge?.(c) ?? 0
-          const summary = state !== "upcoming" ? s.summary?.(c) : null
+          const isSelected = s.key === activeKey
+          const badge = s.badge?.(c) ?? 0
           return (
-            <li key={s.key} id={`step-${s.key}`} className="relative scroll-mt-4 pb-6 pl-10">
-              {i < steps.length - 1 && <span aria-hidden className="absolute top-8 bottom-0 left-[13px] w-px bg-border" />}
-              <span
-                aria-hidden
-                className={cn("absolute top-1 left-0 flex size-7 items-center justify-center rounded-full text-xs font-semibold", STEP_DOT[state])}
-              >
-                {state === "done" ? <Check className="size-4" /> : i + 1}
-              </span>
-              <button
-                type="button"
-                aria-expanded={open}
-                onClick={() => setToggled((t) => ({ ...t, [s.key]: !open }))}
-                className="flex w-full items-center gap-2 py-1.5 text-left"
-              >
-                <span className={cn("font-semibold", state === "upcoming" ? "text-muted-foreground" : "text-brand-navy")}>{s.label}</span>
-                {state === "current" && <span className="rounded bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">Now</span>}
-                {count > 0 && <span className="rounded-full bg-amber-100 px-1.5 text-xs text-amber-900">{count}</span>}
-                <ChevronDown className={cn("ml-auto size-4 text-muted-foreground transition-transform", open && "rotate-180")} aria-hidden />
-              </button>
-              {!open && summary && <p className="text-sm text-muted-foreground">{summary}</p>}
-              {!open && state === "upcoming" && <p className="text-sm text-muted-foreground">Comes after the steps above.</p>}
-              {open && (
-                <div className="mt-2 space-y-6">
-                  <s.Body c={c} />
-                </div>
+            <button
+              key={s.key}
+              type="button"
+              onClick={() => go(s.key)}
+              className={cn(
+                "flex items-center gap-2 rounded-md px-3.5 py-2 text-xs font-medium transition-all shrink-0 cursor-pointer",
+                isSelected
+                  ? "bg-primary text-primary-foreground shadow-xs font-semibold"
+                  : state === "done"
+                    ? "bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground",
               )}
-            </li>
+            >
+              <span
+                className={cn(
+                  "flex size-4.5 items-center justify-center rounded-full text-[10px] font-bold",
+                  isSelected
+                    ? "bg-primary-foreground/20 text-primary-foreground"
+                    : state === "done"
+                      ? "bg-emerald-200 text-emerald-900 dark:bg-emerald-800 dark:text-emerald-100"
+                      : "bg-muted text-muted-foreground",
+                )}
+              >
+                {state === "done" ? <Check className="size-2.5" /> : i + 1}
+              </span>
+              <span>{s.label}</span>
+              {badge > 0 && (
+                <span
+                  className={cn(
+                    "rounded-full px-1.5 py-0.2 text-[10px] font-bold",
+                    isSelected ? "bg-primary-foreground/30 text-primary-foreground" : "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200",
+                  )}
+                >
+                  {badge}
+                </span>
+              )}
+            </button>
           )
         })}
-        <li className="pl-10">
-          <details className="group rounded-lg border bg-card">
-            <summary className="cursor-pointer px-5 py-3 text-sm font-medium text-muted-foreground hover:text-foreground">
-              Documents, actions and audit details
-            </summary>
-            <div className="space-y-6 border-t p-5">
-              <Artifacts c={c} />
-              <OwnedActions c={c} />
-              {!ownsPosting && <PostingTasks c={c} />}
-              <CaseData c={c} />
-              <CaseAudit c={c} />
-            </div>
-          </details>
-        </li>
-      </ol>
-      <div className="space-y-6 xl:sticky xl:top-4 xl:self-start">
-        <NextCard c={c} next={next} onGo={go} />
-        {aside}
+      </div>
+
+      {/* 3. ACTIVE STEP WORKSPACE - Only renders the active step, zero clutter! */}
+      <div className="space-y-4">
+        <section aria-label={activeStep.label} className="space-y-4">
+          <activeStep.Body c={c} />
+        </section>
+
+        {/* Step navigation buttons (Prev / Next) */}
+        <div className="flex items-center justify-between border-t border-border/60 pt-3">
+          {activeStepIdx > 0 ? (
+            <Button size="sm" variant="outline" onClick={() => go(steps[activeStepIdx - 1]!.key)}>
+              ← Previous: {steps[activeStepIdx - 1]!.label}
+            </Button>
+          ) : <div />}
+          {activeStepIdx < steps.length - 1 && (
+            <Button size="sm" variant="outline" onClick={() => go(steps[activeStepIdx + 1]!.key)}>
+              Next: {steps[activeStepIdx + 1]!.label} →
+            </Button>
+          )}
+        </div>
+
+        {/* Optional Aside Content (e.g. Related Cases) */}
+        {aside && <div className="pt-2">{aside}</div>}
+
+        {/* 4. COLLAPSIBLE TECHNICAL DETAILS & AUDIT */}
+        <details className="group rounded-lg border border-border/70 bg-card shadow-2xs">
+          <summary className="cursor-pointer px-4 py-2.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors flex items-center justify-between">
+            <span>Documents, actions and audit details</span>
+            <span className="text-[11px] text-muted-foreground/70">Click to expand</span>
+          </summary>
+          <div className="space-y-4 border-t border-border/60 p-4">
+            <Artifacts c={c} />
+            <OwnedActions c={c} />
+            {!ownsPosting && <PostingTasks c={c} />}
+            <CaseData c={c} />
+            <CaseAudit c={c} />
+          </div>
+        </details>
       </div>
     </div>
   )

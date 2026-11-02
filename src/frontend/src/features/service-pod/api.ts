@@ -338,6 +338,11 @@ export type CaseActionName =
   | "refresh_source"
   | "set_allocation"
   | "create_posting_task"
+  | "set_commentary"
+  | "confirm_mapping"
+  | "propose_correction"
+  | "withdraw_correction"
+  | "queue_correction"
 
 export interface CaseDetail extends CaseSummary {
   snapshot: Snapshot

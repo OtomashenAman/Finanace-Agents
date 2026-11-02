@@ -41,7 +41,7 @@ async def fpa_commentary(
     access: PodAccessDep,
     llm: LLM,
 ) -> CaseDetail:
-    """AI drafts the findings, open questions and follow-ups, citing the engine's facts."""
+    """AI drafts a few findings and at most three follow-ups, citing the engine's facts."""
     return await narrative.draft_commentary(session, access, case_id, body.expected_version, llm)
 
 

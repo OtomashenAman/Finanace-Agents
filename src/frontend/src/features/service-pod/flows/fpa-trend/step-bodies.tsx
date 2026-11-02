@@ -18,7 +18,7 @@ import { attempt, selectClass } from "../../ui"
 import { useRunAction } from "../../use-run-action"
 import { CheckRow } from "../shared-ui"
 import { BridgeChart, TrendChart } from "./charts"
-import type { FpaChange, FpaContributor, FpaState } from "./meta"
+import type { FpaChange, FpaContributor, FpaFact, FpaState } from "./meta"
 import { amount, blockingIssues, fpaState, marginLabel, monthLabel, pct, signed } from "./meta"
 
 /** A figure tile sized for four across the case column (amounts stay on one line). */
@@ -493,6 +493,30 @@ function CommentaryCta({ c }: { c: CaseDetail }) {
   )
 }
 
+/** The cited figures under a sentence: two shown, the rest on request. */
+function FactChips({ ids, facts }: { ids: string[]; facts: Map<string, FpaFact> }) {
+  const [all, setAll] = useState(false)
+  if (!ids.length) return null
+  const shown = all ? ids : ids.slice(0, 2)
+  return (
+    <p className="mt-1 flex flex-wrap items-center gap-1.5">
+      {shown.map((id) => {
+        const f = facts.get(id)
+        return (
+          <span key={id} className="rounded bg-secondary px-1.5 py-0.5 text-xs" title={id}>
+            {f ? `${f.label}: ${f.value}` : id}
+          </span>
+        )
+      })}
+      {ids.length > 2 && (
+        <button type="button" className="text-xs text-primary hover:underline" onClick={() => setAll(!all)}>
+          {all ? "less" : `+${ids.length - 2} more`}
+        </button>
+      )}
+    </p>
+  )
+}
+
 function Commentary({ c, s }: { c: CaseDetail; s: FpaState }) {
   const draft = useFpaCommentary()
   const { run, pending } = useRunAction(c)
@@ -555,18 +579,7 @@ function Commentary({ c, s }: { c: CaseDetail; s: FpaState }) {
             {cm.highlights.map((h, i) => (
               <li key={i} className="text-sm">
                 <p>{h.text}</p>
-                {h.fact_ids.length > 0 && (
-                  <p className="mt-1 flex flex-wrap gap-1.5">
-                    {h.fact_ids.map((id) => {
-                      const f = facts.get(id)
-                      return (
-                        <span key={id} className="rounded bg-secondary px-1.5 py-0.5 text-xs" title={id}>
-                          {f ? `${f.label}: ${f.value}` : id}
-                        </span>
-                      )
-                    })}
-                  </p>
-                )}
+                <FactChips ids={h.fact_ids} facts={facts} />
               </li>
             ))}
           </ul>
@@ -584,29 +597,45 @@ function inAWeek(): string {
   return new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10)
 }
 
-function Recommended({ c, s }: { c: CaseDetail; s: FpaState }) {
+const FOLLOW_UP: Record<string, [string, "info" | "warn" | "neutral"]> = {
+  question: ["Question", "info"],
+  validate: ["Validate", "info"],
+  investigate: ["Investigate", "warn"],
+}
+
+/** The AI's open questions and checks: they don't block the sign-off; one can be tracked as
+ *  an owned action. */
+function FollowUps({ c, s }: { c: CaseDetail; s: FpaState }) {
   const { run, pending } = useRunAction(c)
-  const recs = s.recommended_actions ?? []
-  if (!recs.length) return null
+  const items = (s.follow_ups ?? s.recommended_actions ?? []).filter((f) => f.kind !== "approve")
+  if (!items.length) return null
   const taken = new Set(c.owned_actions.map((a) => a.title))
   return (
-    <Card title="Recommended follow-ups" hint="Suggested by the AI from the cited facts. Adopt one to track it as an owned action.">
+    <Card title="Questions and follow-ups" hint="From the AI, for the Finance Head. They don't block the sign-off; track one if someone should act on it.">
       <ul className="divide-y">
-        {recs.map((r) => (
-          <li key={r.text} className="flex items-center gap-2 py-2 text-sm">
-            <Pill label={r.kind} tone={r.kind === "investigate" ? "warn" : "info"} />
-            <span className="flex-1">{r.text}</span>
-            {taken.has(r.text) ? (
-              <span className="text-xs text-muted-foreground">Adopted</span>
-            ) : (
-              c.allowed_actions.add_action === null && (
-                <Button size="sm" variant="outline" disabled={pending} onClick={() => void run("add_action", { title: r.text.slice(0, 200), owner_id: c.owner.id, due_date: inAWeek() }, "Follow-up added.")}>
-                  Adopt
-                </Button>
-              )
-            )}
-          </li>
-        ))}
+        {items.map((r) => {
+          const [label, tone] = FOLLOW_UP[r.kind] ?? ["Follow-up", "neutral"]
+          return (
+            <li key={r.text} className="flex items-center gap-2 py-2 text-sm">
+              <Pill label={label} tone={tone} />
+              <span className="flex-1">{r.text}</span>
+              {taken.has(r.text.slice(0, 200)) ? (
+                <span className="text-xs text-muted-foreground">Tracked</span>
+              ) : (
+                c.allowed_actions.add_action === null && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={pending}
+                    onClick={() => void run("add_action", { title: r.text.slice(0, 200), owner_id: c.owner.id, due_date: inAWeek() }, "Tracked as an action.")}
+                  >
+                    Track as action
+                  </Button>
+                )
+              )}
+            </li>
+          )
+        })}
       </ul>
     </Card>
   )
@@ -762,9 +791,10 @@ export function SignOff({ c }: { c: CaseDetail }) {
   return (
     <>
       <Commentary c={c} s={s} />
-      <Recommended c={c} s={s} />
-      <ReviewTasks c={c} />
-      <OwnedActions c={c} />
+      <FollowUps c={c} s={s} />
+      {/* Only what really needs settling (or tracking): no empty cards */}
+      {c.review_tasks.length > 0 && <ReviewTasks c={c} />}
+      {c.owned_actions.length > 0 && <OwnedActions c={c} />}
       <Corrections c={c} s={s} />
       <Exports c={c} />
     </>

@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Archive, ArchiveRestore, FileJson, Landmark, Trash2, Upload } from "lucide-react"
+import { Archive, ArchiveRestore, ChevronDown, ChevronRight, FileJson, Landmark, Trash2, Upload } from "lucide-react"
 
 import { AppPage } from "@/components/layout/app-page"
 import { Button } from "@/components/ui/button"
@@ -119,6 +119,58 @@ function QuickBooksImport() {
       <p className="text-xs text-muted-foreground">
         Copies customers, invoices, payments and accounts as last synced. Nothing is written to QuickBooks.
       </p>
+    </form>
+  )
+}
+
+function BankStatementImport({ snapshots }: { snapshots: Snapshot[] }) {
+  const activeSnapshots = snapshots.filter((s) => !s.archived)
+  const [snapshotId, setSnapshotId] = useState<string>("")
+  const [file, setFile] = useState<File | null>(null)
+  const importCsv = useImportBankStatement()
+
+  const selectedId = snapshotId || activeSnapshots[0]?.id || ""
+
+  if (activeSnapshots.length === 0) {
+    return <Empty>Import or freeze a snapshot first before attaching bank receipts.</Empty>
+  }
+
+  return (
+    <form
+      className="space-y-3"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (file && selectedId)
+          void attempt(() => importCsv.mutateAsync({ snapshotId: selectedId, file }), imported)
+      }}
+    >
+      <Field label="Target snapshot" hint="Which snapshot to attach these bank receipts to">
+        <select
+          className={selectClass}
+          value={selectedId}
+          onChange={(e) => setSnapshotId(e.target.value)}
+        >
+          {activeSnapshots.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.company_name} ({s.source_type.replace("_", " ")}) · {s.as_of}
+              {s.coverage.includes("bank_receipts") ? " [has receipts]" : " [no receipts]"}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field
+        label="Bank statement (CSV)"
+        hint="Headers required: reference, payer, date, amount, currency, cleared."
+      >
+        <Input
+          type="file"
+          accept=".csv,text/csv"
+          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+        />
+      </Field>
+      <Button type="submit" size="sm" disabled={!file || !selectedId || importCsv.isPending}>
+        <Upload /> Attach to snapshot
+      </Button>
     </form>
   )
 }
@@ -293,37 +345,62 @@ export function SourcesPage() {
           {snapshots.isError && <LoadError what="snapshots" />}
           {snapshots.data?.length === 0 && <Empty>No snapshots yet.</Empty>}
           <ul className="divide-y">
-            {snapshots.data?.map((s) => (
-              <li key={s.id} className="py-3">
-                <button type="button" className="w-full text-left" onClick={() => setOpenId(openId === s.id ? null : s.id)}>
-                  <p className="flex flex-wrap items-center gap-2">
-                    <span className="font-semibold text-brand-navy">{s.company_name}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {s.entity.code} · {s.currency} · {s.basis} · as of {s.as_of}
-                    </span>
-                    {s.is_demo && <DemoBadge />}
-                    {s.archived && <Pill label="Archived" tone="neutral" />}
-                  </p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    {s.source_type.replace("_", " ")} · {s.coverage.length} collections · imported by {s.imported_by}{" "}
-                    {formatDateTime(s.imported_at)} · sha256 {shortHash(s.sha256)}
-                    {s.parent_id && " · extends an earlier snapshot"}
-                    {s.used_by_cases > 0 && ` · ${s.used_by_cases} case(s)`}
-                  </p>
-                </button>
-                {openId === s.id && (
-                  <div className="mt-3 space-y-4 rounded-md bg-secondary/30 p-3">
-                    <p className="text-xs break-all text-muted-foreground">Source: {s.source_reference}</p>
-                    <Rows snapshot={s} />
-                    {!s.archived && <BankStatement snapshot={s} />}
-                    <Removal snapshot={s} />
-                  </div>
-                )}
-              </li>
-            ))}
+            {snapshots.data?.map((s) => {
+              const hasReceipts = s.coverage.includes("bank_receipts")
+              const isOpen = openId === s.id
+              return (
+                <li key={s.id} className="py-2">
+                  <button
+                    type="button"
+                    className="flex w-full items-start justify-between gap-3 rounded-lg p-2.5 text-left transition-colors hover:bg-muted/50"
+                    onClick={() => setOpenId(isOpen ? null : s.id)}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="flex flex-wrap items-center gap-2">
+                        <span className="font-semibold text-brand-navy">{s.company_name}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {s.entity.code} · {s.currency} · {s.basis} · as of {s.as_of}
+                        </span>
+                        {s.is_demo && <DemoBadge />}
+                        {s.archived && <Pill label="Archived" tone="neutral" />}
+                        {hasReceipts ? (
+                          <Pill label="Bank receipts ✓" tone="good" />
+                        ) : (
+                          <Pill label="No bank receipts" tone="neutral" />
+                        )}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {s.source_type.replace("_", " ")} · {s.coverage.length} collections · imported by {s.imported_by}{" "}
+                        {formatDateTime(s.imported_at)} · sha256 {shortHash(s.sha256)}
+                        {s.parent_id && " · extends earlier snapshot"}
+                        {s.used_by_cases > 0 && ` · ${s.used_by_cases} case(s)`}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground pt-1">
+                      <span>{isOpen ? "Hide" : "Details"}</span>
+                      {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                    </div>
+                  </button>
+                  {isOpen && (
+                    <div className="mt-2 space-y-4 rounded-md border bg-secondary/20 p-3">
+                      <p className="text-xs break-all text-muted-foreground">Source: {s.source_reference}</p>
+                      <Rows snapshot={s} />
+                      {!s.archived && <BankStatement snapshot={s} />}
+                      <Removal snapshot={s} />
+                    </div>
+                  )}
+                </li>
+              )
+            })}
           </ul>
         </Card>
         <div className="space-y-6">
+          <Card
+            title="Attach bank statement (CSV)"
+            hint="Upload bank statement receipts to run bank-to-invoice reconciliation"
+          >
+            <BankStatementImport snapshots={snapshots.data ?? []} />
+          </Card>
           <Card title="Import an export">
             <JsonImport />
           </Card>

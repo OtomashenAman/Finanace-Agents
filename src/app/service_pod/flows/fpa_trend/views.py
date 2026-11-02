@@ -196,8 +196,8 @@ async def approved_pack(
         "yoy": state.get("yoy"),
         "caveats": state.get("caveats"),
         "commentary": state.get("commentary"),
-        "recommended_actions": state.get("recommended_actions"),
-        "open_questions": [
+        "follow_ups": state.get("follow_ups") or state.get("recommended_actions"),
+        "review_tasks": [
             {"detail": t.detail, "status": t.status, "resolution": t.resolution}
             for t in detail.review_tasks
         ],
