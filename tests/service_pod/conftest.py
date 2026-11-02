@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.auth.models import User, UserRole
 from src.app.entities.models import LegalEntity
-from tests.conftest import ClientFactory, MakeUser
+from tests.conftest import ClientFactory, FakeLLM, MakeUser
 
 CUSTOMER_EMAIL = "ap@harbor.example"
 
@@ -140,3 +140,52 @@ async def open_ar_case(
 @pytest.fixture
 async def ar_case(pod: AsyncClient, snapshot: dict[str, Any]) -> dict[str, Any]:
     return await open_ar_case(pod, snapshot)
+
+
+async def customer_replies(
+    pod: AsyncClient, case: dict[str, Any], llm: FakeLLM, text: str = "Noted, thank you."
+) -> dict[str, Any]:
+    """Mail the customer (outbox) and import their reply, read as saying nothing specific."""
+    draft = (
+        await pod.post(
+            f"/api/v1/pod/cases/{case['id']}/messages",
+            json={
+                "audience": "customer",
+                "purpose": "case_message",
+                "to_email": CUSTOMER_EMAIL,
+                "subject": "Your open invoices",
+                "body": "Please confirm when you will pay.",
+            },
+        )
+    ).json()
+    sent = (
+        await pod.post(
+            f"/api/v1/pod/messages/{draft['id']}/send",
+            json={
+                "expected_version": draft["version"],
+                "checks": {"recipient": True, "mapping": True, "tone": True},
+            },
+        )
+    ).json()
+    llm.output = {
+        "intent": "reply",
+        "tranches": [],
+        "disputes": [],
+        "document_requests": [],
+        "unclear": [],
+    }
+    r = await pod.post(
+        f"/api/v1/pod/cases/{case['id']}/replies",
+        json={"from_email": CUSTOMER_EMAIL, "body": text, "reply_to_message_id": sent["id"]},
+    )
+    assert r.status_code == 201, r.text
+    answered: dict[str, Any] = (await pod.get(f"/api/v1/pod/cases/{case['id']}")).json()
+    return answered
+
+
+@pytest.fixture
+async def answered_ar_case(
+    pod: AsyncClient, ar_case: dict[str, Any], fake_llm: FakeLLM
+) -> dict[str, Any]:
+    """An AR case the customer has answered, with nothing left to settle."""
+    return await customer_replies(pod, ar_case, fake_llm)

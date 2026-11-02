@@ -28,12 +28,15 @@ async def _task_action(client: Any, task: dict[str, Any], action: str, **body: A
 
 
 async def test_posting_lifecycle(
-    pod: AsyncClient, snapshot: dict[str, Any], ar_case: dict[str, Any], entity: LegalEntity
+    pod: AsyncClient,
+    snapshot: dict[str, Any],
+    answered_ar_case: dict[str, Any],
+    entity: LegalEntity,
 ) -> None:
-    url = f"/api/v1/pod/cases/{ar_case['id']}/tasks"
+    url = f"/api/v1/pod/cases/{answered_ar_case['id']}/tasks"
     assert (await pod.post(url, json=TASK)).status_code == 409  # case not approved yet
 
-    case = (await act(pod, ar_case, "approve")).json()
+    case = (await act(pod, answered_ar_case, "approve")).json()
     r = await pod.post(url, json=TASK)
     assert r.status_code == 201, r.text
     task = r.json()

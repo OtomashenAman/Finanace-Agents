@@ -160,7 +160,8 @@ export interface Message {
   approval_checks: ApprovalChecks | null
   /** Replies: what the AI read, with provenance and notes, or why it couldn't */
   extraction: { output?: Record<string, unknown>; provenance?: Record<string, string>; notes?: string[]; error?: string } | null
-  extraction_status: "pending" | "done" | "failed" | "skipped" | null
+  /** case_closed: came after the case closed, kept but not read into it */
+  extraction_status: "pending" | "done" | "failed" | "skipped" | "case_closed" | null
   approved_by: string | null
   approved_at: string | null
   provider: string | null

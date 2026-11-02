@@ -5,7 +5,8 @@ from httpx import AsyncClient
 
 from src.app.core.config import get_settings
 from src.app.service_pod.core.messaging import providers
-from tests.service_pod.conftest import CUSTOMER_EMAIL
+from tests.conftest import FakeLLM
+from tests.service_pod.conftest import CUSTOMER_EMAIL, act
 
 DRAFT = {
     "audience": "customer",
@@ -182,3 +183,30 @@ async def test_attachments_must_be_approved_documents(
     assert r.status_code == 201
     content = await pod.get(f"/api/v1/pod/artifacts/{artifact['id']}/content")
     assert content.content == b"%PDF-1.4 hours"
+
+
+async def test_a_reply_after_closing_is_kept_not_read(
+    pod: AsyncClient, answered_ar_case: dict[str, Any], fake_llm: FakeLLM
+) -> None:
+    case = (await act(pod, answered_ar_case, "approve")).json()
+    case = (await act(pod, case, "complete")).json()
+    sent = next(m for m in case["messages"] if m["direction"] == "outbound")
+    calls = len(fake_llm.calls)
+
+    r = await pod.post(
+        f"/api/v1/pod/cases/{case['id']}/replies",
+        json={
+            "from_email": CUSTOMER_EMAIL,
+            "body": "We will pay on Dec 1.",
+            "reply_to_message_id": sent["id"],
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["extraction_status"] == "case_closed"
+    assert len(fake_llm.calls) == calls  # not read into the case
+
+    after = (await pod.get(f"/api/v1/pod/cases/{case['id']}")).json()
+    assert (after["status"], after["version"]) == ("completed", case["version"])
+    assert after["commitments"] == []
+    inbox = (await pod.get("/api/v1/pod/messages")).json()
+    assert inbox[0]["extraction_status"] == "case_closed"

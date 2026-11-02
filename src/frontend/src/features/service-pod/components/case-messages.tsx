@@ -39,8 +39,9 @@ export function Extraction({ m }: { m: Message }) {
         <Bot className="size-3.5" aria-hidden /> AI reading:{" "}
         {m.extraction_status === "pending" && "in progress…"}
         {m.extraction_status === "done" && "done (checked against the customer's words)"}
-        {m.extraction_status === "failed" && "rejected, a person reads it"}
+        {m.extraction_status === "failed" && "couldn't be read reliably, a person reads it"}
         {m.extraction_status === "skipped" && "not available, a person reads it"}
+        {m.extraction_status === "case_closed" && "not read: it came after the case was closed (open a new case if it needs action)"}
       </p>
       {m.extraction?.error && <p className="mt-1 text-red-800">{m.extraction.error}</p>}
       {notes.length > 0 && (

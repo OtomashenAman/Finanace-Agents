@@ -32,7 +32,9 @@ class SetAllocationPayload(BaseModel):
 
 class BankAllocationRead(BaseModel):
     invoice_number: str = Field(description="One of the open invoice numbers listed")
-    amount: str = Field(description="Amount to apply, digits only, e.g. 6000.00")
+    amount: str = Field(
+        description="Amount to apply, digits only, e.g. 6000.00; empty if the customer states none"
+    )
     quote: str = Field(description="The customer's exact words for this line")
     confidence: float = Field(description="0 to 1")
 

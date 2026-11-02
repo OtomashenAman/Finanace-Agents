@@ -40,6 +40,7 @@ export function InboxPage() {
             return (
               <li key={m.id} className="flex flex-col gap-1 py-3 text-sm sm:flex-row sm:items-center sm:gap-3">
                 <Pill label={label} tone={tone} />
+                {m.extraction_status === "case_closed" && <Pill label="After the case closed" tone="warn" />}
                 <Link to={`/pod/cases/${m.case_id}`} className="min-w-0 flex-1 truncate font-medium text-primary hover:underline">
                   {m.subject}
                 </Link>

@@ -32,7 +32,13 @@ export function useCases(filters: { workflow?: string | null; status?: string | 
 }
 
 export function useCase(id: string | undefined) {
-  return useQuery({ queryKey: [POD_TAG, "case", id], queryFn: () => podApi.case(id!), enabled: Boolean(id) })
+  // Replies arrive from the mailbox in the background: refresh while the case is on screen
+  return useQuery({
+    queryKey: [POD_TAG, "case", id],
+    queryFn: () => podApi.case(id!),
+    enabled: Boolean(id),
+    refetchInterval: 30_000,
+  })
 }
 
 export function useReviewQueue() {

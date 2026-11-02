@@ -36,7 +36,18 @@ async def test_coverage_is_checked(pod: AsyncClient, snapshot: dict[str, Any]) -
     assert "gl lines" in r.json()["detail"]["message"]
 
 
-async def test_approve_and_complete(pod: AsyncClient, ar_case: dict[str, Any]) -> None:
+async def test_no_approval_before_the_customer_answers(
+    pod: AsyncClient, ar_case: dict[str, Any]
+) -> None:
+    r = await act(pod, ar_case, "approve")
+    assert r.status_code == 409
+    assert "hasn't replied" in r.json()["detail"]["message"]
+    case = await _ok(await act(pod, ar_case, "cancel", reason="Customer never answered"))
+    assert case["status"] == "cancelled"
+
+
+async def test_approve_and_complete(pod: AsyncClient, answered_ar_case: dict[str, Any]) -> None:
+    ar_case = answered_ar_case
     assert ar_case["reference"].startswith("AR-")
     assert ar_case["status"] == "draft"
     assert ar_case["allowed_actions"]["approve"] is None
@@ -60,11 +71,13 @@ async def test_stale_version_is_refused(pod: AsyncClient, ar_case: dict[str, Any
     assert r.json()["detail"]["code"] == "stale_version"
 
 
-async def test_open_review_tasks_block_approval(pod: AsyncClient, ar_case: dict[str, Any]) -> None:
+async def test_open_review_tasks_block_approval(
+    pod: AsyncClient, answered_ar_case: dict[str, Any]
+) -> None:
     case = await _ok(
         await act(
             pod,
-            ar_case,
+            answered_ar_case,
             "add_review_task",
             kind="unknown_date",
             subject="INV-101",
@@ -90,9 +103,9 @@ async def test_open_review_tasks_block_approval(pod: AsyncClient, ar_case: dict[
 
 
 async def test_change_after_approval_goes_back_to_draft(
-    pod: AsyncClient, ar_case: dict[str, Any]
+    pod: AsyncClient, answered_ar_case: dict[str, Any]
 ) -> None:
-    case = await _ok(await act(pod, ar_case, "approve"))
+    case = await _ok(await act(pod, answered_ar_case, "approve"))
     approved_hash = case["fingerprint"]
 
     case = await _ok(

@@ -64,7 +64,9 @@ async def extract[T: BaseModel](
     result = await llm.generate_structured(system=system, user=user, schema=schema)
     problems = validate(result.output)
     if problems:
-        raise AiOutputRejectedError("The AI output was rejected: " + "; ".join(problems[:5]))
+        raise AiOutputRejectedError(
+            "the AI's reading didn't hold up against the reply: " + "; ".join(problems[:5])
+        )
     return Extraction(result.output, _provenance(result, prompt_version))
 
 

@@ -69,9 +69,10 @@ class PodMessage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     fact_block: Mapped[str | None] = mapped_column(Text)
     # The checks confirmed when it was sent (recipient, invoice mapping, tone)
     approval_checks: Mapped[dict[str, bool] | None] = mapped_column(JSONB)
-    # Replies: what the AI read (output, provenance, problems) and how that went
+    # Replies: what the AI read (output, provenance, problems) and how that went:
+    # pending | done | failed | skipped | case_closed (came after the case closed, not read)
     extraction: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
-    extraction_status: Mapped[str | None] = mapped_column(String(16))  # pending|done|failed|skipped
+    extraction_status: Mapped[str | None] = mapped_column(String(16))
 
     approval_hash: Mapped[str | None] = mapped_column(String(64))
     approved_by: Mapped[uuid.UUID | None] = mapped_column(

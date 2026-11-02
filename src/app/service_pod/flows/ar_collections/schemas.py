@@ -18,7 +18,9 @@ class ArSelection(BaseModel):
 
 class ArTranche(BaseModel):
     invoice_number: str = Field(description="One of the invoice numbers listed")
-    amount: str = Field(description="Amount promised, digits only, e.g. 6000.00")
+    amount: str = Field(
+        description="Amount promised, digits only, e.g. 6000.00; empty if the customer states none"
+    )
     date: str | None = Field(
         description="YYYY-MM-DD only if the customer names a calendar date, else null "
         "('now', 'initially', 'soon' are not dates)"

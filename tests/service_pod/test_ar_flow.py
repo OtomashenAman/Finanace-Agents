@@ -202,7 +202,7 @@ async def test_reply_a_both_on_nov_12(
     )
     reply = case["messages"][-1]
     assert reply["extraction_status"] == "done"
-    assert reply["extraction"]["provenance"]["prompt_version"] == "ar_reply/v1"
+    assert reply["extraction"]["provenance"]["prompt_version"] == "ar_reply/v2"
     assert [
         (c["invoice_number"], c["amount"], c["expected_date"]) for c in case["commitments"]
     ] == [
@@ -405,6 +405,38 @@ async def test_low_confidence_and_conditions_go_to_a_person(
     assert len(case["review_tasks"]) == 2
 
 
+async def test_reply_without_an_amount_is_a_review_task(
+    pod: AsyncClient, ar_case: dict[str, Any], fake_llm: FakeLLM
+) -> None:
+    # "Done" names no amount: the reading is still used, and a person asks the customer
+    sent = await _send_request(pod, ar_case, fake_llm)
+    case = await _reply(
+        pod, ar_case, sent, "Done", fake_llm, read(tranches=[tranche("INV-101", "", None, "Done")])
+    )
+    assert case["messages"][-1]["extraction_status"] == "done"
+    assert case["commitments"] == []
+    (task,) = case["review_tasks"]
+    assert task["kind"] == "ambiguity" and task["subject"] == "INV-101"
+    assert "didn't say how much" in task["detail"]
+
+
+async def test_unreadable_amount_is_explained_plainly(
+    pod: AsyncClient, ar_case: dict[str, Any], fake_llm: FakeLLM
+) -> None:
+    sent = await _send_request(pod, ar_case, fake_llm)
+    case = await _reply(
+        pod,
+        ar_case,
+        sent,
+        "We pay a lot",
+        fake_llm,
+        read(tranches=[tranche("INV-101", "a lot", None, "We pay a lot")]),
+    )
+    message = case["messages"][-1]
+    assert message["extraction_status"] == "failed"
+    assert "couldn't read ('a lot')" in message["extraction"]["error"]
+
+
 async def test_newer_source_must_be_taken_in(
     pod: AsyncClient, ar_case: dict[str, Any], entity: LegalEntity
 ) -> None:
@@ -417,7 +449,7 @@ async def test_newer_source_must_be_taken_in(
     case = (await act(pod, case, "refresh_source", snapshot_id=newer["id"])).json()
     assert case["snapshot"]["id"] == newer["id"]
     assert case["state"]["total_open"] == "19000"
-    assert case["blockers"] == []
+    assert not any("newer source" in b for b in case["blockers"])
 
 
 async def test_portfolio(pod: AsyncClient, ar_case: dict[str, Any]) -> None:

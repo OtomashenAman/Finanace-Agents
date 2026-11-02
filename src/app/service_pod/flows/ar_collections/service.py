@@ -97,6 +97,12 @@ async def blockers(c: Ctx) -> list[str]:
     if c.case.status in (CaseStatus.APPROVED, CaseStatus.COMPLETED):
         return []
     problems = []
+    # The schedule comes from the customer: without their answer there's nothing to approve
+    if not (await progress.progress(c.session, c.case, "payment_schedule_request")).replied:
+        problems.append(
+            "The customer hasn't replied yet: approve once they answer, or cancel the case "
+            "with the reason."
+        )
     undecided = [x for x in c.children.commitments if x.status == CommitmentStatus.PROPOSED]
     if undecided:
         problems.append(f"Decide the {len(undecided)} proposed commitment(s) first.")

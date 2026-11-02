@@ -35,17 +35,18 @@ def _structural_problems(read: ArReplyRead, reply: str, numbers: set[str]) -> li
     quotes += [r.quote for r in read.document_requests]
     for quote in quotes:
         if not reading.quote_in(reply, quote):
-            problems.append(f"quote not found in the reply: {quote[:80]!r}")
+            problems.append(f"it quoted words that aren't in the reply ({quote[:80]!r})")
     for number in (
         [t.invoice_number for t in read.tranches]
         + [d.invoice_number for d in read.disputes]
         + [n for r in read.document_requests for n in r.invoice_numbers]
     ):
         if number not in numbers:
-            problems.append(f"{number} isn't an invoice of this case")
+            problems.append(f"it named invoice {number}, which isn't on this case")
     for t in read.tranches:
-        if reading.parse_money(t.amount) is None:
-            problems.append(f"unreadable amount {t.amount!r}")
+        # A blank amount means the customer named none: a review task, not a broken reading
+        if t.amount.strip() and reading.parse_money(t.amount) is None:
+            problems.append(f"it gave an amount it couldn't read ({t.amount!r})")
     return problems
 
 
@@ -100,7 +101,16 @@ async def _apply(
 
     for t in read.tranches:
         number, amount = t.invoice_number, reading.parse_money(t.amount)
-        assert amount is not None  # noqa: S101 - structural check
+        if amount is None:  # blank (structural check): the customer stated no amount
+            system.raise_task(
+                session,
+                case,
+                ReviewTaskKind.AMBIGUITY,
+                f'"{t.quote}": the customer didn\'t say how much they will pay on {number}. '
+                "Ask them, or record it by hand.",
+                subject=number,
+            )
+            continue
         balance = reading.dec(invoices[number]["balance"])
         problems = []
         if t.confidence < MIN_CONFIDENCE:

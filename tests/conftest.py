@@ -29,6 +29,12 @@ os.environ["ENVIRONMENT"] = "test"
 os.environ["COOKIE_SECURE"] = "false"
 os.environ["LLM_PROVIDER"] = "none"  # tests never call a real LLM; use the fake_llm fixture
 os.environ["JOBS_MODE"] = "inline"  # background jobs run inside the request (see tests/jobs)
+# Tests never send real email or read a real mailbox, whatever .env says (see
+# tests/service_pod/test_microsoft_mail.py for Microsoft Graph, faked)
+os.environ["EMAIL_PROVIDER"] = "outbox"
+os.environ["EMAIL_TEST_RECIPIENT"] = ""
+os.environ["EMAIL_SANDBOX_TO_QUICKBOOKS_CONTACTS"] = "false"
+os.environ["AGENT_POLL_INTERVAL"] = ""
 get_settings.cache_clear()
 
 

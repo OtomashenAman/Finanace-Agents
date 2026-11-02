@@ -77,7 +77,7 @@ async def read_mailbox(session: AsyncSession, payload: dict[str, Any], ctx: JobC
                     await service.import_reply(
                         session, None, original.case_id, ReplyImport(raw_eml=raw), _MAILBOX, ctx.llm
                     )
-            except AppError as exc:  # not readable, case closed...: left for a person
+            except AppError as exc:  # e.g. no readable text, or not from the addressee
                 await session.rollback()
                 log.info("mailbox: left %s from %s alone: %s", item.id, item.sender, exc)
         cursor = await session.get(PodMailboxCursor, mailbox.mailbox)

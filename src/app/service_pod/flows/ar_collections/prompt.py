@@ -1,6 +1,6 @@
 """What the AI is told when it reads a customer's reply (versioned with each reading)."""
 
-READ_PROMPT_VERSION = "ar_reply/v1"
+READ_PROMPT_VERSION = "ar_reply/v2"
 
 
 READ_SYSTEM = (

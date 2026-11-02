@@ -1,6 +1,6 @@
 """What the AI is told when it reads a customer's allocation reply."""
 
-READ_PROMPT_VERSION = "bank_reply/v1"
+READ_PROMPT_VERSION = "bank_reply/v2"
 
 
 READ_SYSTEM = (

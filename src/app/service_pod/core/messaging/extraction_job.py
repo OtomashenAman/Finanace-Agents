@@ -2,6 +2,7 @@
 configured, provider error, output that fails the checks) nothing is guessed: a person gets
 a review task to read it and record what the customer said."""
 
+import logging
 import uuid
 from typing import Any
 
@@ -15,6 +16,8 @@ from src.app.service_pod.core.cases.models import LOCKED_STATUSES, PodCase, Revi
 from src.app.service_pod.core.hooks import hooks_for
 from src.app.service_pod.core.messaging.models import PodMessage
 from src.app.service_pod.core.messaging.service import EXTRACT_JOB
+
+log = logging.getLogger(__name__)
 
 
 @handler(EXTRACT_JOB)
@@ -32,11 +35,13 @@ async def extract_reply(session: AsyncSession, payload: dict[str, Any], ctx: Job
     try:
         await read(session, case, message, ctx.llm)
     except (LLMNotConfiguredError, LLMError, AiOutputRejectedError) as exc:
-        reason = (
-            "no AI provider is configured"
-            if isinstance(exc, LLMNotConfiguredError)
-            else str(exc)[:300] or type(exc).__name__
-        )
+        if isinstance(exc, LLMNotConfiguredError):
+            reason = "no AI provider is configured"
+        elif isinstance(exc, AiOutputRejectedError):
+            reason = str(exc)[:300]
+        else:  # provider outage, timeout, …: the raw error is for the logs, not the reader
+            log.warning("reply %s: AI provider error: %s", message.id, exc)
+            reason = "the AI service didn't answer"
         message.extraction_status = (
             "skipped" if isinstance(exc, LLMNotConfiguredError) else "failed"
         )
@@ -45,7 +50,7 @@ async def extract_reply(session: AsyncSession, payload: dict[str, Any], ctx: Job
             session,
             case,
             ReviewTaskKind.AMBIGUITY,
-            f"The reply from {message.from_email} wasn't read automatically ({reason}). Read it "
+            f"The reply from {message.from_email} wasn't read automatically: {reason}. Read it "
             "and record what the customer said; nothing was assumed.",
             subject=message.subject[:200] or None,
         )

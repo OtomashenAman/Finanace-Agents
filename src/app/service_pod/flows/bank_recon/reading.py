@@ -33,17 +33,21 @@ async def extract_reply(
         problems = []
         quotes = [a.quote for a in read.allocations] + [r.quote for r in read.document_requests]
         problems += [
-            f"quote not found: {q[:80]!r}" for q in quotes if not reading.quote_in(message.body, q)
+            f"it quoted words that aren't in the reply ({q[:80]!r})"
+            for q in quotes
+            if not reading.quote_in(message.body, q)
         ]
         numbers = [a.invoice_number for a in read.allocations]
         numbers += [n for r in read.document_requests for n in r.invoice_numbers]
         problems += [
-            f"{n} isn't an open invoice of this customer" for n in numbers if n not in by_number
+            f"it named invoice {n}, which isn't open for this customer"
+            for n in numbers
+            if n not in by_number
         ]
         problems += [
-            f"unreadable amount {a.amount!r}"
+            f"it gave an amount it couldn't read ({a.amount!r})"
             for a in read.allocations
-            if reading.parse_money(a.amount) is None
+            if a.amount.strip() and reading.parse_money(a.amount) is None
         ]
         return problems
 
@@ -64,7 +68,16 @@ async def extract_reply(
     lines: list[tuple[str, Decimal]] = []
     for a in read.allocations:
         amount = reading.parse_money(a.amount)
-        assert amount is not None  # noqa: S101 - structural check
+        if amount is None:  # blank (structural check): the customer stated no amount
+            system.raise_task(
+                session,
+                case,
+                ReviewTaskKind.AMBIGUITY,
+                f'"{a.quote}": the customer didn\'t say how much goes to {a.invoice_number}. '
+                "Clarify with the customer.",
+                subject=a.invoice_number,
+            )
+            continue
         problems = []
         if a.confidence < MIN_CONFIDENCE:
             problems.append("the reading is uncertain")

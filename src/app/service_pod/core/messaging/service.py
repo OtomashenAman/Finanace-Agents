@@ -58,6 +58,7 @@ from src.app.service_pod.core.snapshots.models import PodSnapshot
 
 SEND_JOB = "pod.send_message"
 EXTRACT_JOB = "pod.extract_reply"
+CASE_CLOSED = "case_closed"  # a reply that came after the case closed: kept, not read into it
 EDITABLE = frozenset({MessageStatus.DRAFT, MessageStatus.SEND_FAILED})
 ARTIFACT_TYPES = {
     "application/pdf",
@@ -561,9 +562,10 @@ async def import_reply(
 ) -> tuple[MessageOut, bool]:
     """(reply, created). Re-importing the same email returns the existing one. A workflow
     that reads replies gets it read in the background (see flows.extraction). actor_id None:
-    read from the mailbox by the worker."""
+    read from the mailbox by the worker. A reply to a closed case is still kept (with
+    extraction_status "case_closed") but not read into it: the case doesn't change."""
     case = await load_case(session, case_id, lock=True)
-    _require_open(case)
+    closed = case.status in LOCKED_STATUSES
     sent = list(
         await session.scalars(
             select(PodMessage).where(
@@ -648,10 +650,13 @@ async def import_reply(
         actor_id,
         case,
         reply,
-        f"Imported a reply from {from_email} ({evidence} thread)",
+        f"Imported a reply from {from_email} ({evidence} thread)"
+        + (f", after the case was {case.status.value}" if closed else ""),
     )
     job = None
-    if hooks_for(case.workflow).extract_reply is not None:
+    if closed:
+        reply.extraction_status = CASE_CLOSED
+    elif hooks_for(case.workflow).extract_reply is not None:
         reply.extraction_status = "pending"
         job = await queue.enqueue(
             session,
