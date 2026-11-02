@@ -31,7 +31,7 @@ export function CustomerAllocation({ c }: { c: CaseDetail }) {
       <Messages
         c={c}
         title="Customer replies"
-        hint="Import the reply; its allocation is read in the customer's own words."
+        hint="Replies come in from the mailbox; the allocation is read in the customer's own words."
         filter={(m) => m.direction === "inbound"}
         compose={false}
         empty="No reply imported yet."

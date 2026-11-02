@@ -32,7 +32,7 @@ export function CustomerReply({ c }: { c: CaseDetail }) {
       <Messages
         c={c}
         title="Customer replies"
-        hint="Import the reply; the AI reads it next to the email, and anything unclear becomes a review task."
+        hint="Replies come in from the mailbox; the AI reads each one next to our email, and anything unclear becomes a review task."
         filter={(m) => m.direction === "inbound"}
         compose={false}
         ReplyPanel={ArReplyReview}

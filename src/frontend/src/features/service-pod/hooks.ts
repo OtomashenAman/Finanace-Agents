@@ -53,8 +53,35 @@ export function useTasks(status?: TaskStatus | null) {
   return useQuery({ queryKey: [POD_TAG, "tasks", status ?? null], queryFn: () => podApi.tasks(status) })
 }
 
+const EMAIL_TO_ACT: MessageStatus[] = ["draft", "send_failed", "send_unknown"]
+const POSTING_TO_ACT: TaskStatus[] = ["proposed", "recorded_unverified"]
+
+/** Everything waiting on the Finance Admin: open review tasks, emails to send or settle, and
+ *  QuickBooks postings to record or verify. */
+export function useMyQueue() {
+  const reviews = useReviewQueue()
+  const messages = useMessages(null)
+  const tasks = useTasks(null)
+  const emails = (messages.data ?? []).filter((m) => m.direction === "outbound" && EMAIL_TO_ACT.includes(m.status))
+  const postings = (tasks.data ?? []).filter((t) => POSTING_TO_ACT.includes(t.status))
+  const reviewItems = reviews.data ?? []
+  return {
+    reviews: reviewItems,
+    emails,
+    postings,
+    messages: messages.data ?? [],
+    count: reviewItems.length + emails.length + postings.length,
+    isPending: reviews.isPending || messages.isPending || tasks.isPending,
+    isError: reviews.isError || messages.isError || tasks.isError,
+  }
+}
+
 export function useArPortfolio() {
   return useQuery({ queryKey: [POD_TAG, "ar-portfolio"], queryFn: podApi.arPortfolio })
+}
+
+export function useDashboard() {
+  return useQuery({ queryKey: [POD_TAG, "dashboard"], queryFn: podApi.dashboard, refetchInterval: 60_000 })
 }
 
 export function useBankWorklist() {

@@ -245,7 +245,9 @@ async def compose(session: AsyncSession, case: PodCase, purpose: str, llm: LLMPr
 
 
 async def stage(session: AsyncSession, case: PodCase) -> str:
-    """request -> allocation -> posting, as the case page's steps."""
+    """request -> allocation -> posting, as the case page's steps (approved: posting)."""
+    if case.status == CaseStatus.APPROVED:
+        return "posting"
     p = await progress.progress(session, case, "allocation_request")
     if not p.request_sent:
         return "request"

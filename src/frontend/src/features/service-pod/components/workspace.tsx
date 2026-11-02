@@ -34,7 +34,7 @@ export function WorkflowWorkspace({ workflow, homeLabel, children }: WorkflowWor
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <p className="flex items-center gap-1 text-sm">
           <Link to="/pod" className="text-muted-foreground hover:text-foreground">
-            Workflows
+            Dashboard
           </Link>
           <ChevronRight className="size-3.5 text-muted-foreground" aria-hidden />
           <span className="font-semibold text-brand-navy">{spec?.name ?? WORKFLOW_SHORT[workflow]}</span>
@@ -45,9 +45,9 @@ export function WorkflowWorkspace({ workflow, homeLabel, children }: WorkflowWor
               {homeLabel}
             </NavLink>
           )}
-          <NavLink to={`/pod/${slug}/cases`} className={subTab}>
-            Cases
-          </NavLink>
+          <Link to={`/pod/cases?workflow=${slug}`} className={subTab({ isActive: false })}>
+            Its cases
+          </Link>
         </nav>
       </div>
       {children}

@@ -6,21 +6,22 @@ import { Alert } from "@/components/ui/alert"
 import { Button, type ButtonProps } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
+import { useMyQueue } from "../hooks"
 import { TONE_CLASSES } from "../labels"
 
 const TABS = [
-  { to: "/pod", label: "Workflows" },
-  { to: "/pod/inbox", label: "Inbox" },
-  { to: "/pod/review", label: "AI Review" },
-  { to: "/pod/tasks", label: "Manual QB Tasks" },
+  { to: "/pod", label: "Dashboard" },
+  { to: "/pod/cases", label: "Cases" },
+  { to: "/pod/queue", label: "My Queue" },
   { to: "/pod/sources", label: "Sources" },
 ]
 const SHARED = TABS.slice(1).map((t) => t.to)
 
-/** The same five tabs whatever the number of workflows (deck: one shared navigation);
- *  each workflow's own screens live in its workspace under Workflows. */
+/** The same four tabs whatever the number of workflows; each workflow's own screen (e.g. the
+ *  AR portfolio, where cases start) opens from Home. */
 export function PodTabs() {
   const { pathname } = useLocation()
+  const { count } = useMyQueue()
   const active = (tab: (typeof TABS)[number]) =>
     tab.to === "/pod" ? !SHARED.some((to) => pathname.startsWith(to)) : pathname.startsWith(tab.to)
   return (
@@ -36,6 +37,9 @@ export function PodTabs() {
           )}
         >
           {tab.label}
+          {tab.to === "/pod/queue" && count > 0 && (
+            <span className="ml-1.5 rounded-full bg-amber-100 px-1.5 text-xs text-amber-900">{count}</span>
+          )}
         </Link>
       ))}
     </nav>

@@ -471,6 +471,11 @@ async def _ctx(
     return c
 
 
+async def case_blockers(session: AsyncSession, access: PodAccess, case: PodCase) -> list[str]:
+    """Why the case can't be approved yet (empty: it can)."""
+    return (await _ctx(session, access, case)).blockers
+
+
 def actions_for(case: PodCase) -> dict[str, ActionSpec]:
     return {**ACTIONS, **hooks_for(case.workflow).actions}
 

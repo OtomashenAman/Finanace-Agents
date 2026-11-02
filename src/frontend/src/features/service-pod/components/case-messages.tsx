@@ -18,7 +18,7 @@ import {
   useUpdateMessage,
   useUploadArtifact,
 } from "../hooks"
-import { ARTIFACT_KIND, formatDateTime, MESSAGE_STATUS } from "../labels"
+import { ARTIFACT_KIND, formatDateTime, MESSAGE_STATUS, THREAD_EVIDENCE } from "../labels"
 import { Card, Empty, Field, Pill } from "./bits"
 import { attempt, selectClass } from "../ui"
 
@@ -109,7 +109,9 @@ function MessageItem({ m, c, ReplyPanel }: { m: Message; c: CaseDetail; ReplyPan
         <span className="font-semibold">{m.direction === "inbound" ? `From ${m.from_email}` : `To ${m.to_email}`}</span>
         <Pill label={label} tone={tone} />
         {m.simulated && <Pill label="Simulated: not sent" tone="warn" />}
-        {m.thread_evidence && <span className="text-xs text-muted-foreground">thread: {m.thread_evidence}</span>}
+        {m.thread_evidence && (
+          <span className="text-xs text-muted-foreground">{THREAD_EVIDENCE[m.thread_evidence] ?? m.thread_evidence}</span>
+        )}
       </p>
       {editing ? (
         <div className="mt-2 space-y-2">
@@ -320,10 +322,21 @@ function ReplyForm({ c }: { c: CaseDetail }) {
   const [replyTo, setReplyTo] = useState("")
   const [from, setFrom] = useState("")
   const [text, setText] = useState("")
+  const [open, setOpen] = useState(false)
   if (!sent.length) return null
+  if (!open)
+    return (
+      <p className="mt-3 border-t pt-3 text-xs text-muted-foreground">
+        Replies to our email are picked up from the mailbox automatically.{" "}
+        <button type="button" className="text-primary hover:underline" onClick={() => setOpen(true)}>
+          Import a reply by hand
+        </button>{" "}
+        if it came another way.
+      </p>
+    )
   return (
     <div className="mt-3 space-y-2 border-t pt-3">
-      <Field label="Import the customer's reply" hint="An .eml file proves the thread by its headers. Pasted text must name the message it answers.">
+      <Field label="Import a reply by hand" hint="An .eml file proves the thread by its headers. Pasted text must name the message it answers.">
         <Input
           type="file"
           accept=".eml,message/rfc822"
@@ -357,6 +370,9 @@ function ReplyForm({ c }: { c: CaseDetail }) {
         <Textarea className="sm:col-span-2" rows={3} placeholder="Pasted reply text" value={text} onChange={(e) => setText(e.target.value)} />
         <Button type="submit" size="sm" variant="outline" disabled={importReply.isPending || !replyTo || !from || !text.trim()}>
           Import pasted reply
+        </Button>
+        <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>
+          Cancel
         </Button>
       </form>
     </div>

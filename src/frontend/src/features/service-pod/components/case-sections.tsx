@@ -18,6 +18,7 @@ export function ReviewTasks({ c }: { c: CaseDetail }) {
   const [detail, setDetail] = useState("")
   const [blocking, setBlocking] = useState(true)
   const [resolving, setResolving] = useState<Record<string, string>>({})
+  const [raising, setRaising] = useState(false)
   const reason = c.allowed_actions.add_review_task
 
   return (
@@ -72,7 +73,12 @@ export function ReviewTasks({ c }: { c: CaseDetail }) {
           </li>
         ))}
       </ul>
-      {reason === null && (
+      {reason === null && !raising && (
+        <Button size="sm" variant="ghost" className="mt-2 px-0 text-primary" onClick={() => setRaising(true)}>
+          + Raise a review task
+        </Button>
+      )}
+      {reason === null && raising && (
         <form
           className="mt-3 grid gap-2 border-t pt-3 sm:grid-cols-[160px_160px_1fr]"
           onSubmit={(e) => {
@@ -82,6 +88,7 @@ export function ReviewTasks({ c }: { c: CaseDetail }) {
                 if (r) {
                   setDetail("")
                   setSubject("")
+                  setRaising(false)
                 }
               },
             )
@@ -99,9 +106,14 @@ export function ReviewTasks({ c }: { c: CaseDetail }) {
           <label className="flex items-center gap-2 text-xs">
             <input type="checkbox" checked={blocking} onChange={(e) => setBlocking(e.target.checked)} /> Blocks approval
           </label>
-          <Button type="submit" size="sm" variant="outline" disabled={pending || detail.trim().length < 3}>
-            Raise
-          </Button>
+          <div className="flex gap-2">
+            <Button type="submit" size="sm" variant="outline" disabled={pending || detail.trim().length < 3}>
+              Raise
+            </Button>
+            <Button type="button" size="sm" variant="ghost" onClick={() => setRaising(false)}>
+              Cancel
+            </Button>
+          </div>
         </form>
       )}
     </Card>
@@ -248,21 +260,25 @@ export function Decisions({ c }: { c: CaseDetail }) {
   const { run, pending } = useRunAction(c)
   const a = c.allowed_actions
   return (
-    <Card title="Decision" hint={`Content fingerprint ${c.fingerprint.slice(0, 12)}…: an approval binds exactly this.`}>
-      {c.blockers.length > 0 && (
-        <ul className="mb-3 list-disc pl-5 text-sm text-amber-800">
-          {c.blockers.map((b) => (
-            <li key={b}>{b}</li>
-          ))}
-        </ul>
+    <Card title="Decision">
+      {c.status === "draft" && c.blockers.length > 0 && (
+        <>
+          <p className="mb-1 text-sm font-medium">Not ready to approve yet:</p>
+          <ul className="mb-1 list-disc pl-5 text-sm text-amber-800">
+            {c.blockers.map((b) => (
+              <li key={b}>{b}</li>
+            ))}
+          </ul>
+        </>
       )}
+      {["completed", "cancelled"].includes(c.status) && <p className="text-sm text-muted-foreground">The case is {c.status}.</p>}
       <div className="flex flex-wrap gap-2">
-        {c.status === "draft" && (
+        {c.status === "draft" && a.approve === null && (
           <GuardedButton reason={a.approve} disabled={pending} onClick={() => void run("approve", {}, "Case approved.")}>
             Approve case
           </GuardedButton>
         )}
-        {c.status === "approved" && (
+        {c.status === "approved" && a.complete === null && (
           <GuardedButton reason={a.complete} disabled={pending} variant="outline" onClick={() => void run("complete", {}, "Case completed.")}>
             Complete case
           </GuardedButton>

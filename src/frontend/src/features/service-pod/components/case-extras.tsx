@@ -7,10 +7,35 @@ import { Textarea } from "@/components/ui/textarea"
 
 import type { CaseDetail, PostingTask } from "../api"
 import { useProposeTask } from "../hooks"
-import { formatDateTime, TASK_STATUS } from "../labels"
+import { formatDateTime, shortHash, TASK_STATUS } from "../labels"
 import { attempt, selectClass } from "../ui"
 import { useRunAction } from "../use-run-action"
 import { Card, Empty, Field, Pill } from "./bits"
+
+/** The technical facts behind a case: which data it was built on and what an approval binds. */
+export function CaseAudit({ c }: { c: CaseDetail }) {
+  const rows: [string, string][] = [
+    ["Entity", c.entity.code],
+    ["Opened by", c.owner.name],
+    ["Source data", `${c.snapshot.company_name} as of ${c.snapshot.as_of}`],
+    ["Source fingerprint", shortHash(c.snapshot.sha256)],
+    ["Case version", `v${c.version}`],
+    ["Content fingerprint", `${c.fingerprint.slice(0, 12)}…`],
+    ["QuickBooks writes", "None: a Finance Admin posts by hand and a fresh export proves it"],
+  ]
+  return (
+    <Card title="Audit details" hint="What this case was built on; an approval binds exactly this content.">
+      <dl className="grid gap-x-4 gap-y-1.5 text-sm sm:grid-cols-[180px_1fr]">
+        {rows.map(([k, v]) => (
+          <div key={k} className="contents">
+            <dt className="text-muted-foreground">{k}</dt>
+            <dd className="font-mono text-xs leading-5 break-all sm:font-sans sm:text-sm">{v}</dd>
+          </div>
+        ))}
+      </dl>
+    </Card>
+  )
+}
 
 export function CaseData({ c }: { c: CaseDetail }) {
   const { run, pending } = useRunAction(c)

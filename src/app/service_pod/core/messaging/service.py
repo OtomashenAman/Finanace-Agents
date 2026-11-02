@@ -100,10 +100,15 @@ async def _message_outs(session: AsyncSession, messages: list[PodMessage]) -> li
     people = await names(
         session, [*(m.approved_by for m in messages), *(m.created_by for m in messages)]
     )
+    cases = await session.scalars(
+        select(PodCase).where(PodCase.id.in_({m.case_id for m in messages}))
+    )
+    refs = {c.id: c.reference for c in cases}
     return [
         MessageOut(
             id=m.id,
             case_id=m.case_id,
+            case_reference=refs.get(m.case_id, ""),
             direction=m.direction,
             audience=m.audience,
             purpose=m.purpose,

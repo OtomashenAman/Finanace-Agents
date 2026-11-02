@@ -1,43 +1,43 @@
 import { Link, Navigate, useParams } from "react-router"
 import { ArrowRight } from "lucide-react"
 
-import { AppPage } from "@/components/layout/app-page"
-
-import { LoadError, Loading, PodTabs } from "./components/bits"
+import { LoadError, Loading } from "./components/bits"
 import { FLOW_UI } from "./flows"
 import { useWorkflows } from "./hooks"
 import { WORKFLOW_SLUG, workflowFromSlug } from "./labels"
 
-/** Service POD home: one card per workflow that has its screens (deck slide 2); the rest
- *  are listed as coming. */
-export function WorkflowsPage() {
+/** One card per workflow that has its screens (where its cases start); the rest are listed
+ *  as coming. */
+export function WorkflowCards() {
   const { data: workflows = [], isPending, isError } = useWorkflows()
   const built = workflows.filter((w) => FLOW_UI[w.key]?.home)
   const coming = workflows.filter((w) => !FLOW_UI[w.key]?.home)
 
   return (
-    <AppPage title="Service POD" subtitle="Governed finance workflows on read-only QuickBooks data. You post in QuickBooks by hand.">
-      <PodTabs />
+    <>
       {isPending && <Loading what="workflows" />}
       {isError && <LoadError what="workflows" />}
-      <ul className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <ul className="grid gap-4 md:grid-cols-2">
         {built.map((w) => {
           const flow = FLOW_UI[w.key]
           return (
             <li key={w.key}>
               <Link
                 to={`/pod/${WORKFLOW_SLUG[w.key]}`}
-                className="group flex h-full flex-col rounded-lg border bg-card p-5 transition-colors hover:border-primary/50 hover:bg-secondary/20"
+                title={w.description}
+                className="group flex h-full flex-col rounded-lg border bg-card p-5 transition-colors hover:border-primary/50"
               >
-                <p className="flex items-center justify-between gap-2">
-                  <span className="font-semibold text-brand-navy">{w.name}</span>
-                  <ArrowRight className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" aria-hidden />
-                </p>
-                <p className="mt-1 flex-1 text-xs text-muted-foreground">{w.description}</p>
+                <p className="font-semibold text-brand-navy">{w.name}</p>
                 {flow?.Stats && (
-                  <div className="mt-4 border-t pt-3">
+                  <div className="mt-3 flex-1">
                     <flow.Stats />
                   </div>
+                )}
+                {flow?.home && (
+                  <span className="mt-4 inline-flex items-center gap-1.5 self-start rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-colors group-hover:bg-primary/90">
+                    Open {flow.home.label} to start a case
+                    <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" aria-hidden />
+                  </span>
                 )}
               </Link>
             </li>
@@ -45,9 +45,9 @@ export function WorkflowsPage() {
         })}
       </ul>
       {coming.length > 0 && (
-        <p className="mt-6 text-xs text-muted-foreground">Coming soon: {coming.map((w) => w.name).join(" · ")}</p>
+        <p className="mt-3 text-xs text-muted-foreground">Coming soon: {coming.map((w) => w.name).join(" · ")}</p>
       )}
-    </AppPage>
+    </>
   )
 }
 
@@ -57,5 +57,5 @@ export function WorkflowHomePage() {
   const key = workflowFromSlug(slug)
   if (!key) return <Navigate to="/pod" replace />
   const Home = FLOW_UI[key]?.home?.Page
-  return Home ? <Home /> : <Navigate to={`/pod/${slug}/cases`} replace />
+  return Home ? <Home /> : <Navigate to={`/pod/cases?workflow=${slug}`} replace />
 }

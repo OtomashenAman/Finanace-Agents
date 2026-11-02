@@ -7,6 +7,7 @@ import type {
   TaskStatus,
   WorkflowKey,
 } from "./api"
+import type { CasePhase } from "./flows/types"
 
 type Tone = "neutral" | "info" | "good" | "warn" | "bad"
 
@@ -40,10 +41,28 @@ export function workflowFromSlug(slug: string | undefined): WorkflowKey | undefi
 }
 
 export const CASE_STATUS: Record<CaseStatus, [string, Tone]> = {
-  draft: ["Draft", "neutral"],
+  draft: ["In progress", "neutral"],
   approved: ["Approved", "good"],
   completed: ["Completed", "good"],
   cancelled: ["Cancelled", "neutral"],
+}
+
+/** A case's status chip, from where its work stands (workflows with steps) */
+export const CASE_PHASE: Record<CasePhase, [string, Tone]> = {
+  compose: ["Email to send", "neutral"],
+  waiting: ["Waiting for reply", "info"],
+  review: ["Needs review", "warn"],
+  ready: ["Ready to approve", "good"],
+  posting: ["QuickBooks posting", "info"],
+  approved: ["Approved", "good"],
+  completed: ["Completed", "good"],
+  cancelled: ["Cancelled", "neutral"],
+}
+
+/** How an imported reply was tied to our email */
+export const THREAD_EVIDENCE: Record<string, string> = {
+  header: "matched to our email",
+  manual: "linked by hand",
 }
 
 export const MESSAGE_STATUS: Record<MessageStatus, [string, Tone]> = {

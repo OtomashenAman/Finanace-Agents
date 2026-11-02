@@ -186,7 +186,9 @@ async def compose(session: AsyncSession, case: PodCase, purpose: str, llm: LLMPr
 
 
 async def stage(session: AsyncSession, case: PodCase) -> str:
-    """email -> reply -> close, as the case page's steps."""
+    """email -> reply -> close, as the case page's steps (an approved case is closing)."""
+    if case.status == CaseStatus.APPROVED:
+        return "close"
     p = await progress.progress(session, case, "payment_schedule_request")
     if not p.request_sent:
         return "email"

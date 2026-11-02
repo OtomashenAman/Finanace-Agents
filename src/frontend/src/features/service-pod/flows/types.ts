@@ -29,6 +29,8 @@ export interface FlowStep {
   label: string
   /** Something waiting on this step (shown as a count) */
   badge?: (c: CaseDetail) => number
+  /** One line for the folded step on the case timeline (what happened there) */
+  summary?: (c: CaseDetail) => string | null
   Body: ComponentType<{ c: CaseDetail }>
 }
 
@@ -38,4 +40,8 @@ export interface NextAction {
   step?: string
   /** do: you can act; wait: the customer or a send is next; done: nothing left */
   kind: "do" | "wait" | "done"
+  /** Where the case stands, in plain words for its status chip */
+  phase: CasePhase
 }
+
+export type CasePhase = "compose" | "waiting" | "review" | "ready" | "posting" | "approved" | "completed" | "cancelled"

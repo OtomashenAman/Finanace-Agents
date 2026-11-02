@@ -144,6 +144,7 @@ export interface Commitment {
 export interface Message {
   id: string
   case_id: string
+  case_reference: string
   direction: "outbound" | "inbound"
   audience: "customer" | "internal" | null
   purpose: string
@@ -353,6 +354,41 @@ export interface CaseDetail extends CaseSummary {
   allowed_actions: Record<CaseActionName, string | null>
 }
 
+export type DashboardPhase = "compose" | "waiting" | "review" | "ready" | "approved" | "closed"
+
+export interface PromiseItem {
+  case_id: string
+  case_reference: string
+  case_title: string
+  invoice_number: string
+  amount: string
+  currency: string
+  expected_date: string
+}
+
+export interface Dashboard {
+  open_cases: number
+  closed_30d: number
+  phases: Record<DashboardPhase, number>
+  promised: { currency: string; amount: string }[]
+  due_this_week: PromiseItem[]
+  overdue_promises: PromiseItem[]
+  aging: { label: string; count: number }[]
+  open: { id: string; reference: string; title: string; workflow: WorkflowKey; phase: DashboardPhase; days_open: number }[]
+  email: {
+    provider: string
+    simulated: boolean
+    ready: boolean
+    problem: string | null
+    reads_mailbox: boolean
+    poll_seconds: number | null
+    last_reply_at: string | null
+    sent_30d: number
+    replies_30d: number
+    avg_reply_hours: number | null
+  }
+}
+
 export interface ReviewQueueItem {
   task: ReviewTask
   case_id: string
@@ -392,6 +428,7 @@ const qs = (params: Record<string, string | null | undefined>) => {
 export const podApi = {
   workflows: () => apiRequest<Workflow[]>("/pod/workflows"),
   emailStatus: () => apiRequest<EmailStatus>("/pod/email-status"),
+  dashboard: () => apiRequest<Dashboard>("/pod/dashboard"),
 
   snapshots: (includeArchived = false) =>
     apiRequest<Snapshot[]>(`/pod/snapshots${includeArchived ? "?include_archived=true" : ""}`),

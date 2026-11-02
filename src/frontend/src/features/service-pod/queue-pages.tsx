@@ -1,137 +1,176 @@
 import { useState } from "react"
-import { Link } from "react-router"
+import { Link, Navigate, useSearchParams } from "react-router"
+import { ArrowRight } from "lucide-react"
 
 import { AppPage } from "@/components/layout/app-page"
+import { Button } from "@/components/ui/button"
 
-import type { MessageStatus, TaskStatus } from "./api"
+import type { MessageStatus } from "./api"
 import { TaskRow } from "./components/case-extras"
 import { TaskActions } from "./components/task-actions"
 import { Card, Empty, LoadError, Loading, Pill, PodTabs } from "./components/bits"
 import { selectClass } from "./ui"
-import { useMessages, useReviewQueue, useTasks } from "./hooks"
+import { useMessages, useMyQueue } from "./hooks"
 import { formatDateTime, MESSAGE_STATUS, REVIEW_KIND, WORKFLOW_SHORT } from "./labels"
 
-/** Every message on the cases: drafts to send, sends to reconcile, replies. */
-export function InboxPage() {
+type QueueType = "all" | "review" | "email" | "posting" | "log"
+
+const chip = (on: boolean) =>
+  `rounded-full border px-3 py-1 text-xs font-medium transition-colors ${on ? "border-primary bg-primary/10 text-primary" : "bg-card text-muted-foreground hover:text-foreground"}`
+
+function OpenButton({ to }: { to: string }) {
+  return (
+    <Button asChild size="sm" variant="outline" className="shrink-0">
+      <Link to={to}>
+        Open <ArrowRight />
+      </Link>
+    </Button>
+  )
+}
+
+const EMAIL_TODO: Partial<Record<MessageStatus, string>> = {
+  draft: "Check and send this draft",
+  send_failed: "Sending failed: fix it and send again",
+  send_unknown: "Send outcome unknown: reconcile it",
+}
+
+/** Every message on the cases (the full log, not only what needs you). */
+function EmailLog() {
   const [status, setStatus] = useState<MessageStatus | "">("")
   const messages = useMessages(status || null)
   return (
-    <AppPage title="Service POD" subtitle="Outbound messages and imported customer replies on your cases.">
+    <>
+      <div className="mb-3 flex justify-end">
+        <select className={`${selectClass} w-auto`} value={status} onChange={(e) => setStatus(e.target.value as MessageStatus | "")} aria-label="Status">
+          <option value="">All messages</option>
+          {Object.entries(MESSAGE_STATUS).map(([k, [label]]) => (
+            <option key={k} value={k}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </div>
+      {messages.isPending && <Loading what="messages" />}
+      {messages.isError && <LoadError what="messages" />}
+      {messages.data?.length === 0 && <Empty>No messages.</Empty>}
+      <ul className="divide-y">
+        {messages.data?.map((m) => {
+          const [label, tone] = MESSAGE_STATUS[m.status]
+          return (
+            <li key={m.id} className="flex flex-col gap-1 py-3 text-sm sm:flex-row sm:items-center sm:gap-3">
+              <Pill label={label} tone={tone} />
+              {m.extraction_status === "case_closed" && <Pill label="After the case closed" tone="warn" />}
+              <Link to={`/pod/cases/${m.case_id}`} className="min-w-0 flex-1 truncate font-medium text-primary hover:underline">
+                {m.subject}
+              </Link>
+              <span className="text-xs text-muted-foreground">
+                {m.direction === "inbound" ? `from ${m.from_email}` : `to ${m.to_email}`} · {formatDateTime(m.updated_at)}
+              </span>
+            </li>
+          )
+        })}
+      </ul>
+    </>
+  )
+}
+
+/** One list of what waits on you: review tasks, emails to send, QuickBooks postings. */
+export function MyQueuePage() {
+  const [params, setParams] = useSearchParams()
+  const type = (params.get("type") as QueueType | null) ?? "all"
+  const q = useMyQueue()
+  const show = (t: QueueType) => type === "all" || type === t
+  const tabs: [QueueType, string, number | null][] = [
+    ["all", "Everything", q.count],
+    ["review", "Review tasks", q.reviews.length],
+    ["email", "Emails to send", q.emails.length],
+    ["posting", "QuickBooks postings", q.postings.length],
+    ["log", "Email log", null],
+  ]
+
+  return (
+    <AppPage title="Service POD" subtitle="Everything waiting on you, across all cases.">
       <PodTabs />
-      <Card
-        title="Inbox"
-        actions={
-          <select className={`${selectClass} w-auto`} value={status} onChange={(e) => setStatus(e.target.value as MessageStatus | "")} aria-label="Status">
-            <option value="">All messages</option>
-            {Object.entries(MESSAGE_STATUS).map(([k, [label]]) => (
-              <option key={k} value={k}>
-                {label}
-              </option>
-            ))}
-          </select>
-        }
-      >
-        {messages.isPending && <Loading what="messages" />}
-        {messages.isError && <LoadError what="messages" />}
-        {messages.data?.length === 0 && <Empty>No messages.</Empty>}
-        <ul className="divide-y">
-          {messages.data?.map((m) => {
-            const [label, tone] = MESSAGE_STATUS[m.status]
-            return (
-              <li key={m.id} className="flex flex-col gap-1 py-3 text-sm sm:flex-row sm:items-center sm:gap-3">
-                <Pill label={label} tone={tone} />
-                {m.extraction_status === "case_closed" && <Pill label="After the case closed" tone="warn" />}
-                <Link to={`/pod/cases/${m.case_id}`} className="min-w-0 flex-1 truncate font-medium text-primary hover:underline">
-                  {m.subject}
-                </Link>
-                <span className="text-xs text-muted-foreground">
-                  {m.direction === "inbound" ? `from ${m.from_email}` : `to ${m.to_email}`} · {formatDateTime(m.updated_at)}
-                </span>
-              </li>
-            )
-          })}
-        </ul>
+      <Card title="My Queue" hint="Settle review tasks, send the emails, and post in QuickBooks by hand: each item opens where it's done.">
+        <div className="mb-4 flex flex-wrap gap-1.5" role="group" aria-label="Show">
+          {tabs.map(([key, label, n]) => (
+            <button key={key} type="button" className={chip(type === key)} onClick={() => setParams(key === "all" ? {} : { type: key }, { replace: true })}>
+              {label}
+              {n !== null && <span className="ml-1 opacity-70">{n}</span>}
+            </button>
+          ))}
+        </div>
+
+        {type === "log" ? (
+          <EmailLog />
+        ) : (
+          <>
+            {q.isPending && <Loading what="your queue" />}
+            {q.isError && <LoadError what="your queue" />}
+            {!q.isPending && q.count === 0 && <Empty>Nothing is waiting on you.</Empty>}
+            <ul className="divide-y">
+              {show("review") &&
+                q.reviews.map((item) => (
+                  <li key={item.task.id} className="flex items-start gap-3 py-3 text-sm">
+                    <div className="min-w-0 flex-1">
+                      <p className="flex flex-wrap items-center gap-2">
+                        <Pill label={`Review · ${REVIEW_KIND[item.task.kind]}`} tone={item.task.blocking ? "warn" : "info"} />
+                        <span className="font-semibold">{item.case_reference}</span>
+                        <span>{item.case_title}</span>
+                        <span className="text-xs text-muted-foreground">{WORKFLOW_SHORT[item.workflow]}</span>
+                      </p>
+                      <p className="mt-1 text-muted-foreground">
+                        {item.task.subject && <strong className="text-foreground">{item.task.subject}: </strong>}
+                        {item.task.detail}
+                      </p>
+                    </div>
+                    <OpenButton to={`/pod/cases/${item.case_id}`} />
+                  </li>
+                ))}
+              {show("email") &&
+                q.emails.map((m) => (
+                  <li key={m.id} className="flex items-start gap-3 py-3 text-sm">
+                    <div className="min-w-0 flex-1">
+                      <p className="flex flex-wrap items-center gap-2">
+                        <Pill label="Email" tone={m.status === "draft" ? "neutral" : "bad"} />
+                        <span className="font-semibold">{m.case_reference}</span>
+                        <span>{m.subject}</span>
+                      </p>
+                      <p className="mt-1 text-muted-foreground">
+                        {EMAIL_TODO[m.status]} · to {m.to_email} · {formatDateTime(m.updated_at)}
+                      </p>
+                    </div>
+                    <OpenButton to={`/pod/cases/${m.case_id}`} />
+                  </li>
+                ))}
+              {show("posting") &&
+                q.postings.map((t) => (
+                  <li key={t.id} className="py-3 text-sm">
+                    <div className="flex items-start gap-3">
+                      <div className="min-w-0 flex-1">
+                        <TaskRow t={t} />
+                        <p className="text-xs text-muted-foreground">
+                          {t.case_reference} · {WORKFLOW_SHORT[t.workflow]} · proposed by {t.proposed_by}
+                        </p>
+                      </div>
+                      <OpenButton to={`/pod/cases/${t.case_id}`} />
+                    </div>
+                    <details className="mt-1">
+                      <summary className="cursor-pointer text-xs text-muted-foreground">What to post</summary>
+                      <pre className="mt-1 max-h-32 overflow-auto rounded bg-secondary/40 p-2 text-xs">{JSON.stringify(t.instructions, null, 2)}</pre>
+                    </details>
+                    <TaskActions t={t} />
+                  </li>
+                ))}
+            </ul>
+          </>
+        )}
       </Card>
     </AppPage>
   )
 }
 
-/** Open review tasks: what a person must settle before anything is approved. */
-export function ReviewQueuePage() {
-  const queue = useReviewQueue()
-  return (
-    <AppPage
-      title="Service POD"
-      subtitle="Unknown dates, disputes, missing documents and other ambiguities waiting for a person."
-    >
-      <PodTabs />
-      <Card title="AI Review" hint="Raised by people now; by reply understanding and the workflow engines in the next phases.">
-        {queue.isPending && <Loading what="the review queue" />}
-        {queue.isError && <LoadError what="the review queue" />}
-        {queue.data?.length === 0 && <Empty>Nothing waiting.</Empty>}
-        <ul className="divide-y">
-          {queue.data?.map((item) => (
-            <li key={item.task.id} className="py-3 text-sm">
-              <p className="flex flex-wrap items-center gap-2">
-                <Pill label={REVIEW_KIND[item.task.kind]} tone={item.task.blocking ? "warn" : "info"} />
-                <Link to={`/pod/cases/${item.case_id}`} className="font-semibold text-primary hover:underline">
-                  {item.case_reference}
-                </Link>
-                <span>{item.case_title}</span>
-                <span className="text-xs text-muted-foreground">{WORKFLOW_SHORT[item.workflow]}</span>
-              </p>
-              <p className="mt-1">
-                {item.task.subject && <strong>{item.task.subject}: </strong>}
-                {item.task.detail}
-              </p>
-            </li>
-          ))}
-        </ul>
-      </Card>
-    </AppPage>
-  )
-}
-
-/** The manual QuickBooks queue: post outside the application, record, verify. */
-export function TasksPage() {
-  const [status, setStatus] = useState<TaskStatus | "">("")
-  const tasks = useTasks(status || null)
-  return (
-    <AppPage
-      title="Service POD"
-      subtitle="Post in QuickBooks yourself, record the transaction ID, then verify it against a fresh export."
-    >
-      <PodTabs />
-      <Card
-        title="Manual QB Tasks"
-        actions={
-          <select className={`${selectClass} w-auto`} value={status} onChange={(e) => setStatus(e.target.value as TaskStatus | "")} aria-label="Status">
-            <option value="">All tasks</option>
-            <option value="proposed">Proposed</option>
-            <option value="approved">To post</option>
-            <option value="recorded_unverified">To verify</option>
-            <option value="verified">Verified</option>
-          </select>
-        }
-      >
-        {tasks.isPending && <Loading what="tasks" />}
-        {tasks.isError && <LoadError what="tasks" />}
-        {tasks.data?.length === 0 && <Empty>No posting tasks.</Empty>}
-        <ul className="divide-y">
-          {tasks.data?.map((t) => (
-            <li key={t.id} className="py-3 text-sm">
-              <TaskRow t={t} />
-              <p className="text-xs text-muted-foreground">
-                {t.case_reference} · {WORKFLOW_SHORT[t.workflow]} · proposed by {t.proposed_by}
-              </p>
-              <pre className="mt-1 max-h-32 overflow-auto rounded bg-secondary/40 p-2 text-xs">
-                {JSON.stringify(t.instructions, null, 2)}
-              </pre>
-              <TaskActions t={t} />
-            </li>
-          ))}
-        </ul>
-      </Card>
-    </AppPage>
-  )
+/** Old addresses (Inbox, AI Review, Manual QB Tasks) land on the matching part of My Queue. */
+export function LegacyQueue({ type }: { type: QueueType }) {
+  return <Navigate to={`/pod/queue?type=${type}`} replace />
 }

@@ -1,19 +1,19 @@
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { Link, useSearchParams } from "react-router"
-import { ArrowRight, CircleCheck, Hourglass } from "lucide-react"
+import { ArrowRight, Check, ChevronDown, CircleCheck, Hourglass } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 import type { CaseDetail, WorkflowKey } from "../api"
 import { useCases } from "../hooks"
-import { WORKFLOW_SLUG } from "../labels"
+import { CASE_PHASE, formatDateTime, WORKFLOW_SLUG } from "../labels"
+import { useRunAction } from "../use-run-action"
 import type { FlowStep, NextAction } from "../flows/types"
-import { CaseData, PostingTasks } from "./case-extras"
+import { CaseAudit, CaseData, PostingTasks } from "./case-extras"
 import { Artifacts } from "./case-messages"
+import { Pill } from "./bits"
 import { OwnedActions } from "./case-sections"
-
-const DETAILS = "details"
 
 function Num({ n, on }: { n: number; on: boolean }) {
   return (
@@ -55,7 +55,7 @@ export function JourneyStrip({ workflow, home, steps }: { workflow: WorkflowKey;
               {body}
             </span>
           )
-        const to = waiting.length === 1 ? `/pod/cases/${waiting[0]!.id}?step=${s.key}` : `/pod/${slug}/cases?stage=${s.key}`
+        const to = waiting.length === 1 ? `/pod/cases/${waiting[0]!.id}?step=${s.key}` : `/pod/cases?workflow=${slug}&stage=${s.key}`
         return (
           <Link key={s.key} to={to} className={stepClass(false)} title={waiting.map((c) => `${c.reference} ${c.title}`).join(", ")}>
             {body}
@@ -66,87 +66,168 @@ export function JourneyStrip({ workflow, home, steps }: { workflow: WorkflowKey;
   )
 }
 
-/** The one next thing, for this viewer, with a jump to the step where it happens. */
-function NextBar({ next, onGo }: { next: NextAction; onGo: (step: string) => void }) {
+/** Where the case stands and the one thing to do now; approving and completing happen here. */
+function NextCard({ c, next, onGo }: { c: CaseDetail; next: NextAction; onGo: (step: string) => void }) {
+  const { run, pending } = useRunAction(c)
+  const a = c.allowed_actions
+  const [label, tone] = CASE_PHASE[next.phase]
   const Icon = next.kind === "done" ? CircleCheck : next.kind === "wait" ? Hourglass : ArrowRight
+  const canApprove = c.status === "draft" && a.approve === null
+  const canComplete = c.status === "approved" && a.complete === null
   return (
-    <div
-      className={cn(
-        "flex flex-wrap items-center gap-3 rounded-lg border px-4 py-3 text-sm",
-        next.kind === "do" ? "border-primary/40 bg-primary/5" : "bg-card",
+    <section aria-label="What's next" className={cn("rounded-lg border p-5", next.kind === "do" ? "border-primary/40 bg-primary/5" : "bg-card")}>
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold text-brand-navy">What&apos;s next</h2>
+        <Pill label={label} tone={tone} />
+      </div>
+      <p className="flex gap-2 text-sm">
+        <Icon className={cn("mt-0.5 size-4 shrink-0", next.kind === "do" ? "text-primary" : "text-muted-foreground")} aria-hidden />
+        <span>{next.text}</span>
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {canApprove ? (
+          <Button size="sm" disabled={pending} onClick={() => void run("approve", {}, "Case approved.")}>
+            Approve case
+          </Button>
+        ) : canComplete ? (
+          <Button size="sm" disabled={pending} onClick={() => void run("complete", {}, "Case completed.")}>
+            Complete case
+          </Button>
+        ) : (
+          next.step &&
+          next.kind === "do" && (
+            <Button size="sm" onClick={() => onGo(next.step!)}>
+              Go to it <ArrowRight />
+            </Button>
+          )
+        )}
+      </div>
+      {c.status === "draft" && !canApprove && c.blockers.length > 0 && (
+        <div className="mt-4 border-t pt-3 text-xs">
+          <p className="mb-1 font-medium">Before it can be approved:</p>
+          <ul className="list-disc space-y-0.5 pl-4 text-muted-foreground">
+            {c.blockers.map((b) => (
+              <li key={b}>{b}</li>
+            ))}
+          </ul>
+        </div>
       )}
-    >
-      <Icon className={cn("size-4", next.kind === "do" ? "text-primary" : "text-muted-foreground")} aria-hidden />
-      <span>
-        <span className="font-semibold">{next.kind === "do" ? "Next: " : next.kind === "wait" ? "Waiting: " : ""}</span>
-        {next.text}
-      </span>
-      {next.step && next.kind === "do" && (
-        <Button size="sm" className="ml-auto" onClick={() => onGo(next.step!)}>
-          Go
-        </Button>
+      {c.status === "approved" && !canComplete && c.completion_blockers.length > 0 && (
+        <div className="mt-4 border-t pt-3 text-xs">
+          <p className="mb-1 font-medium">Before it can be completed:</p>
+          <ul className="list-disc space-y-0.5 pl-4 text-muted-foreground">
+            {c.completion_blockers.map((b) => (
+              <li key={b}>{b}</li>
+            ))}
+          </ul>
+        </div>
       )}
-    </div>
+      {c.approvals.length > 0 && (
+        <ul className="mt-4 space-y-1 border-t pt-3 text-xs">
+          {c.approvals.map((ap) => (
+            <li key={ap.id} className={ap.valid ? "" : "text-muted-foreground line-through"}>
+              Approved by {ap.user.name} · {formatDateTime(ap.created_at)}
+              {!ap.valid && " (content changed since)"}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   )
 }
 
-/** A case as steps (deck screens), plus a Details tab for documents, actions and data. */
+type StepState = "done" | "current" | "upcoming"
+
+const STEP_DOT: Record<StepState, string> = {
+  done: "bg-emerald-600 text-white",
+  current: "bg-primary text-primary-foreground ring-4 ring-primary/15",
+  upcoming: "border-2 border-border bg-card text-muted-foreground",
+}
+
+/** A case as one timeline: every step in order, done ones folded with a summary, the current one
+ *  open. The "What's next" card beside it holds the one action (and approve / complete). */
 export function CaseSteps({
   c,
   steps,
   next,
   ownsPosting,
-  home,
+  aside,
 }: {
   c: CaseDetail
   steps: FlowStep[]
   next: NextAction
   ownsPosting: boolean
-  /** The workflow's home screen, shown as step 1 (back to the list) */
-  home?: { label: string; to: string }
+  /** More cards under "What's next" (e.g. related cases) */
+  aside?: ReactNode
 }) {
-  // Opens on the step asked for (from a worklist), else where the work is; then the viewer's choice sticks
+  // ?step= (from a worklist) opens that step; otherwise the current one is open. A click overrides.
   const [params] = useSearchParams()
   const asked = params.get("step")
-  const [active, setActive] = useState(steps.some((s) => s.key === asked) ? asked! : (next.step ?? steps[0]!.key))
-  const current = steps.find((s) => s.key === active)
-  const tab = (key: string) => stepClass(active === key)
-  const first = home ? 2 : 1
+  const [toggled, setToggled] = useState<Record<string, boolean>>({})
+  const current = next.kind === "done" ? steps.length : Math.max(0, steps.findIndex((s) => s.key === next.step))
+  const stateOf = (i: number): StepState => (i < current ? "done" : i === current ? "current" : "upcoming")
+  const isOpen = (key: string, i: number) => toggled[key] ?? (asked ? key === asked : stateOf(i) === "current")
+  const go = (key: string) => {
+    setToggled((t) => ({ ...t, [key]: true }))
+    requestAnimationFrame(() => document.getElementById(`step-${key}`)?.scrollIntoView({ behavior: "smooth", block: "start" }))
+  }
+
   return (
-    <div className="space-y-4">
-      <NextBar next={next} onGo={setActive} />
-      <nav aria-label="Case steps" className="flex overflow-x-auto border-b">
-        {home && (
-          <Link to={home.to} className={tab("")} title={`Back to ${home.label}`}>
-            <Num n={1} on={false} />
-            {home.label}
-          </Link>
-        )}
+    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <ol aria-label="Case timeline" className="space-y-0">
         {steps.map((s, i) => {
+          const state = stateOf(i)
+          const open = isOpen(s.key, i)
           const count = s.badge?.(c) ?? 0
+          const summary = state !== "upcoming" ? s.summary?.(c) : null
           return (
-            <button key={s.key} type="button" className={tab(s.key)} onClick={() => setActive(s.key)} aria-current={active === s.key ? "step" : undefined}>
-              <Num n={i + first} on={active === s.key} />
-              {s.label}
-              {count > 0 && <span className="rounded-full bg-amber-100 px-1.5 text-xs text-amber-900">{count}</span>}
-            </button>
+            <li key={s.key} id={`step-${s.key}`} className="relative scroll-mt-4 pb-6 pl-10">
+              {i < steps.length - 1 && <span aria-hidden className="absolute top-8 bottom-0 left-[13px] w-px bg-border" />}
+              <span
+                aria-hidden
+                className={cn("absolute top-1 left-0 flex size-7 items-center justify-center rounded-full text-xs font-semibold", STEP_DOT[state])}
+              >
+                {state === "done" ? <Check className="size-4" /> : i + 1}
+              </span>
+              <button
+                type="button"
+                aria-expanded={open}
+                onClick={() => setToggled((t) => ({ ...t, [s.key]: !open }))}
+                className="flex w-full items-center gap-2 py-1.5 text-left"
+              >
+                <span className={cn("font-semibold", state === "upcoming" ? "text-muted-foreground" : "text-brand-navy")}>{s.label}</span>
+                {state === "current" && <span className="rounded bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">Now</span>}
+                {count > 0 && <span className="rounded-full bg-amber-100 px-1.5 text-xs text-amber-900">{count}</span>}
+                <ChevronDown className={cn("ml-auto size-4 text-muted-foreground transition-transform", open && "rotate-180")} aria-hidden />
+              </button>
+              {!open && summary && <p className="text-sm text-muted-foreground">{summary}</p>}
+              {!open && state === "upcoming" && <p className="text-sm text-muted-foreground">Comes after the steps above.</p>}
+              {open && (
+                <div className="mt-2 space-y-6">
+                  <s.Body c={c} />
+                </div>
+              )}
+            </li>
           )
         })}
-        <button type="button" className={cn(tab(DETAILS), "ml-auto")} onClick={() => setActive(DETAILS)}>
-          Details
-        </button>
-      </nav>
-      <div className="space-y-6">
-        {current ? (
-          <current.Body c={c} />
-        ) : (
-          <>
-            <Artifacts c={c} />
-            <OwnedActions c={c} />
-            {!ownsPosting && <PostingTasks c={c} />}
-            <CaseData c={c} />
-          </>
-        )}
+        <li className="pl-10">
+          <details className="group rounded-lg border bg-card">
+            <summary className="cursor-pointer px-5 py-3 text-sm font-medium text-muted-foreground hover:text-foreground">
+              Documents, actions and audit details
+            </summary>
+            <div className="space-y-6 border-t p-5">
+              <Artifacts c={c} />
+              <OwnedActions c={c} />
+              {!ownsPosting && <PostingTasks c={c} />}
+              <CaseData c={c} />
+              <CaseAudit c={c} />
+            </div>
+          </details>
+        </li>
+      </ol>
+      <div className="space-y-6 xl:sticky xl:top-4 xl:self-start">
+        <NextCard c={c} next={next} onGo={go} />
+        {aside}
       </div>
     </div>
   )

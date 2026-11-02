@@ -16,6 +16,7 @@ from src.app.service_pod.core.messaging.models import (
 class MessageOut(BaseModel):
     id: uuid.UUID
     case_id: uuid.UUID
+    case_reference: str
     direction: Direction
     audience: Audience | None
     purpose: str
