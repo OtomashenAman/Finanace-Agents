@@ -6,7 +6,7 @@ import { AppPage } from "@/components/layout/app-page"
 import { cn } from "@/lib/utils"
 
 import type { Dashboard, DashboardPhase, PromiseItem } from "./api"
-import { Card, Empty, LoadError, Loading, Pill, PodTabs } from "./components/bits"
+import { Card, LivePulse, LoadError, Loading, Pill, PodTabs } from "./components/bits"
 import { fmt } from "./flows/shared"
 import { useDashboard, useMyQueue } from "./hooks"
 import { CASE_PHASE, formatDateTime, REVIEW_KIND, WORKFLOW_SHORT } from "./labels"
@@ -17,21 +17,68 @@ const PROVIDER: Record<string, string> = { microsoft: "Microsoft 365", brevo: "B
 const PHASES: DashboardPhase[] = ["compose", "waiting", "review", "ready", "approved", "closed"]
 const PHASE_LABEL = (p: DashboardPhase) => (p === "closed" ? "Closed (30 days)" : CASE_PHASE[p][0])
 
-function Tile({ label, value, hint, to }: { label: string; value: string; hint?: string; to?: string }) {
-  const body = (
-    <>
-      <p className="text-[11px] font-semibold tracking-wider text-muted-foreground uppercase">{label}</p>
-      <p className="mt-1 text-xl font-bold tracking-tight text-foreground tabular-nums">{value}</p>
-      {hint && <p className="mt-0.5 text-xs text-muted-foreground/80">{hint}</p>}
-    </>
-  )
-  const cls = "block rounded-lg border border-border/70 bg-card px-3.5 py-3 shadow-2xs"
-  return to ? (
-    <Link to={to} className={cn(cls, "transition-all hover:border-primary/60 hover:shadow-xs")}>
-      {body}
-    </Link>
-  ) : (
-    <div className={cls}>{body}</div>
+function DashboardKpis({
+  openCases,
+  waitingCount,
+  promised,
+}: {
+  openCases: number
+  waitingCount: number
+  promised: string
+}) {
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <Link
+        to="/pod/queue"
+        className="group flex flex-col justify-between rounded-xl border border-border/80 bg-card p-4 shadow-2xs transition-all hover:border-amber-400 hover:shadow-xs"
+      >
+        <div>
+          <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Needs You Now</span>
+          <p className="mt-1 text-2xl font-bold tracking-tight text-amber-600 dark:text-amber-400 tabular-nums">
+            {waitingCount}
+          </p>
+        </div>
+        <span className="mt-2 text-xs font-medium text-amber-700 dark:text-amber-300 group-hover:underline">
+          Go to queue →
+        </span>
+      </Link>
+
+      <Link
+        to="/pod/cases"
+        className="group flex flex-col justify-between rounded-xl border border-border/80 bg-card p-4 shadow-2xs transition-all hover:border-primary hover:shadow-xs"
+      >
+        <div>
+          <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Open Cases</span>
+          <p className="mt-1 text-2xl font-bold tracking-tight text-foreground tabular-nums">
+            {openCases}
+          </p>
+        </div>
+        <span className="mt-2 text-xs font-medium text-primary group-hover:underline">
+          View all cases →
+        </span>
+      </Link>
+
+      <div className="flex flex-col justify-between rounded-xl border border-border/80 bg-card p-4 shadow-2xs">
+        <div>
+          <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Payment Promises</span>
+          <p className="mt-1 text-xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400 tabular-nums truncate" title={promised}>
+            {promised}
+          </p>
+        </div>
+        <span className="mt-2 text-xs text-muted-foreground">Approved commitments</span>
+      </div>
+
+      <div className="flex flex-col justify-between rounded-xl border border-border/80 bg-card p-4 shadow-2xs">
+        <div>
+          <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">QuickBooks Status</span>
+          <div className="mt-1.5 flex items-center gap-2">
+            <LivePulse color="emerald" />
+            <span className="text-sm font-bold text-foreground">Read-Only Live</span>
+          </div>
+        </div>
+        <span className="mt-2 text-xs text-muted-foreground">5 Governed Workflows</span>
+      </div>
+    </div>
   )
 }
 
@@ -193,37 +240,44 @@ function EmailHealth({ d }: { d: Dashboard }) {
 function NeedsYou() {
   const q = useMyQueue()
   const items = [
-    ...q.signoffs.map((c) => ({ key: c.id, to: `/pod/cases/${c.id}`, tag: "Sign-off", ref: c.reference, text: c.title })),
+    ...q.signoffs.map((c) => ({ key: c.id, to: `/pod/cases/${c.id}`, tag: "Sign-off", tone: "good" as const, ref: c.reference, text: c.title })),
     ...q.reviews.map((r) => ({
       key: r.task.id,
       to: `/pod/cases/${r.case_id}`,
       tag: `Review · ${REVIEW_KIND[r.task.kind]}`,
+      tone: "warn" as const,
       ref: r.case_reference,
       text: r.task.subject ?? r.task.detail,
     })),
-    ...q.emails.map((m) => ({ key: m.id, to: `/pod/cases/${m.case_id}`, tag: "Email", ref: m.case_reference, text: m.subject })),
-    ...q.postings.map((t) => ({ key: t.id, to: `/pod/cases/${t.case_id}`, tag: "QuickBooks", ref: t.case_reference, text: t.reference })),
+    ...q.emails.map((m) => ({ key: m.id, to: `/pod/cases/${m.case_id}`, tag: "Email Draft", tone: "ai" as const, ref: m.case_reference, text: m.subject })),
+    ...q.postings.map((t) => ({ key: t.id, to: `/pod/cases/${t.case_id}`, tag: "QuickBooks", tone: "info" as const, ref: t.case_reference, text: t.reference })),
   ]
   return (
     <Card
-      title="Needs you now"
+      title="Human-in-the-Loop: Needs You Now"
+      hint="Authorized human sign-offs, email draft checks, and posting confirmations"
       actions={
         q.count > 5 ? (
-          <Link to="/pod/queue" className="text-xs text-primary hover:underline">
-            All {q.count} →
+          <Link to="/pod/queue" className="text-xs font-semibold text-primary hover:underline flex items-center gap-1">
+            All {q.count} in queue →
           </Link>
         ) : undefined
       }
     >
       {q.isPending && <Loading what="your queue" />}
-      {!q.isPending && items.length === 0 && <Empty>Nothing is waiting on you.</Empty>}
+      {!q.isPending && items.length === 0 && (
+        <div className="py-6 text-center text-xs text-muted-foreground">
+          <p className="font-semibold text-emerald-600 dark:text-emerald-400">All caught up! ✨</p>
+          <p className="mt-0.5">No tasks currently require human sign-off.</p>
+        </div>
+      )}
       <ul className="divide-y">
         {items.slice(0, 5).map((i) => (
           <li key={i.key}>
-            <Link to={i.to} className="group flex items-center gap-2 py-2 text-sm">
-              <Pill label={i.tag} tone="warn" />
-              <span className="font-semibold">{i.ref}</span>
-              <span className="min-w-0 flex-1 truncate text-muted-foreground">{i.text}</span>
+            <Link to={i.to} className="group flex items-center gap-2.5 py-2.5 text-sm transition-colors hover:bg-muted/40 rounded px-1.5">
+              <Pill label={i.tag} tone={i.tone} />
+              <span className="font-semibold text-brand-navy">{i.ref}</span>
+              <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground group-hover:text-foreground">{i.text}</span>
               <ArrowRight className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" aria-hidden />
             </Link>
           </li>
@@ -271,30 +325,34 @@ export function DashboardPage() {
   const promised = d?.promised.length ? d.promised.map((t) => fmt(t.amount, t.currency)).join(" + ") : "None yet"
 
   return (
-    <AppPage title="Service POD" subtitle="Governed finance workflows on read-only QuickBooks data. You post in QuickBooks by hand.">
+    <AppPage
+      title="Service POD"
+      subtitle="Governed finance workflows on read-only QuickBooks books. Real-time monitoring, customer dunning, and audit-ready reconciliations."
+    >
       <PodTabs />
       <div className="space-y-6">
-        <section aria-label="Workflows">
+        <DashboardKpis
+          openCases={d?.open_cases ?? 0}
+          waitingCount={q.count}
+          promised={promised}
+        />
+
+        <section aria-label="Workflows" className="space-y-2.5">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+              Workflows
+            </h2>
+            <span className="text-xs text-muted-foreground">5 active workflows</span>
+          </div>
           <WorkflowCards />
         </section>
-
-        <div className="grid gap-4 sm:grid-cols-3">
-          <Tile label="Promised by customers" value={promised} hint="Approved payment commitments" />
-          <Tile label="Waiting on you" value={String(q.count)} hint={`${q.reviews.length} review task${q.reviews.length === 1 ? "" : "s"}`} to="/pod/queue" />
-          <Tile
-            label="Open cases"
-            value={d ? String(d.open_cases) : "-"}
-            hint={d ? `${d.closed_30d} closed in the last 30 days` : undefined}
-            to="/pod/cases"
-          />
-        </div>
 
         {isPending && <Loading what="the dashboard" />}
         {isError && <LoadError what="the dashboard" />}
         {d && (
           <div className="grid items-start gap-6 xl:grid-cols-2">
-            <Stages d={d} />
             <NeedsYou />
+            <Stages d={d} />
             <Promises d={d} />
             <div className="space-y-6">
               <EmailHealth d={d} />

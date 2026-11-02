@@ -364,7 +364,7 @@ export function SourcesPage() {
                         {s.is_demo && <DemoBadge />}
                         {s.archived && <Pill label="Archived" tone="neutral" />}
                         {hasReceipts ? (
-                          <Pill label="Bank receipts ✓" tone="good" />
+                          <Pill label="Bank receipts ✓" tone="positive" />
                         ) : (
                           <Pill label="No bank receipts" tone="neutral" />
                         )}

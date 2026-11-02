@@ -345,6 +345,9 @@ export type CaseActionName =
   | "propose_correction"
   | "withdraw_correction"
   | "queue_correction"
+  | "review_receipt"
+  | "add_shift"
+  | "remove_shift"
 
 export interface CaseDetail extends CaseSummary {
   snapshot: Snapshot

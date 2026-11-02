@@ -39,15 +39,15 @@ export function WorkflowWorkspace({ workflow, homeLabel, children }: WorkflowWor
           <ChevronRight className="size-3.5 text-muted-foreground" aria-hidden />
           <span className="font-semibold text-brand-navy">{spec?.name ?? WORKFLOW_SHORT[workflow]}</span>
         </p>
-        <nav aria-label={`${spec?.name ?? WORKFLOW_SHORT[workflow]} screens`} className="flex gap-1">
+        <nav aria-label={`${spec?.name ?? WORKFLOW_SHORT[workflow]} screens`} className="flex gap-1.5">
           {homeLabel && (
             <NavLink to={`/pod/${slug}`} end className={subTab}>
               {homeLabel}
             </NavLink>
           )}
-          <Link to={`/pod/cases?workflow=${slug}`} className={subTab({ isActive: false })}>
-            Its cases
-          </Link>
+          <NavLink to={`/pod/${slug}/cases`} className={subTab}>
+            Cases
+          </NavLink>
         </nav>
       </div>
       {children}

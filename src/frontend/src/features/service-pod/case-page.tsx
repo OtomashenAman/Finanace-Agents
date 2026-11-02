@@ -27,7 +27,7 @@ function Header({ c, next }: { c: CaseDetail; next?: NextAction }) {
             <ArrowLeft className="size-3" aria-hidden /> Cases
           </Link>
           <ChevronRight className="size-3 opacity-60" aria-hidden />
-          <Link to={`/pod/cases?workflow=${WORKFLOW_SLUG[c.workflow]}`} className="hover:text-foreground font-medium transition-colors">
+          <Link to={`/pod/${WORKFLOW_SLUG[c.workflow]}/cases`} className="hover:text-foreground font-medium transition-colors">
             {WORKFLOW_SHORT[c.workflow]}
           </Link>
           <ChevronRight className="size-3 opacity-60" aria-hidden />
