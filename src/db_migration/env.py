@@ -20,7 +20,8 @@ import src.app.jobs.models
 import src.app.service_pod.core.cases.models
 import src.app.service_pod.core.messaging.models
 import src.app.service_pod.core.snapshots.models
-import src.app.service_pod.core.tasks.models  # noqa: F401
+import src.app.service_pod.core.tasks.models
+import src.app.service_pod.flows.reporting.models  # noqa: F401
 from src.app.common.models import Base
 
 # this is the Alembic Config object, which provides

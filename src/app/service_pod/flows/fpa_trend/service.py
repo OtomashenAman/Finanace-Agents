@@ -151,9 +151,12 @@ MONTH_NAMES = [
 ]
 
 
-def _month(period: str) -> str:
+def month_name(period: str) -> str:
     """'2026-09' -> 'September 2026'"""
     return f"{MONTH_NAMES[int(period[5:7]) - 1]} {period[:4]}"
+
+
+_month = month_name
 
 
 def _money(value: Any, currency: str) -> str:

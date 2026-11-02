@@ -42,6 +42,8 @@ class Composed(BaseModel):
 class WorkflowHooks:
     # Extra case actions: name -> spec (same contract as the engine's own)
     actions: Mapping[str, ActionSpec] = field(default_factory=dict)
+    # Once the new case has its ID (e.g. raise review tasks the source calls for)
+    after_create: Callable[[AsyncSession, PodCase], Awaitable[None]] | None = None
     # Check the selection against the snapshot and compute the case's state (raise to refuse).
     # refresh=True: the case moves to a newer snapshot (e.g. an invoice may now be paid)
     on_create: Callable[[AsyncSession, PodCase, SnapshotDocument, bool], Awaitable[None]] | None = (

@@ -17,7 +17,9 @@ from src.app.service_pod.core.snapshots.contract import (
     Account,
     AccountClass,
     Allocation,
+    BalanceSheet,
     Basis,
+    CloseStatus,
     Customer,
     GlLine,
     Invoice,
@@ -32,7 +34,12 @@ from src.app.service_pod.core.snapshots.importers.base import (
     check_row_limits,
     validation_message,
 )
-from src.app.service_pod.core.snapshots.importers.quickbooks_pnl import PnlReports, build_pnl
+from src.app.service_pod.core.snapshots.importers.quickbooks_pnl import (
+    PnlReports,
+    build_balance_sheets,
+    build_close_status,
+    build_pnl,
+)
 
 _QB_CLASSES = {
     "income": AccountClass.INCOME,
@@ -164,6 +171,8 @@ async def from_quickbooks(
     ]
     gl_lines: list[GlLine] | None = None
     transactions: list[Transaction] | None = None
+    balance_sheets: list[BalanceSheet] | None = None
+    close_status: list[CloseStatus] | None = None
     if pnl is not None:
         # P&L evidence (FP&A): only when the reports were read; otherwise not supplied
         gl_lines, transactions, pnl_notes = build_pnl(
@@ -173,6 +182,8 @@ async def from_quickbooks(
         )
         if notes is not None:
             notes.extend(pnl_notes)
+        balance_sheets = build_balance_sheets(pnl)
+        close_status = build_close_status(pnl)
 
     synced = source.last_synced_at
     try:
@@ -200,6 +211,8 @@ async def from_quickbooks(
             accounts=pod_accounts,
             gl_lines=gl_lines,
             transactions=transactions,
+            balance_sheets=balance_sheets,
+            close_status=close_status,
         )
     except ValidationError as exc:
         raise SnapshotInvalidError(validation_message(exc)) from exc

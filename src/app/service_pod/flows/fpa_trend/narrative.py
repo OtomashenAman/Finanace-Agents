@@ -3,6 +3,8 @@
 itself (TDD: no digits, currency or percent signs); the screen shows the cited values."""
 
 import uuid
+from collections.abc import Callable
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,7 +29,7 @@ PROMPT_VERSION = "fpa_commentary/v3"
 MAX = {"highlights": 4, "follow_ups": 3}
 
 SYSTEM = (
-    "You are an FP&A analyst writing for the Finance Head. You explain month-on-month "
+    "You are an FP&A analyst writing for {audience}. You explain month-on-month "
     "movements in revenue, costs and operating margin using only the facts given, citing their "
     "IDs. Write no digits, currency or percent signs, and no amounts in words either (not "
     "'sixty thousand', 'ten percent', 'one point seven points'): say rose, fell, the largest, "
@@ -42,8 +44,20 @@ ASK = (
     "and which contributors explain it (use the trend facts only if the longer trend matters). "
     "Then at most three follow-ups: open questions the figures can't answer (e.g. whether new "
     "revenue is recurring) or checks to make. Mention a data caveat only if it changes the "
-    "reading. The Finance Head signs off separately: don't suggest approving the commentary."
+    "reading. The sign-off is separate: don't suggest approving the commentary."
 )
+
+
+# Which workflows have this commentary: their facts and who reads it (Reporting registers too)
+_WRITERS: dict[WorkflowKey, tuple[Callable[[dict[str, Any]], list[ai.Fact]], str]] = {
+    WorkflowKey.FPA_TREND: (facts, "the Finance Head"),
+}
+
+
+def register(
+    key: WorkflowKey, facts_for: Callable[[dict[str, Any]], list[ai.Fact]], audience: str
+) -> None:
+    _WRITERS[key] = (facts_for, audience)
 
 
 class CommentaryUnavailableError(AppError):
@@ -83,13 +97,15 @@ async def draft_commentary(
     llm: LLMProvider,
 ) -> CaseDetail:
     case = await load_case(session, case_id, lock=True, expected_version=expected_version)
-    if case.workflow != WorkflowKey.FPA_TREND:
-        raise CaseActionError("Only an FP&A case has a Finance Head commentary.")
+    writer = _WRITERS.get(case.workflow)
+    if writer is None:
+        raise CaseActionError("This workflow has no cited commentary.")
+    facts_for, audience = writer
     if case.status != CaseStatus.DRAFT:
         raise CaseActionError(f"Can't change the commentary while the case is {case.status.value}.")
     if [i for i in case.state.get("issues", []) if i.get("blocking")]:
         raise CaseActionError("Settle the data issues first: commentary on them would mislead.")
-    cited = facts(case.state)
+    cited = facts_for(case.state)
     known = {f.id for f in cited}
     user = f"{ASK}\n\nFacts:\n{ai.facts_prompt(cited)}"
     rejected = ""
@@ -97,7 +113,7 @@ async def draft_commentary(
         try:
             result = await ai.extract(
                 llm,
-                system=SYSTEM,
+                system=SYSTEM.format(audience=audience),
                 user=user + rejected,
                 schema=FpaCommentary,
                 prompt_version=PROMPT_VERSION,

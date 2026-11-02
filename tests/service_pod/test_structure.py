@@ -10,7 +10,12 @@ from src.app.service_pod.core.workflows import WORKFLOWS, WorkflowKey
 
 def test_every_workflow_is_registered_in_key_order() -> None:
     assert list(WORKFLOWS) == list(WorkflowKey)
-    assert set(HOOKS) == {WorkflowKey.AR_COLLECTIONS, WorkflowKey.BANK_RECON, WorkflowKey.FPA_TREND}
+    assert set(HOOKS) == {
+        WorkflowKey.AR_COLLECTIONS,
+        WorkflowKey.BANK_RECON,
+        WorkflowKey.FPA_TREND,
+        WorkflowKey.REPORTING,
+    }
 
 
 def test_the_worker_knows_every_job() -> None:

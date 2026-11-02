@@ -100,6 +100,14 @@ export function useFpaDrill(args: { caseId: string; accountId: string; period: s
   })
 }
 
+export function useReportMonths() {
+  return useQuery({ queryKey: [POD_TAG, "report-months"], queryFn: podApi.reportMonths })
+}
+
+export function useReportPacks(caseId: string) {
+  return useQuery({ queryKey: [POD_TAG, "report-packs", caseId], queryFn: () => podApi.reportPacks(caseId) })
+}
+
 export function useBankWorklist() {
   return useQuery({ queryKey: [POD_TAG, "bank-worklist"], queryFn: podApi.bankWorklist })
 }
@@ -114,6 +122,7 @@ export const useImportBankStatement = () => usePodMutation(podApi.importBankStat
 export const useCreateCase = () => usePodMutation(podApi.createCase)
 export const useCaseAction = () => usePodMutation(podApi.caseAction)
 export const useFpaCommentary = () => usePodMutation(podApi.fpaCommentary)
+export const useExportPack = () => usePodMutation(podApi.exportPack)
 export const useCreateDraft = () => usePodMutation(podApi.createDraft)
 export const useUpdateMessage = () => usePodMutation(podApi.updateMessage)
 export const useSendMessage = () => usePodMutation(podApi.sendMessage)

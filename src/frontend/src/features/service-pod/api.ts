@@ -39,6 +39,8 @@ export interface Workflow {
   required: Collection[]
   /** The capacity sign-offs are given in, e.g. "Finance Head" (the Finance Admin signs) */
   signoff_as: string
+  /** Every sign-off in order, e.g. ["Controller", "CFO"] */
+  signoffs: string[]
 }
 
 export interface Snapshot {
@@ -361,6 +363,8 @@ export interface CaseDetail extends CaseSummary {
   related_cases: RelatedCase[]
   blockers: string[]
   completion_blockers: string[]
+  /** The sign-off the case waits for (e.g. "CFO"); null: none now */
+  next_signoff: string | null
   /** null: it can be done now; otherwise why not */
   allowed_actions: Record<CaseActionName, string | null>
 }
@@ -429,6 +433,30 @@ export interface FpaDrill {
   }[]
 }
 
+export interface ReportMonths {
+  sources: {
+    snapshot: Snapshot
+    months: { month: string; closed: boolean; balance_sheet: boolean; prior_available: boolean }[]
+    business_units: string[]
+    suggested: string | null
+  }[]
+  cases: { id: string; reference: string; title: string; status: CaseStatus; month: string }[]
+  internal_recipients: string[]
+}
+
+export interface ReportPack {
+  id: string
+  number: number
+  sha256: string
+  size: number
+  content_hash: string
+  source_sha: string
+  reviewers: { capacity: string; name: string; at: string }[]
+  artifact_id: string
+  current: boolean
+  created_at: string
+}
+
 export interface ReviewQueueItem {
   task: ReviewTask
   case_id: string
@@ -470,6 +498,9 @@ export const podApi = {
   emailStatus: () => apiRequest<EmailStatus>("/pod/email-status"),
   dashboard: () => apiRequest<Dashboard>("/pod/dashboard"),
   fpaPeriods: () => apiRequest<FpaPeriods>("/pod/fpa/periods"),
+  reportMonths: () => apiRequest<ReportMonths>("/pod/reporting/months"),
+  reportPacks: (caseId: string) => apiRequest<ReportPack[]>(`/pod/reporting/cases/${caseId}/packs`),
+  exportPack: (caseId: string) => apiRequest<ReportPack>(`/pod/reporting/cases/${caseId}/packs`, { method: "POST" }),
   fpaCommentary: ({ caseId, version }: { caseId: string; version: number }) =>
     apiRequest<CaseDetail>(`/pod/fpa/cases/${caseId}/commentary`, { method: "POST", json: { expected_version: version } }),
   fpaDrill: ({ caseId, accountId, period }: { caseId: string; accountId: string; period: string }) =>

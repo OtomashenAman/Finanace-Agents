@@ -25,9 +25,15 @@ class WorkflowSpec:
     prefix: str  # case references: AR-0042
     description: str
     required: frozenset[Collection]  # a case can't start on a snapshot without these
-    # The capacity an approval is given in (deck: Finance Head for FP&A). The Finance Admin
-    # gives every sign-off; the label is recorded so real roles can be added later.
-    signoff_as: str = "Finance Admin"
+    # The sign-offs a case needs, in order, each recorded in its capacity (deck: Finance Head
+    # for FP&A; Controller then CFO for Reporting). The Finance Admin gives every sign-off; the
+    # labels are kept so real roles can be added later.
+    signoffs: tuple[str, ...] = ("Finance Admin",)
+
+    @property
+    def signoff_as(self) -> str:
+        """The first (usually only) sign-off's capacity."""
+        return self.signoffs[0]
 
 
 # Filled by core.registry.register() as each flow package is imported (in import order)

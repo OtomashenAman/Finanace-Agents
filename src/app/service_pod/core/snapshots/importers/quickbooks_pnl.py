@@ -15,7 +15,14 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Protocol
 
 from src.app.data_sources.records import month_end
-from src.app.service_pod.core.snapshots.contract import AccountClass, Basis, GlLine, Transaction
+from src.app.service_pod.core.snapshots.contract import (
+    AccountClass,
+    BalanceSheet,
+    Basis,
+    CloseStatus,
+    GlLine,
+    Transaction,
+)
 
 PNL_MONTHS = 13  # the latest month and the same month a year before (year-on-year)
 PNL_CLASSES = {
@@ -30,6 +37,8 @@ PNL_CLASSES = {
 class ReportApi(Protocol):
     async def report(self, name: str, **params: str) -> dict[str, Any]: ...
 
+    async def books_closed_through(self) -> str | None: ...
+
 
 @dataclass
 class PnlReports:
@@ -37,6 +46,9 @@ class PnlReports:
     detail: dict[str, Any]
     start: str  # YYYY-MM
     end: str
+    # Financial Reporting's evidence: month-end Balance Sheets and the books closing date
+    balance_sheet: dict[str, Any] | None = None
+    books_closed_through: str | None = None
 
 
 def last_complete_months(today: date, months: int = PNL_MONTHS) -> tuple[str, str]:
@@ -57,7 +69,69 @@ async def fetch_pnl(api: ReportApi, today: date, basis: Basis) -> PnlReports:
     }
     by_month = await api.report("ProfitAndLoss", summarize_column_by="Month", **params)
     detail = await api.report("ProfitAndLossDetail", **params)
-    return PnlReports(by_month=by_month, detail=detail, start=start, end=end)
+    sheet = await api.report("BalanceSheet", summarize_column_by="Month", **params)
+    return PnlReports(
+        by_month=by_month,
+        detail=detail,
+        start=start,
+        end=end,
+        balance_sheet=sheet,
+        books_closed_through=await api.books_closed_through(),
+    )
+
+
+# Balance Sheet report sections (QuickBooks "group" names) and what they total
+_SHEET_GROUPS = {"TotalAssets": "assets", "Liabilities": "liabilities", "Equity": "equity"}
+
+
+def _sections(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    found: list[dict[str, Any]] = []
+    for row in rows:
+        found.append(row)
+        found.extend(_sections((row.get("Rows") or {}).get("Row", [])))
+    return found
+
+
+def build_balance_sheets(reports: PnlReports) -> list[BalanceSheet] | None:
+    """One Balance Sheet per month: the Assets, Liabilities and Equity section totals."""
+    if reports.balance_sheet is None:
+        return None
+    report = reports.balance_sheet
+    totals: dict[str, dict[str, Decimal]] = {}
+    for row in _sections((report.get("Rows") or {}).get("Row", [])):
+        key = _SHEET_GROUPS.get(str(row.get("group") or ""))
+        cells = (row.get("Summary") or {}).get("ColData") or []
+        if key is None or not cells:
+            continue
+        for index, period in _month_columns(report):
+            value = _money(cells[index]) if index < len(cells) else None
+            totals.setdefault(period, {})[key] = value or Decimal(0)
+    return [
+        BalanceSheet(
+            period=period,
+            assets=t.get("assets", Decimal(0)),
+            liabilities=t.get("liabilities", Decimal(0)),
+            equity=t.get("equity", Decimal(0)),
+            report_id=f"BalanceSheet {reports.start}..{reports.end}",
+        )
+        for period, t in sorted(totals.items())
+        if {"assets", "liabilities", "equity"} <= set(t)
+    ]
+
+
+def build_close_status(reports: PnlReports) -> list[CloseStatus]:
+    """A month is Closed when the books closing date is on or after its last day."""
+    closed = (
+        date.fromisoformat(reports.books_closed_through) if reports.books_closed_through else None
+    )
+    out = []
+    year, month = int(reports.start[:4]), int(reports.start[5:])
+    while f"{year:04d}-{month:02d}" <= reports.end:
+        period = f"{year:04d}-{month:02d}"
+        is_closed = closed is not None and month_end(period) <= closed
+        out.append(CloseStatus(period=period, status="Closed" if is_closed else "Open"))
+        year, month = (year, month + 1) if month < 12 else (year + 1, 1)
+    return out
 
 
 def _walk(

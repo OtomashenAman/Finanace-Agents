@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import undefer
 
 from src.app.audit.service import record_event
 from src.app.common.clock import utcnow
@@ -54,7 +55,14 @@ async def send_message(session: AsyncSession, payload: dict[str, Any], ctx: JobC
         return
     ids = [uuid.UUID(a) for a in message.artifact_ids]
     files = (
-        list(await session.scalars(select(PodArtifact).where(PodArtifact.id.in_(ids))))
+        # content is a deferred column: load it here, an async session can't load it lazily
+        list(
+            await session.scalars(
+                select(PodArtifact)
+                .options(undefer(PodArtifact.content))
+                .where(PodArtifact.id.in_(ids))
+            )
+        )
         if ids
         else []
     )

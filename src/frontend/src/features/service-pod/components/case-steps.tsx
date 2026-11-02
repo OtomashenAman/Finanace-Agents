@@ -70,7 +70,7 @@ export function JourneyStrip({ workflow, home, steps }: { workflow: WorkflowKey;
 function NextCard({ c, next, onGo }: { c: CaseDetail; next: NextAction; onGo: (step: string) => void }) {
   const { run, pending } = useRunAction(c)
   const { data: workflows } = useWorkflows()
-  const signoff = workflows?.find((w) => w.key === c.workflow)?.signoff_as ?? "Finance Admin"
+  const signoff = c.next_signoff ?? workflows?.find((w) => w.key === c.workflow)?.signoff_as ?? "Finance Admin"
   const a = c.allowed_actions
   const [label, tone] = CASE_PHASE[next.phase]
   const Icon = next.kind === "done" ? CircleCheck : next.kind === "wait" ? Hourglass : ArrowRight

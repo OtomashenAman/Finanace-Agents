@@ -48,6 +48,7 @@ async def test_sample_workbook_opens_every_workflow(pod: AsyncClient, entity: Le
         "ar_collections": {"customer_id": "C1", "invoice_ids": ["I101", "I102"]},
         "bank_recon": {"receipt_reference": "WIRE-2901", "customer_id": "C1"},
         "fpa_trend": {"start": "2026-04", "end": "2026-09"},
+        "reporting": {"month": "2026-09"},
     }
     for workflow in WorkflowKey:
         r = await pod.post(

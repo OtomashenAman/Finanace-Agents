@@ -39,6 +39,7 @@ def workflows_for() -> list[WorkflowOut]:
             description=spec.description,
             required=sorted(spec.required),
             signoff_as=spec.signoff_as,
+            signoffs=list(spec.signoffs),
         )
         for spec in WORKFLOWS.values()
     ]

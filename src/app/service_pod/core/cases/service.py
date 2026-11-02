@@ -150,6 +150,11 @@ def case_fingerprint(case: PodCase, children: Children) -> str:
     )
 
 
+async def current_fingerprint(session: AsyncSession, case: PodCase) -> str:
+    """What an approval of the case's current content would bind."""
+    return case_fingerprint(case, await _children(session, case))
+
+
 def _blockers(children: Children) -> list[str]:
     open_tasks = [
         t for t in children.review_tasks if t.blocking and t.status == ReviewTaskStatus.OPEN
@@ -226,8 +231,19 @@ def _guard_edit(c: Ctx) -> str | None:
     return need_status(c, DRAFT, "edit")
 
 
+def next_signoff(c: Ctx) -> str | None:
+    """The first sign-off (in the workflow's order) that the current content doesn't have yet;
+    an edit invalidates them all, so they are given again from the first."""
+    signed = {a.capacity for a in c.children.approvals if a.content_hash == c.fingerprint}
+    return next((s for s in WORKFLOWS[c.case.workflow].signoffs if s not in signed), None)
+
+
 def _guard_approve(c: Ctx) -> str | None:
-    return need_status(c, DRAFT, "approve") or (c.blockers[0] if c.blockers else None)
+    return (
+        need_status(c, DRAFT, "approve")
+        or (c.blockers[0] if c.blockers else None)
+        or (None if next_signoff(c) else "Every sign-off is already given.")
+    )
 
 
 def _guard_complete(c: Ctx) -> str | None:
@@ -264,7 +280,8 @@ async def _edit(c: Ctx, p: BaseModel) -> tuple[str, bool]:
 
 
 async def _approve(c: Ctx, _: BaseModel) -> tuple[str, bool]:
-    capacity = WORKFLOWS[c.case.workflow].signoff_as
+    capacity = next_signoff(c)
+    assert capacity is not None  # noqa: S101 - the guard checked it
     c.session.add(
         PodApproval(
             case_id=c.case.id,
@@ -273,7 +290,9 @@ async def _approve(c: Ctx, _: BaseModel) -> tuple[str, bool]:
             capacity=capacity,
         )
     )
-    c.case.status = CaseStatus.APPROVED
+    # The case is approved once its last sign-off is given; until then it stays a draft
+    if capacity == WORKFLOWS[c.case.workflow].signoffs[-1]:
+        c.case.status = CaseStatus.APPROVED
     return ("Approved" if capacity == "Finance Admin" else f"Signed off as {capacity}"), False
 
 
@@ -522,6 +541,9 @@ async def create_case(
         await on_create(session, case, snapshots.document(snapshot), False)
     session.add(case)
     await session.flush()
+    after_create = hooks_for(spec.key).after_create
+    if after_create is not None:
+        await after_create(session, case)
     record_event(
         session,
         "pod.case_created",
@@ -730,6 +752,7 @@ async def get_case(session: AsyncSession, access: PodAccess, case_id: uuid.UUID)
         related_cases=await related_cases(session, case),
         blockers=c.blockers,
         completion_blockers=c.completion_blockers,
+        next_signoff=next_signoff(c) if case.status == CaseStatus.DRAFT else None,
         allowed_actions={name: a.guard(c) for name, a in actions_for(case).items()},
     )
 

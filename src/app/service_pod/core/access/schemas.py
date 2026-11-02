@@ -11,3 +11,4 @@ class WorkflowOut(BaseModel):
     description: str
     required: list[Collection]
     signoff_as: str
+    signoffs: list[str]  # in order, e.g. Controller then CFO

@@ -129,6 +129,7 @@ class CaseDetail(CaseSummary):
     posting_tasks: list[TaskOut]
     related_cases: list[RelatedCase]
     blockers: list[str]  # what stops approval now
+    next_signoff: str | None  # the sign-off the case waits for (e.g. "CFO"); None: none now
     completion_blockers: list[str]
     # action -> None when it can be done now, else the reason it can't
     allowed_actions: dict[str, str | None]

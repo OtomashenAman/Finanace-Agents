@@ -19,4 +19,5 @@ SPEC = WorkflowSpec(
             Collection.INVOICES,
         }
     ),
+    signoffs=("Controller", "CFO"),
 )

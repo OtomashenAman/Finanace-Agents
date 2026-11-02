@@ -22,7 +22,7 @@ import type { FpaChange, FpaContributor, FpaFact, FpaState } from "./meta"
 import { amount, blockingIssues, fpaState, marginLabel, monthLabel, pct, signed } from "./meta"
 
 /** A figure tile sized for four across the case column (amounts stay on one line). */
-function Kpi({ label, value }: { label: string; value: string }) {
+export function Kpi({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0 rounded-lg border bg-card px-3 py-3">
       <p className="truncate text-[11px] tracking-wide text-muted-foreground uppercase">{label}</p>
@@ -480,7 +480,7 @@ function CommentaryCta({ c }: { c: CaseDetail }) {
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm">
       <span className="flex-1">
-        {issues.length ? "Settle the data issues before writing the commentary." : "Reviewed the figures? Draft the Finance Head commentary next."}
+        {issues.length ? "Settle the data issues before writing the commentary." : "Reviewed the figures? Draft the commentary next."}
       </span>
       <Button
         size="sm"
@@ -517,7 +517,7 @@ function FactChips({ ids, facts }: { ids: string[]; facts: Map<string, FpaFact> 
   )
 }
 
-function Commentary({ c, s }: { c: CaseDetail; s: FpaState }) {
+export function Commentary({ c, s, title = "Finance Head commentary" }: { c: CaseDetail; s: FpaState; title?: string }) {
   const draft = useFpaCommentary()
   const { run, pending } = useRunAction(c)
   const [editing, setEditing] = useState(false)
@@ -536,7 +536,7 @@ function Commentary({ c, s }: { c: CaseDetail; s: FpaState }) {
 
   return (
     <Card
-      title="Finance Head commentary"
+      title={title}
       hint="AI findings cite the engine's facts and never state a figure themselves; the cited values are shown beside them."
       actions={
         editable &&
@@ -605,13 +605,13 @@ const FOLLOW_UP: Record<string, [string, "info" | "warn" | "neutral"]> = {
 
 /** The AI's open questions and checks: they don't block the sign-off; one can be tracked as
  *  an owned action. */
-function FollowUps({ c, s }: { c: CaseDetail; s: FpaState }) {
+export function FollowUps({ c, s }: { c: CaseDetail; s: FpaState }) {
   const { run, pending } = useRunAction(c)
   const items = (s.follow_ups ?? s.recommended_actions ?? []).filter((f) => f.kind !== "approve")
   if (!items.length) return null
   const taken = new Set(c.owned_actions.map((a) => a.title))
   return (
-    <Card title="Questions and follow-ups" hint="From the AI, for the Finance Head. They don't block the sign-off; track one if someone should act on it.">
+    <Card title="Questions and follow-ups" hint="From the AI, for the reviewers. They don't block the sign-off; track one if someone should act on it.">
       <ul className="divide-y">
         {items.map((r) => {
           const [label, tone] = FOLLOW_UP[r.kind] ?? ["Follow-up", "neutral"]
@@ -641,7 +641,7 @@ function FollowUps({ c, s }: { c: CaseDetail; s: FpaState }) {
   )
 }
 
-function Corrections({ c, s }: { c: CaseDetail; s: FpaState }) {
+export function Corrections({ c, s }: { c: CaseDetail; s: FpaState }) {
   const { run, pending } = useRunAction(c)
   const [open, setOpen] = useState(false)
   const end = s.months[s.months.length - 1]!
