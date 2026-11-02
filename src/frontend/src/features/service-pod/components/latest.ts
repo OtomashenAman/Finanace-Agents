@@ -14,4 +14,6 @@ export function splitLatest<T>(items: T[], key: (item: T) => string): { latest: 
   return { latest, older }
 }
 
-export const snapshotKey = (s: { company_name: string; entity: { code: string } }) => `${s.company_name}|${s.entity.code}`
+export function snapshotKey<T extends { company_name: string; entity: { code: string } }>(s: T): string {
+  return `${s.company_name}|${s.entity.code}`
+}

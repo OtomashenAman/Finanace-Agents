@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Archive, ArchiveRestore, ChevronDown, ChevronRight, FileJson, Landmark, Trash2, Upload } from "lucide-react"
+import { Archive, ArchiveRestore, ChevronDown, ChevronRight, FileJson, History, Landmark, Trash2, Upload } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -356,7 +356,7 @@ export function SourcesPage() {
 
   // The latest snapshot of each company first; earlier ones on request
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const groups = splitLatest(snapshots.data ?? [], snapshotKey)
+  const groups = splitLatest<Snapshot>(snapshots.data ?? [], snapshotKey)
   const rows = groups.latest.flatMap((s) => {
     const key = snapshotKey(s)
     const older = groups.older.get(key) ?? []
@@ -391,16 +391,23 @@ export function SourcesPage() {
               const hasReceipts = s.coverage.includes("bank_receipts")
               const isOpen = openId === s.id
               return (
-                <li key={s.id} className={first ? "py-2" : "ml-6 border-l-2 border-border/70 py-1 pl-3"}>
+                <li
+                  key={s.id}
+                  className={
+                    first
+                      ? "py-2.5"
+                      : "relative ml-6 border-l-2 border-primary/20 py-1.5 pl-4 before:absolute before:-left-[5px] before:top-4 before:size-2 before:rounded-full before:bg-primary/50"
+                  }
+                >
                   <button
                     type="button"
-                    className="flex w-full items-start justify-between gap-3 rounded-lg p-2.5 text-left transition-colors hover:bg-muted/50"
+                    className="flex w-full items-start justify-between gap-3 rounded-lg border border-transparent p-2.5 text-left transition-all hover:border-border/60 hover:bg-muted/40"
                     onClick={() => setOpenId(isOpen ? null : s.id)}
                   >
                     <div className="min-w-0 flex-1">
                       <p className="flex flex-wrap items-center gap-2">
-                        <span className="font-semibold text-brand-navy">{s.company_name}</span>
-                        <span className="text-xs text-muted-foreground">
+                        <span className="font-semibold text-brand-navy dark:text-foreground">{s.company_name}</span>
+                        <span className="text-xs text-muted-foreground font-mono">
                           {s.entity.code} · {s.currency} · {s.basis} · as of {s.as_of}
                         </span>
                         {s.is_demo && <DemoBadge />}
@@ -410,12 +417,19 @@ export function SourcesPage() {
                         ) : (
                           <Pill label="No bank receipts" tone="neutral" />
                         )}
+                        {!first && (
+                          <span className="rounded bg-secondary/80 px-1.5 py-0.2 text-[10px] font-medium text-muted-foreground">
+                            Earlier Snapshot
+                          </span>
+                        )}
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">
                         {s.source_type.replace("_", " ")} · {s.coverage.length} collections · imported by {s.imported_by}{" "}
-                        {formatDateTime(s.imported_at)} · sha256 {shortHash(s.sha256)}
+                        {formatDateTime(s.imported_at)} · sha256 <span className="font-mono">{shortHash(s.sha256)}</span>
                         {s.parent_id && " · extends earlier snapshot"}
-                        {s.used_by_cases > 0 && ` · ${s.used_by_cases} case(s)`}
+                        {s.used_by_cases > 0 && (
+                          <span className="font-semibold text-foreground"> · {s.used_by_cases} case(s) bound</span>
+                        )}
                       </p>
                     </div>
                     <div className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground pt-1">
@@ -424,28 +438,36 @@ export function SourcesPage() {
                     </div>
                   </button>
                   {isOpen && (
-                    <div className="mt-2 space-y-4 rounded-md border bg-secondary/20 p-3">
-                      <p className="text-xs break-all text-muted-foreground">Source: {s.source_reference}</p>
+                    <div className="mt-2 space-y-4 rounded-md border border-border/80 bg-secondary/20 p-3 shadow-2xs">
+                      <p className="text-xs font-mono break-all text-muted-foreground">Source: {s.source_reference}</p>
                       <Rows snapshot={s} />
                       {!s.archived && <BankStatement snapshot={s} />}
                       <Removal snapshot={s} />
                     </div>
                   )}
                   {first && older.length > 0 && (
-                    <button
-                      type="button"
-                      className="ml-2.5 text-xs text-primary hover:underline"
-                      onClick={() =>
-                        setExpanded((prev) => {
-                          const next = new Set(prev)
-                          if (next.has(key)) next.delete(key)
-                          else next.add(key)
-                          return next
-                        })
-                      }
-                    >
-                      {expanded.has(key) ? "Hide earlier snapshots" : `${older.length} earlier snapshot${older.length > 1 ? "s" : ""} of ${s.company_name}`}
-                    </button>
+                    <div className="mt-1 pl-2.5">
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1.5 rounded-full border border-border/70 bg-card px-2.5 py-1 text-xs font-medium text-foreground transition-all hover:border-primary/40 hover:bg-secondary/60 hover:text-primary shadow-2xs"
+                        onClick={() =>
+                          setExpanded((prev) => {
+                            const next = new Set(prev)
+                            if (next.has(key)) next.delete(key)
+                            else next.add(key)
+                            return next
+                          })
+                        }
+                      >
+                        <History className="size-3 text-muted-foreground" />
+                        <span>
+                          {expanded.has(key)
+                            ? `Hide ${older.length} earlier snapshot${older.length > 1 ? "s" : ""}`
+                            : `Show ${older.length} earlier snapshot${older.length > 1 ? "s" : ""} of ${s.company_name}`}
+                        </span>
+                        {expanded.has(key) ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+                      </button>
+                    </div>
                   )}
                 </li>
               )

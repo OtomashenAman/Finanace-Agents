@@ -40,8 +40,18 @@ const NAV: NavItem[] = [
 function Brand() {
   return (
     <div>
-      <p className="text-xl font-bold tracking-wide text-brand-navy-muted">◈ FINANCE AI</p>
-      <p className="mt-3 text-[15px] text-brand-ice">Command Center</p>
+      <div className="flex items-center gap-2">
+        <span className="text-xl font-extrabold tracking-wider text-sky-400">◈</span>
+        <span className="text-lg font-bold tracking-wider text-white">FINANCE AI</span>
+      </div>
+      <p className="mt-1 text-xs font-medium tracking-wide text-brand-ice/80">Autonomous Command Center</p>
+      <div className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-950/40 px-2.5 py-1 text-[11px] font-medium text-emerald-300">
+        <span className="relative flex size-2">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+          <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
+        </span>
+        5 Workflows Active
+      </div>
     </div>
   )
 }

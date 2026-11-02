@@ -1,5 +1,42 @@
 import { Link, useParams } from "react-router"
-import { ArrowLeft, ChevronRight } from "lucide-react"
+import { ArrowLeft, ChevronRight, Sparkles } from "lucide-react"
+
+function AiExecutiveSummary({ c, next }: { c: CaseDetail; next?: NextAction }) {
+  return (
+    <div className="relative overflow-hidden rounded-xl border border-violet-200/80 bg-gradient-to-r from-violet-50/70 via-indigo-50/40 to-card p-4 shadow-2xs dark:border-violet-900/40 dark:from-violet-950/20 dark:via-indigo-950/10">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="flex size-6 items-center justify-center rounded-md bg-violet-600/10 text-violet-700 dark:text-violet-300">
+              <Sparkles className="size-3.5" />
+            </span>
+            <span className="text-xs font-bold tracking-wide uppercase text-violet-800 dark:text-violet-300">
+              Autonomous AI Analysis
+            </span>
+            <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+              Read-Only Safe
+            </span>
+          </div>
+          <p className="text-sm font-semibold text-foreground">
+            {next ? next.text : `Case ${c.reference} is currently ${c.status}.`}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Workflow: <span className="font-medium text-foreground">{WORKFLOW_SHORT[c.workflow]}</span> · Fingerprint:{" "}
+            <span className="font-mono text-[11px]">{c.fingerprint.slice(0, 10)}…</span> · QB Snapshot: {c.snapshot.company_name}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 sm:self-center shrink-0">
+          <span className="rounded-md border border-border/80 bg-card/80 px-2.5 py-1 text-xs font-mono font-medium text-muted-foreground">
+            Version v{c.version}
+          </span>
+          <span className="rounded-md border border-border/80 bg-card/80 px-2.5 py-1 text-xs font-medium text-muted-foreground">
+            {c.blockers.length === 0 ? "✓ 0 Blockers" : `⚠️ ${c.blockers.length} Blocker${c.blockers.length > 1 ? "s" : ""}`}
+          </span>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 
 import type { CaseDetail } from "./api"
@@ -62,6 +99,7 @@ export function CasePage() {
       {c && (
         <div className="space-y-4">
           <Header c={c} next={next} />
+          <AiExecutiveSummary c={c} next={next} />
           <RefreshSource c={c} />
           {flow?.steps && next ? (
             <CaseSteps key={c.id} c={c} steps={flow.steps} next={next} ownsPosting={flow.ownsPosting} aside={<RelatedCases c={c} />} />
