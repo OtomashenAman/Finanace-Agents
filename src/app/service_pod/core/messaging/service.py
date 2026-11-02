@@ -55,6 +55,7 @@ from src.app.service_pod.core.messaging.schemas import (
 )
 from src.app.service_pod.core.snapshots import service as snapshots
 from src.app.service_pod.core.snapshots.models import PodSnapshot
+from src.app.service_pod.core.workflows import PodKey, keys_in
 
 SEND_JOB = "pod.send_message"
 EXTRACT_JOB = "pod.extract_reply"
@@ -153,7 +154,13 @@ async def messages_for_case(session: AsyncSession, case: PodCase) -> list[Messag
 
 async def list_messages(session: AsyncSession, status: MessageStatus | None) -> list[MessageOut]:
     """The inbox: messages on every case, newest first."""
-    query = select(PodMessage).order_by(PodMessage.updated_at.desc()).limit(300)
+    query = (
+        select(PodMessage)
+        .join(PodCase, PodCase.id == PodMessage.case_id)
+        .where(PodCase.workflow.in_(keys_in(PodKey.SERVICE)))  # the Service POD's inbox
+        .order_by(PodMessage.updated_at.desc())
+        .limit(300)
+    )
     if status is not None:
         query = query.where(PodMessage.status == status)
     return await _message_outs(session, list(await session.scalars(query)))
@@ -306,12 +313,12 @@ def _require_facts(fact_block: str | None, body: str) -> None:
 
 
 async def _load_message(
-    session: AsyncSession, message_id: uuid.UUID, expected_version: int
+    session: AsyncSession, access: PodAccess, message_id: uuid.UUID, expected_version: int
 ) -> tuple[PodMessage, PodCase]:
     message = await session.get(PodMessage, message_id, with_for_update=True)
     if message is None:
         raise MessageNotFoundError
-    case = await load_case(session, message.case_id)
+    case = await load_case(session, message.case_id, access=access)
     if message.version != expected_version:
         raise StaleVersionError("This message was changed by someone else. Refresh and retry.")
     return message, case
@@ -350,7 +357,7 @@ async def create_draft(
     body: MessageDraftIn,
     ctx: RequestContext,
 ) -> MessageOut:
-    case = await load_case(session, case_id)
+    case = await load_case(session, case_id, access=access)
     _require_open(case)
     await _check_recipient(session, case, body.audience, body.to_email)
     await _approved_artifacts(session, case, body.artifact_ids)
@@ -393,7 +400,7 @@ async def update_message(
     body: MessageUpdate,
     ctx: RequestContext,
 ) -> MessageOut:
-    message, case = await _load_message(session, message_id, body.expected_version)
+    message, case = await _load_message(session, access, message_id, body.expected_version)
     _require_open(case)
     if message.direction != Direction.OUTBOUND or message.status not in EDITABLE:
         raise MessageRefusedError(f"A {message.status.value} message can't be edited.")
@@ -437,7 +444,7 @@ async def send_message(
 ) -> MessageOut:
     """Approve the exact message (its hash binds subject, body, recipient, attachments,
     purpose and transport) and send it once."""
-    message, case = await _load_message(session, message_id, body.expected_version)
+    message, case = await _load_message(session, access, message_id, body.expected_version)
     _require_open(case)
     if message.direction != Direction.OUTBOUND or message.status not in EDITABLE:
         raise MessageRefusedError(f"A {message.status.value} message can't be sent.")
@@ -531,7 +538,7 @@ async def reconcile_message(
     ctx: RequestContext,
 ) -> MessageOut:
     """Settle a send whose outcome was unknown, after checking the provider's own log."""
-    message, case = await _load_message(session, message_id, body.expected_version)
+    message, case = await _load_message(session, access, message_id, body.expected_version)
     _require_open(case)
     if message.status != MessageStatus.SEND_UNKNOWN:
         raise MessageRefusedError("Only a send with an unknown outcome needs reconciling.")
@@ -689,7 +696,7 @@ async def upload_artifact(
     data: bytes,
     ctx: RequestContext,
 ) -> ArtifactOut:
-    case = await load_case(session, case_id)
+    case = await load_case(session, case_id, access=access)
     _require_open(case)
     content_type = content_type.split(";")[0].strip().lower()
     if content_type not in ARTIFACT_TYPES:
@@ -748,7 +755,7 @@ async def decide_artifact(
     artifact = await session.get(PodArtifact, artifact_id, with_for_update=True)
     if artifact is None:
         raise ArtifactNotFoundError
-    case = await load_case(session, artifact.case_id)
+    case = await load_case(session, artifact.case_id, access=access)
     _require_open(case)
     if artifact.status != ArtifactStatus.PENDING:
         raise ArtifactInvalidError("This document was already decided.")

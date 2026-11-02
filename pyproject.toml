@@ -52,6 +52,9 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 addopts = "-ra --strict-markers --strict-config"
 cache_dir = ".cache/pytest"
+markers = [
+    "requirement(*ids): the GIA requirement items (e.g. AP1.R1) a test proves (see tests/finance_pod/test_requirement_coverage.py)",
+]
 filterwarnings = ["error::DeprecationWarning:src.*"]
 
 [tool.coverage.run]

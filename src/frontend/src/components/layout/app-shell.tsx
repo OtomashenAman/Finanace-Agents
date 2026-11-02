@@ -5,6 +5,7 @@ import {
   Database,
   History,
   LayoutDashboard,
+  Landmark,
   LayoutGrid,
   ListTodo,
   Workflow,
@@ -16,6 +17,7 @@ import {
 
 import { useCurrentUser } from "@/features/auth/hooks"
 import { isAdmin } from "@/features/auth/roles"
+import { useFinanceMe } from "@/features/finance-pod/hooks"
 import { useWorklist } from "@/features/worklist/hooks"
 import { cn } from "@/lib/utils"
 
@@ -24,12 +26,15 @@ interface NavItem {
   icon: LucideIcon
   to?: string // undefined = not built yet
   adminOnly?: boolean
+  /** Finance POD: shown to admins and to anyone holding a Finance POD capacity */
+  financePod?: boolean
 }
 
 const NAV: NavItem[] = [
   { label: "Overview", icon: LayoutDashboard, to: "/overview" },
   { label: "Agent Catalog", icon: LayoutGrid, to: "/catalog" },
   { label: "Service POD", icon: Workflow, to: "/pod", adminOnly: true },
+  { label: "Finance POD", icon: Landmark, to: "/finance", financePod: true },
   { label: "My Worklist", icon: ListTodo, to: "/worklist" },
   { label: "Approvals", icon: CircleCheck, to: "/approvals" },
   { label: "Audit Trail", icon: History, to: "/audit" },
@@ -58,7 +63,10 @@ function Brand() {
 
 function Nav({ onNavigate }: { onNavigate?: () => void }) {
   const { data: user } = useCurrentUser()
-  const items = NAV.filter((item) => !item.adminOnly || isAdmin(user))
+  const finance = useFinanceMe()
+  const items = NAV.filter(
+    (item) => (!item.adminOnly || isAdmin(user)) && (!item.financePod || isAdmin(user) || finance.isSuccess),
+  )
   const worklist = useWorklist()
   const todo = worklist.data?.action.length ?? 0
   const base = "relative flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150"

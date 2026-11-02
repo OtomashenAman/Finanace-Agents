@@ -6,6 +6,7 @@ const TABS = [
   { to: "/admin/users", label: "Users" },
   { to: "/admin/entities", label: "Legal entities" },
   { to: "/admin/governance", label: "Governance" },
+  { to: "/admin/finance-capacities", label: "Finance POD" },
   { to: "/admin/data-sources", label: "Data sources" },
   { to: "/admin/ai-monitoring", label: "Monitoring" },
 ]

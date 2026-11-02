@@ -1,12 +1,13 @@
-"""How a workflow plugs into the Service POD: its spec, its rules (hooks) and its own
-endpoints. Each package under flows/ calls register() once, when flows is imported."""
+"""How a workflow plugs into its POD: its spec, its rules (hooks) and its own endpoints.
+Each package under service_pod/flows/ and finance_pod/flows/ calls register() once, when
+its flows package is imported. A workflow's router is mounted under its own POD only."""
 
 from fastapi import APIRouter
 
 from src.app.service_pod.core.hooks import HOOKS, WorkflowHooks
-from src.app.service_pod.core.workflows import WORKFLOWS, WorkflowKey, WorkflowSpec
+from src.app.service_pod.core.workflows import WORKFLOWS, PodKey, WorkflowKey, WorkflowSpec
 
-ROUTERS: list[APIRouter] = []
+ROUTERS: dict[PodKey, list[APIRouter]] = {pod: [] for pod in PodKey}
 
 
 def register(
@@ -22,4 +23,4 @@ def register(
     if hooks is not None:
         HOOKS[spec.key] = hooks
     if router is not None:
-        ROUTERS.append(router)
+        ROUTERS[spec.pod].append(router)

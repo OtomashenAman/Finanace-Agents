@@ -9,9 +9,10 @@ approved is what goes out.
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from typing import Any
 
 from pydantic import BaseModel, ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.audit.service import record_event
@@ -25,6 +26,7 @@ from src.app.service_pod.core.access.service import PodAccess
 from src.app.service_pod.core.cases.access import load_case
 from src.app.service_pod.core.cases.exceptions import (
     CaseActionError,
+    CaseSelectionError,
     InvalidActionPayloadError,
     SourceCoverageError,
 )
@@ -68,9 +70,11 @@ from src.app.service_pod.core.messaging.models import Direction, MessageStatus, 
 from src.app.service_pod.core.snapshots import service as snapshots
 from src.app.service_pod.core.snapshots.contract import Collection
 from src.app.service_pod.core.snapshots.models import PodSnapshot
+from src.app.service_pod.core.steps import service as steps
+from src.app.service_pod.core.steps.models import PodCaseStep
 from src.app.service_pod.core.tasks import service as tasks
 from src.app.service_pod.core.tasks.models import PodPostingTask, TaskStatus
-from src.app.service_pod.core.workflows import WORKFLOWS
+from src.app.service_pod.core.workflows import WORKFLOWS, PodKey, keys_in
 
 MAX_CASE_DATA = 256 * 1024  # selection / state JSON
 DRAFT = frozenset({CaseStatus.DRAFT})
@@ -82,10 +86,12 @@ class Children:
     review_tasks: list[PodReviewTask]
     actions: list[PodOwnedAction]
     commitments: list[PodCommitment]
+    steps: list[PodCaseStep]  # Finance POD workflows only (empty otherwise)
 
 
 async def _children(session: AsyncSession, case: PodCase) -> Children:
     return Children(
+        steps=await steps.load_steps(session, case) if steps.has_steps(case) else [],
         approvals=list(
             await session.scalars(
                 select(PodApproval)
@@ -119,9 +125,12 @@ async def _children(session: AsyncSession, case: PodCase) -> Children:
 
 def case_fingerprint(case: PodCase, children: Children) -> str:
     """What an approval vouches for. Timestamps and who-did-it are left out on purpose:
-    they don't change what is being approved."""
+    they don't change what is being approved. Steps join the content only for workflows
+    that have them, so the Service POD's existing approvals keep their fingerprints."""
+    step_part = {"steps": steps.fingerprint_part(children.steps)} if children.steps else {}
     return fingerprint(
         {
+            **step_part,
             "snapshot": case.snapshot_sha,
             "title": case.title,
             "selection": case.selection,
@@ -238,11 +247,30 @@ def next_signoff(c: Ctx) -> str | None:
     return next((s for s in WORKFLOWS[c.case.workflow].signoffs if s not in signed), None)
 
 
+def _signoff_problem(c: Ctx) -> str | None:
+    """Finance POD: the next sign-off needs its capacity, and (signoff_sod) someone other
+    than the case's owner and the people who already signed this content."""
+    spec = WORKFLOWS[c.case.workflow]
+    capacity = next_signoff(c)
+    if spec.pod != PodKey.FINANCE or capacity is None:
+        return None
+    if not c.access.holds(capacity, c.case.entity_id):
+        return f"Signing off as {capacity.replace('_', ' ')} needs that capacity."
+    if spec.signoff_sod:
+        if c.case.owner_id == c.user.id:
+            return "Who opened the case can't sign it off."
+        signed = {a.user_id for a in c.children.approvals if a.content_hash == c.fingerprint}
+        if c.user.id in signed:
+            return "Each sign-off must come from a different person."
+    return None
+
+
 def _guard_approve(c: Ctx) -> str | None:
     return (
         need_status(c, DRAFT, "approve")
         or (c.blockers[0] if c.blockers else None)
         or (None if next_signoff(c) else "Every sign-off is already given.")
+        or _signoff_problem(c)
     )
 
 
@@ -480,6 +508,23 @@ ACTIONS: dict[str, ActionSpec] = {
     "decide_commitment": ActionSpec(DecideCommitmentPayload, need_open, _decide_commitment),
 }
 
+# Workflows with L4/L5 steps (the Finance POD) also get these; who may act on which step is
+# checked by the step engine against the payload's step
+STEP_ACTIONS: dict[str, ActionSpec] = {
+    "complete_step": ActionSpec(steps.CompleteStepPayload, need_open, steps.complete_step),
+    "run_agent_step": ActionSpec(steps.RunAgentStepPayload, need_open, steps.run_agent_step),
+    "redo_step": ActionSpec(steps.RedoStepPayload, need_open, steps.redo_step),
+}
+
+
+async def _rule_blockers(c: Ctx) -> list[str]:
+    """The workflow's declared business rules and guardrails that refuse approval."""
+    problems = []
+    for rule in WORKFLOWS[c.case.workflow].plan.rules:
+        if rule.check is not None and (reason := await rule.check(c)):
+            problems.append(reason)
+    return problems
+
 
 async def _ctx(
     session: AsyncSession, access: PodAccess, case: PodCase, request: RequestContext | None = None
@@ -495,10 +540,19 @@ async def _ctx(
         completion_blockers=await _completion_blockers(session, case),
         request=request,
     )
-    workflow_blockers = hooks_for(case.workflow).blockers
-    if workflow_blockers is not None and case.status not in LOCKED_STATUSES:
-        c.blockers.extend(await workflow_blockers(c))
+    if case.status not in LOCKED_STATUSES:
+        if children.steps:
+            c.blockers.extend(steps.blockers(case, children.steps))
+            c.blockers.extend(await _rule_blockers(c))
+        workflow_blockers = hooks_for(case.workflow).blockers
+        if workflow_blockers is not None:
+            c.blockers.extend(await workflow_blockers(c))
     return c
+
+
+async def case_context(session: AsyncSession, access: PodAccess, case: PodCase) -> Ctx:
+    """The engine's view of a case for this person (what the guards and steps see)."""
+    return await _ctx(session, access, case)
 
 
 async def case_blockers(session: AsyncSession, access: PodAccess, case: PodCase) -> list[str]:
@@ -507,7 +561,28 @@ async def case_blockers(session: AsyncSession, access: PodAccess, case: PodCase)
 
 
 def actions_for(case: PodCase) -> dict[str, ActionSpec]:
-    return {**ACTIONS, **hooks_for(case.workflow).actions}
+    step_actions = STEP_ACTIONS if steps.has_steps(case) else {}
+    return {**ACTIONS, **step_actions, **hooks_for(case.workflow).actions}
+
+
+def visible_condition(access: PodAccess) -> Any:
+    """SQL condition for the cases this person may see in their POD: a Finance Admin every
+    one; anyone else the cases they opened, plus every case of a workflow whose viewer
+    capacity they hold (for those entities)."""
+    in_pod = PodCase.workflow.in_(keys_in(access.pod))
+    if access.is_admin:
+        return in_pod
+    seen: list[Any] = [PodCase.owner_id == access.user.id]
+    for spec in WORKFLOWS.values():
+        if spec.pod != access.pod:
+            continue
+        for capacity in spec.plan.viewers & set(access.capacities):
+            entities = access.capacities[capacity]
+            if entities is None:
+                seen.append(PodCase.workflow == spec.key)
+            else:
+                seen.append(and_(PodCase.workflow == spec.key, PodCase.entity_id.in_(entities)))
+    return and_(in_pod, or_(*seen))
 
 
 # --- public API ------------------------------------------------------------------------
@@ -517,7 +592,13 @@ async def create_case(
     session: AsyncSession, access: PodAccess, body: CaseCreate, ctx: RequestContext
 ) -> CaseDetail:
     spec = WORKFLOWS[body.workflow]
+    if spec.pod != access.pod:
+        raise CaseSelectionError(f"{spec.name} isn't part of this POD.")
     snapshot = await snapshots.load_snapshot(session, body.snapshot_id)
+    if spec.pod == PodKey.FINANCE and not access.holds_any(
+        set(spec.plan.openers), snapshot.entity_id
+    ):
+        raise CaseActionError(f"Opening a {spec.name} case needs a capacity that may open one.")
     missing = sorted(spec.required - {Collection(c) for c in snapshot.coverage})
     if missing:
         raise SourceCoverageError(
@@ -541,6 +622,10 @@ async def create_case(
         await on_create(session, case, snapshots.document(snapshot), False)
     session.add(case)
     await session.flush()
+    if spec.plan.steps:
+        await steps.create_steps(session, case)
+        await session.flush()
+        await steps.settle_not_applicable(await _ctx(session, access, case))
     after_create = hooks_for(spec.key).after_create
     if after_create is not None:
         await after_create(session, case)
@@ -566,7 +651,9 @@ async def run_action(
     body: CaseAction,
     request: RequestContext,
 ) -> CaseDetail:
-    case = await load_case(session, case_id, lock=True, expected_version=body.expected_version)
+    case = await load_case(
+        session, case_id, lock=True, expected_version=body.expected_version, access=access
+    )
     action = actions_for(case).get(body.action)
     if action is None:
         raise InvalidActionPayloadError(f"Unknown action {body.action!r}.")
@@ -638,6 +725,8 @@ async def _summaries(session: AsyncSession, cases: list[PodCase]) -> list[CaseSu
             stages[c.id] = "done"
         elif stage is not None:
             stages[c.id] = await stage(session, c)
+        elif steps.has_steps(c):  # the first step not settled yet
+            stages[c.id] = steps.current_step(c, await steps.load_steps(session, c))
         else:
             stages[c.id] = None
     return [
@@ -663,11 +752,17 @@ async def _summaries(session: AsyncSession, cases: list[PodCase]) -> list[CaseSu
 
 async def list_cases(
     session: AsyncSession,
+    access: PodAccess,
     workflow: str | None,
     status: CaseStatus | None,
     entity_id: uuid.UUID | None,
 ) -> list[CaseSummary]:
-    query = select(PodCase).order_by(PodCase.updated_at.desc()).limit(300)
+    query = (
+        select(PodCase)
+        .where(visible_condition(access))
+        .order_by(PodCase.updated_at.desc())
+        .limit(300)
+    )
     if workflow is not None:
         query = query.where(PodCase.workflow == workflow)
     if status is not None:
@@ -678,7 +773,7 @@ async def list_cases(
 
 
 async def get_case(session: AsyncSession, access: PodAccess, case_id: uuid.UUID) -> CaseDetail:
-    case = await load_case(session, case_id)
+    case = await load_case(session, case_id, access=access)
     c = await _ctx(session, access, case)
     ch = c.children
     people = await names(
@@ -754,6 +849,7 @@ async def get_case(session: AsyncSession, access: PodAccess, case_id: uuid.UUID)
         completion_blockers=c.completion_blockers,
         next_signoff=next_signoff(c) if case.status == CaseStatus.DRAFT else None,
         allowed_actions={name: a.guard(c) for name, a in actions_for(case).items()},
+        steps=await steps.outs(c) if ch.steps else [],
     )
 
 
@@ -809,8 +905,8 @@ def _task_out(t: PodReviewTask, people: dict[uuid.UUID, str]) -> ReviewTaskOut:
     )
 
 
-async def review_queue(session: AsyncSession) -> list[ReviewQueueItem]:
-    """Open review tasks on open cases, oldest first."""
+async def review_queue(session: AsyncSession, access: PodAccess) -> list[ReviewQueueItem]:
+    """Open review tasks on open cases (of this POD, that this person sees), oldest first."""
     rows = (
         await session.execute(
             select(PodReviewTask, PodCase)
@@ -818,6 +914,7 @@ async def review_queue(session: AsyncSession) -> list[ReviewQueueItem]:
             .where(
                 PodReviewTask.status == ReviewTaskStatus.OPEN,
                 PodCase.status.not_in(LOCKED_STATUSES),
+                visible_condition(access),
             )
             .order_by(PodReviewTask.created_at)
             .limit(300)

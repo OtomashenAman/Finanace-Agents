@@ -44,7 +44,7 @@ from src.app.service_pod.core.hooks import hooks_for
 from src.app.service_pod.core.messaging import service as messaging
 from src.app.service_pod.core.messaging.models import Direction, MessageStatus, PodMessage
 from src.app.service_pod.core.snapshots.models import PodSnapshot
-from src.app.service_pod.core.workflows import WorkflowKey
+from src.app.service_pod.core.workflows import PodKey, WorkflowKey, keys_in
 
 AGING = [
     ("0-7 days", 0, 7),
@@ -239,7 +239,13 @@ async def _cash(session: AsyncSession) -> CashRunway | None:
 async def dashboard(session: AsyncSession, access: PodAccess) -> Dashboard:
     now = utcnow()
     today = now.date()
-    cases = list(await session.scalars(select(PodCase).order_by(PodCase.created_at)))
+    cases = list(
+        await session.scalars(
+            select(PodCase)
+            .where(PodCase.workflow.in_(keys_in(PodKey.SERVICE)))  # Service POD cases only
+            .order_by(PodCase.created_at)
+        )
+    )
     phase_of = await _phases(session, access, cases)
     open_cases = [c for c in cases if c.status not in LOCKED_STATUSES]
     closed_30d = sum(

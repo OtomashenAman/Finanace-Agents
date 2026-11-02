@@ -151,6 +151,17 @@ folder gets an `input_schema`, `run_model` and `analyze()` (see `agents/ap_invoi
   auth cookies are named after it, so an admin and a user can be signed in side by side. A new
   tab opens with the last account used; the user menu's "another account" icon signs in a
   different one in that tab only.
+- Finance POD (`/finance`, API `/api/v1/finance/...`, `src/app/finance_pod/`): the GIA AP / AR
+  agents on the Service POD's case engine, in their own tab. Multi-user: a Finance Admin grants
+  capacities (Admin Settings → Finance POD: requester, budget owner, buyer, controller, ...),
+  per legal entity or for all. Each workflow declares the requirement's L4 tasks and L5 steps
+  (`service_pod/core/steps/`): every L5 exists as a row from the moment a case opens, steps go
+  in order, a person's step needs its capacity, `distinct_from` enforces segregation of duties
+  (for admins too), an agent step runs its handler, a step that doesn't apply is recorded as
+  not applicable with its reason, and the case can't be approved while any step is open.
+  `finance_pod/requirements/` holds the requirement as data; `test_requirement_coverage.py`
+  fails when a built phase misses any L4/L5 step, checkpoint, rule (each needs a test marked
+  `@pytest.mark.requirement("AP1.R1")`) or measure. The two PODs never serve each other's cases.
 - Demo users from `uv run poe seed` (password = `DEMO_ADMIN_PASSWORD`): `finance.admin@example.com`
   and `demo.user@example.com` (runs AP Invoice; the admin approves).
 - Each agent stores its fields as typed columns in its own table (`ap_invoice_runs`); the common

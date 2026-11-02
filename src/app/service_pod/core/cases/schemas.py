@@ -15,6 +15,7 @@ from src.app.service_pod.core.cases.models import (
 )
 from src.app.service_pod.core.messaging.schemas import ArtifactOut, MessageOut
 from src.app.service_pod.core.snapshots.schemas import SnapshotSummary
+from src.app.service_pod.core.steps.schemas import StepOut
 from src.app.service_pod.core.tasks.schemas import TaskOut
 from src.app.service_pod.core.workflows import WorkflowKey
 
@@ -133,6 +134,7 @@ class CaseDetail(CaseSummary):
     completion_blockers: list[str]
     # action -> None when it can be done now, else the reason it can't
     allowed_actions: dict[str, str | None]
+    steps: list[StepOut] = []  # Finance POD: the requirement's L4/L5 steps, in order
 
 
 class ReviewQueueItem(BaseModel):

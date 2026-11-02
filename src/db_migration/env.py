@@ -15,11 +15,13 @@ import src.app.audit.models
 import src.app.auth.models
 import src.app.data_sources.models
 import src.app.entities.models
+import src.app.finance_pod.models
 import src.app.governance.models
 import src.app.jobs.models
 import src.app.service_pod.core.cases.models
 import src.app.service_pod.core.messaging.models
 import src.app.service_pod.core.snapshots.models
+import src.app.service_pod.core.steps.models
 import src.app.service_pod.core.tasks.models
 import src.app.service_pod.flows.reporting.models  # noqa: F401
 from src.app.common.models import Base

@@ -5,6 +5,7 @@ import { Toaster } from "sonner"
 import { AppShell } from "@/components/layout/app-shell"
 import { AdminDataSourcesPage } from "@/features/admin/data-sources-page"
 import { EntitiesPage } from "@/features/admin/entities-page"
+import { FinanceCapacitiesPage } from "@/features/admin/finance-capacities-page"
 import { GovernancePage } from "@/features/governance/governance-page"
 import { UsersPage } from "@/features/admin/users-page"
 import { CatalogPage } from "@/features/agent-catalog/catalog-page"
@@ -18,6 +19,9 @@ import { AuditPage } from "@/features/audit/audit-page"
 import { WorklistPage } from "@/features/worklist/worklist-page"
 import { GuestOnly, RequireAdmin, RequireAuth } from "@/features/auth/route-guards"
 import { DataSourcesPage } from "@/features/data-sources/data-sources-page"
+import { FinanceCasePage } from "@/features/finance-pod/case-page"
+import { FinanceCasesPage } from "@/features/finance-pod/cases-page"
+import { FinanceDashboardPage } from "@/features/finance-pod/dashboard-page"
 import { AiMonitoringPage } from "@/features/monitoring/ai-monitoring-page"
 import { OverviewPage } from "@/features/overview/overview-page"
 import { CasePage } from "@/features/service-pod/case-page"
@@ -58,6 +62,10 @@ const router = createBrowserRouter([
           // A workflow's own screen (where its cases start): /pod/ar, /pod/bank...
           { path: "/pod/:slug", element: <WorkflowHomePage /> },
           { path: "/pod/:slug/cases", element: <LegacyWorkflowCases /> },
+          // Finance POD: the AP / AR agents (its own tab and API, the shared case engine)
+          { path: "/finance", element: <FinanceDashboardPage /> },
+          { path: "/finance/cases", element: <FinanceCasesPage /> },
+          { path: "/finance/cases/:caseId", element: <FinanceCasePage /> },
           {
             element: <RequireAdmin />,
             children: [
@@ -65,6 +73,7 @@ const router = createBrowserRouter([
               { path: "/admin/users", element: <UsersPage /> },
               { path: "/admin/entities", element: <EntitiesPage /> },
               { path: "/admin/governance", element: <GovernancePage /> },
+              { path: "/admin/finance-capacities", element: <FinanceCapacitiesPage /> },
               { path: "/admin/data-sources", element: <AdminDataSourcesPage /> },
               { path: "/admin/ai-monitoring", element: <AiMonitoringPage /> },
             ],

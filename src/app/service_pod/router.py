@@ -8,6 +8,7 @@ from src.app.service_pod.core.messaging.router import router as messaging_router
 from src.app.service_pod.core.registry import ROUTERS
 from src.app.service_pod.core.snapshots.router import router as snapshots_router
 from src.app.service_pod.core.tasks.router import router as tasks_router
+from src.app.service_pod.core.workflows import PodKey
 
 router = APIRouter(prefix="/pod")
 router.include_router(access_router)
@@ -16,5 +17,5 @@ router.include_router(cases_router)
 router.include_router(dashboard_router)
 router.include_router(messaging_router)
 router.include_router(tasks_router)
-for workflow_router in ROUTERS:
+for workflow_router in ROUTERS[PodKey.SERVICE]:
     router.include_router(workflow_router)

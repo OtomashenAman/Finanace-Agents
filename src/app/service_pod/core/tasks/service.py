@@ -27,6 +27,7 @@ from src.app.service_pod.core.snapshots import service as snapshots
 from src.app.service_pod.core.snapshots.models import PodSnapshot
 from src.app.service_pod.core.tasks.models import PodPostingTask, TaskStatus
 from src.app.service_pod.core.tasks.schemas import TaskAction, TaskCreate, TaskOut
+from src.app.service_pod.core.workflows import PodKey, keys_in
 
 ACTIONS = ("record", "verify", "cancel")
 
@@ -114,7 +115,13 @@ async def tasks_for_case(session: AsyncSession, case: PodCase) -> list[TaskOut]:
 
 async def list_tasks(session: AsyncSession, status: TaskStatus | None) -> list[TaskOut]:
     """The manual QuickBooks queue, newest first."""
-    query = select(PodPostingTask).order_by(PodPostingTask.updated_at.desc()).limit(300)
+    query = (
+        select(PodPostingTask)
+        .join(PodCase, PodCase.id == PodPostingTask.case_id)
+        .where(PodCase.workflow.in_(keys_in(PodKey.SERVICE)))  # the Service POD's queue
+        .order_by(PodPostingTask.updated_at.desc())
+        .limit(300)
+    )
     if status is not None:
         query = query.where(PodPostingTask.status == status)
     return await _outs(session, list(await session.scalars(query)))
@@ -127,7 +134,7 @@ async def propose_task(
     body: TaskCreate,
     ctx: RequestContext,
 ) -> TaskOut:
-    case = await load_case(session, case_id, lock=True)
+    case = await load_case(session, case_id, lock=True, access=access)
     task = await add_task(session, case, body, access.user.id)
     _event(session, ctx, access, case, task, f"proposed manual posting for {task.reference}")
     await session.commit()
@@ -234,8 +241,7 @@ async def run_action(
     task = await session.get(PodPostingTask, task_id, with_for_update=True)
     if task is None:
         raise TaskNotFoundError
-    case = await session.get(PodCase, task.case_id)
-    assert case is not None  # noqa: S101
+    case = await load_case(session, task.case_id, access=access)
     if task.version != body.expected_version:
         raise StaleVersionError("This task was changed by someone else. Refresh and retry.")
     if case.status in LOCKED_STATUSES - {CaseStatus.COMPLETED}:
