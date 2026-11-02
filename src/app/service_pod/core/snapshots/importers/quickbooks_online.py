@@ -19,10 +19,12 @@ from src.app.service_pod.core.snapshots.contract import (
     Allocation,
     Basis,
     Customer,
+    GlLine,
     Invoice,
     Payment,
     Provenance,
     SnapshotDocument,
+    Transaction,
 )
 from src.app.service_pod.core.snapshots.exceptions import SnapshotInvalidError
 from src.app.service_pod.core.snapshots.importers.base import (
@@ -30,6 +32,7 @@ from src.app.service_pod.core.snapshots.importers.base import (
     check_row_limits,
     validation_message,
 )
+from src.app.service_pod.core.snapshots.importers.quickbooks_pnl import PnlReports, build_pnl
 
 _QB_CLASSES = {
     "income": AccountClass.INCOME,
@@ -68,7 +71,13 @@ def _email(value: str | None) -> str | None:
 
 
 async def from_quickbooks(
-    session: AsyncSession, source: DataSource, entity_code: str, currency: str, basis: Basis
+    session: AsyncSession,
+    source: DataSource,
+    entity_code: str,
+    currency: str,
+    basis: Basis,
+    pnl: PnlReports | None = None,
+    notes: list[str] | None = None,
 ) -> SnapshotDocument:
     """Customers, open invoices, payments and the chart of accounts as last synced. The
     other collections (GL, bank, cash position...) aren't available from this source.
@@ -143,6 +152,28 @@ async def from_quickbooks(
         more = len(problems) - MAX_REPORTED_ERRORS
         raise SnapshotInvalidError(shown + (f" (and {more} more)" if more > 0 else ""))
 
+    pod_accounts = [
+        Account(
+            id=a.external_id,
+            name=a.name,
+            number=a.number,
+            classification=_QB_CLASSES[(a.account_type or "").lower()],
+        )
+        for a in accounts
+        if (a.account_type or "").lower() in _QB_CLASSES
+    ]
+    gl_lines: list[GlLine] | None = None
+    transactions: list[Transaction] | None = None
+    if pnl is not None:
+        # P&L evidence (FP&A): only when the reports were read; otherwise not supplied
+        gl_lines, transactions, pnl_notes = build_pnl(
+            pnl,
+            {a.id: a.classification for a in pod_accounts},
+            {a.name.strip().lower(): a.id for a in pod_accounts},
+        )
+        if notes is not None:
+            notes.extend(pnl_notes)
+
     synced = source.last_synced_at
     try:
         doc = SnapshotDocument(
@@ -166,16 +197,9 @@ async def from_quickbooks(
             ],
             invoices=pod_invoices,
             payments=pod_payments,
-            accounts=[
-                Account(
-                    id=a.external_id,
-                    name=a.name,
-                    number=a.number,
-                    classification=_QB_CLASSES[(a.account_type or "").lower()],
-                )
-                for a in accounts
-                if (a.account_type or "").lower() in _QB_CLASSES
-            ],
+            accounts=pod_accounts,
+            gl_lines=gl_lines,
+            transactions=transactions,
         )
     except ValidationError as exc:
         raise SnapshotInvalidError(validation_message(exc)) from exc

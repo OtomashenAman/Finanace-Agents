@@ -62,6 +62,9 @@ export function useMyQueue() {
   const reviews = useReviewQueue()
   const messages = useMessages(null)
   const tasks = useTasks(null)
+  const dashboard = useDashboard()
+  // Cases whose work is done and wait only for the sign-off (dashboard phase "ready")
+  const signoffs = (dashboard.data?.open ?? []).filter((c) => c.phase === "ready")
   const emails = (messages.data ?? []).filter((m) => m.direction === "outbound" && EMAIL_TO_ACT.includes(m.status))
   const postings = (tasks.data ?? []).filter((t) => POSTING_TO_ACT.includes(t.status))
   const reviewItems = reviews.data ?? []
@@ -69,8 +72,9 @@ export function useMyQueue() {
     reviews: reviewItems,
     emails,
     postings,
+    signoffs,
     messages: messages.data ?? [],
-    count: reviewItems.length + emails.length + postings.length,
+    count: reviewItems.length + emails.length + postings.length + signoffs.length,
     isPending: reviews.isPending || messages.isPending || tasks.isPending,
     isError: reviews.isError || messages.isError || tasks.isError,
   }
@@ -82,6 +86,18 @@ export function useArPortfolio() {
 
 export function useDashboard() {
   return useQuery({ queryKey: [POD_TAG, "dashboard"], queryFn: podApi.dashboard, refetchInterval: 60_000 })
+}
+
+export function useFpaPeriods() {
+  return useQuery({ queryKey: [POD_TAG, "fpa-periods"], queryFn: podApi.fpaPeriods })
+}
+
+export function useFpaDrill(args: { caseId: string; accountId: string; period: string } | null) {
+  return useQuery({
+    queryKey: [POD_TAG, "fpa-drill", args],
+    queryFn: () => podApi.fpaDrill(args!),
+    enabled: args !== null,
+  })
 }
 
 export function useBankWorklist() {
@@ -97,6 +113,7 @@ export const useImportQuickBooks = () => usePodMutation(podApi.importQuickBooks)
 export const useImportBankStatement = () => usePodMutation(podApi.importBankStatement)
 export const useCreateCase = () => usePodMutation(podApi.createCase)
 export const useCaseAction = () => usePodMutation(podApi.caseAction)
+export const useFpaCommentary = () => usePodMutation(podApi.fpaCommentary)
 export const useCreateDraft = () => usePodMutation(podApi.createDraft)
 export const useUpdateMessage = () => usePodMutation(podApi.updateMessage)
 export const useSendMessage = () => usePodMutation(podApi.sendMessage)

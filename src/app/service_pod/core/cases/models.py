@@ -76,6 +76,8 @@ class PodApproval(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     )
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
     content_hash: Mapped[str] = mapped_column(String(64))
+    # The capacity the sign-off was given in, e.g. "Finance Head" (WorkflowSpec.signoff_as)
+    capacity: Mapped[str] = mapped_column(String(50), default="Finance Admin")
 
 
 class ReviewTaskKind(StrEnum):

@@ -210,7 +210,11 @@ async def _verification(
     doc = snapshots.document(fresh)
     txn = task.external_txn_id
     found = any(p.id == txn or p.reference == txn for p in doc.payments or []) or any(
-        t.id == txn and t.status == "Posted" for t in doc.transactions or []
+        # a journal's lines are "<txn>:<n>" (one row per account); QuickBooks users
+        # usually know a transaction by its number
+        (t.id == txn or t.id.startswith(f"{txn}:") or t.document_ref == txn)
+        and t.status == "Posted"
+        for t in doc.transactions or []
     )
     if not found:
         problems.append(f"Transaction {txn} isn't in the fresh snapshot.")

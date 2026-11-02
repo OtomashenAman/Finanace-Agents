@@ -116,6 +116,7 @@ class GlLine(_Row):
     amount: Money
     report_id: Id
     transaction_ids: list[Id] = []
+    business_unit: Name | None = None  # QuickBooks class / department, when the export has one
 
 
 class Transaction(_Row):
@@ -131,6 +132,7 @@ class Transaction(_Row):
     gl_line_id: Id | None = None
     document_ref: Text | None = None
     entity: Name | None = None
+    business_unit: Name | None = None
 
 
 class BankReceipt(_Row):

@@ -64,6 +64,11 @@ class WorkflowHooks:
     summary: Callable[[AsyncSession, PodCase], Awaitable[str | None]] | None = None
     # The step an open case is on (the frontend's step keys), for the workflow's worklists
     stage: Callable[[AsyncSession, PodCase], Awaitable[str]] | None = None
+    # Where a draft case stands for the dashboard ("compose", "waiting", "analysis", "review",
+    # "ready"); None: the engine's default, from the case's emails and review tasks
+    phase: Callable[[AsyncSession, PodCase, list[str]], Awaitable[str]] | None = None
+    # Workflow reasons an approved case can't be completed yet
+    completion_blockers: Callable[[AsyncSession, PodCase], Awaitable[list[str]]] | None = None
     # Extra problems verifying a posting: (task, case, source it started from, fresh source)
     verify_posting: (
         Callable[[PodPostingTask, PodCase, SnapshotDocument, SnapshotDocument], list[str]] | None

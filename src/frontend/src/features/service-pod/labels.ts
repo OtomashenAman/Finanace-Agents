@@ -51,6 +51,7 @@ export const CASE_STATUS: Record<CaseStatus, [string, Tone]> = {
 export const CASE_PHASE: Record<CasePhase, [string, Tone]> = {
   compose: ["Email to send", "neutral"],
   waiting: ["Waiting for reply", "info"],
+  analysis: ["In analysis", "info"],
   review: ["Needs review", "warn"],
   ready: ["Ready to approve", "good"],
   posting: ["QuickBooks posting", "info"],

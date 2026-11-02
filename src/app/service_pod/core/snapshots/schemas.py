@@ -40,6 +40,7 @@ class SnapshotSummary(BaseModel):
 class SnapshotImportResult(BaseModel):
     snapshot: SnapshotSummary
     created: bool  # False: identical content was already imported (existing snapshot)
+    notes: list[str] = []  # what the import couldn't include, and why
 
 
 class QuickBooksSnapshotRequest(BaseModel):

@@ -76,9 +76,10 @@ const chip = (on: boolean) =>
 /** Where an open case stands, from its step and open review tasks (the case page says more). */
 function whereItStands(c: CaseSummary): [string, Parameters<typeof Pill>[0]["tone"]] {
   if (c.status !== "draft") return CASE_STATUS[c.status]
-  if (c.open_review_tasks > 0) return ["Needs review", "warn"]
+  // The step says where the work is; open tasks may be non-blocking questions (shown beside)
   const step = FLOW_UI[c.workflow]?.steps?.find((s) => s.key === c.stage)
-  return step ? [step.label, "info"] : CASE_STATUS.draft
+  if (step) return [step.label, "info"]
+  return c.open_review_tasks > 0 ? ["Needs review", "warn"] : CASE_STATUS.draft
 }
 
 /** Starting a case: AR and Bank start from their own screen (the right customer or receipt);

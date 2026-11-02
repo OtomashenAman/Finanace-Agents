@@ -295,7 +295,7 @@ export function Decisions({ c }: { c: CaseDetail }) {
         <ul className="mt-4 space-y-1 border-t pt-3 text-xs">
           {c.approvals.map((ap) => (
             <li key={ap.id} className={ap.valid ? "" : "text-muted-foreground line-through"}>
-              Approved by {ap.user.name} · {formatDateTime(ap.created_at)}
+              {ap.capacity === "Finance Admin" ? "Approved" : `Signed off as ${ap.capacity}`} by {ap.user.name} · {formatDateTime(ap.created_at)}
               {!ap.valid && " (content changed since)"}
             </li>
           ))}

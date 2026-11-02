@@ -94,6 +94,21 @@ class CitedNarrative(BaseModel):
 
 MAX_HIGHLIGHTS = 12
 NUMERIC = re.compile(r"[0-9$%€£₹]")
+# Figures written out in words are still the model stating a number ("sixty thousand
+# dollars", "one point seven percentage points"). Small counts ("led by two accounts")
+# stay allowed, as do ordinary words like "one-time".
+NUMBER_WORDS = re.compile(
+    r"\b(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million"
+    r"|billion|percent|percentage|dollars?|cents?|euros?|pounds?|rupees?)\b"
+    r"|\bpoint (?:zero|one|two|three|four|five|six|seven|eight|nine)\b",
+    re.IGNORECASE,
+)
+
+
+def states_number(text: str) -> bool:
+    """True when prose states a figure itself (digits, currency or percent signs, or a
+    number written in words) instead of citing a fact."""
+    return bool(NUMERIC.search(text) or NUMBER_WORDS.search(text))
 
 
 def narrative_problems(narrative: CitedNarrative, facts: list[Fact]) -> list[str]:
@@ -107,7 +122,7 @@ def narrative_problems(narrative: CitedNarrative, facts: list[Fact]) -> list[str
         unknown = [f for f in h.fact_ids if f not in known]
         if unknown:
             problems.append(f"highlight {i} cites unknown facts {', '.join(unknown)}")
-        if NUMERIC.search(h.text):
+        if states_number(h.text):
             problems.append(f"highlight {i} states a number itself instead of citing a fact")
     return problems
 
@@ -120,7 +135,8 @@ async def cited_narrative(
     llm: LLMProvider, *, system: str, facts: list[Fact], ask: str, prompt_version: str
 ) -> Extraction[CitedNarrative]:
     user = (
-        f"{ask}\n\nFacts (cite their IDs; write no digits, currency or percent signs - the "
+        f"{ask}\n\nFacts (cite their IDs; write no digits, currency or percent signs and no "
+        f"numbers in words - the "
         f"figures are shown from the facts you cite):\n{facts_prompt(facts)}"
     )
     return await extract(

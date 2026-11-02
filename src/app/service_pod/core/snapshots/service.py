@@ -8,9 +8,13 @@ from sqlalchemy import Select, delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.audit.service import record_event
+from src.app.common.clock import utcnow
 from src.app.common.context import RequestContext
 from src.app.core.config import get_settings
+from src.app.data_sources import service as data_sources
+from src.app.data_sources.exceptions import AppCredentialsError
 from src.app.data_sources.models import DataSource, SourceKind
+from src.app.data_sources.providers import quickbooks as qb
 from src.app.entities import service as entities
 from src.app.entities.models import LegalEntity
 from src.app.entities.schemas import EntityRef
@@ -31,6 +35,7 @@ from src.app.service_pod.core.snapshots.exceptions import (
     SnapshotInvalidError,
     SnapshotNotFoundError,
 )
+from src.app.service_pod.core.snapshots.importers.quickbooks_pnl import PnlReports, fetch_pnl
 from src.app.service_pod.core.snapshots.models import PodSnapshot, PodSnapshotArchive, SourceType
 from src.app.service_pod.core.snapshots.schemas import (
     QuickBooksSnapshotRequest,
@@ -248,8 +253,27 @@ async def import_quickbooks(
         raise SnapshotNotFoundError("QuickBooks connection not found.")
     if source.kind != SourceKind.QUICKBOOKS or source.last_synced_at is None:
         raise SnapshotInvalidError("Choose a QuickBooks connection that has synced.")
-    doc = await importers.from_quickbooks(session, source, entity.code, body.currency, body.basis)
-    return await _store(session, access, entity, doc, SourceType.QUICKBOOKS_ONLINE, ctx)
+    notes: list[str] = []
+    pnl = await _read_pnl(session, source, body.basis, notes)
+    doc = await importers.from_quickbooks(
+        session, source, entity.code, body.currency, body.basis, pnl=pnl, notes=notes
+    )
+    result = await _store(session, access, entity, doc, SourceType.QUICKBOOKS_ONLINE, ctx)
+    result.notes = notes
+    return result
+
+
+async def _read_pnl(
+    session: AsyncSession, source: DataSource, basis: Basis, notes: list[str]
+) -> PnlReports | None:
+    """The P&L by month and its detail (FP&A's evidence), read live from QuickBooks. If they
+    can't be read the snapshot is still made, without GL lines and transactions."""
+    try:
+        async with data_sources.quickbooks_api(session, source) as api:
+            return await fetch_pnl(api, utcnow().date(), basis)
+    except (AppCredentialsError, qb.QuickBooksError) as exc:
+        notes.append(f"P&L detail for FP&A couldn't be read from QuickBooks: {exc}")
+        return None
 
 
 async def load_snapshot(session: AsyncSession, snapshot_id: uuid.UUID) -> PodSnapshot:

@@ -6,6 +6,7 @@ import uuid
 from collections import defaultdict
 from datetime import timedelta
 from decimal import Decimal
+from typing import cast
 
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +25,7 @@ from src.app.service_pod.core.cases.models import (
 )
 from src.app.service_pod.core.cases.service import case_blockers
 from src.app.service_pod.core.dashboard.schemas import (
+    OPEN_PHASES,
     AgingBucket,
     Dashboard,
     EmailHealth,
@@ -32,6 +34,7 @@ from src.app.service_pod.core.dashboard.schemas import (
     Phase,
     PromiseItem,
 )
+from src.app.service_pod.core.hooks import hooks_for
 from src.app.service_pod.core.messaging import service as messaging
 from src.app.service_pod.core.messaging.models import Direction, MessageStatus, PodMessage
 from src.app.service_pod.core.snapshots.models import PodSnapshot
@@ -83,6 +86,10 @@ async def _phases(
             phases[c.id] = "closed"
         elif c.status == CaseStatus.APPROVED:
             phases[c.id] = "approved"
+        elif (hook := hooks_for(c.workflow).phase) is not None:
+            phases[c.id] = cast(
+                Phase, await hook(session, c, await case_blockers(session, access, c))
+            )
         elif not sent.get(c.id):
             phases[c.id] = "compose"
         elif not replies.get(c.id):
@@ -175,9 +182,7 @@ async def dashboard(session: AsyncSession, access: PodAccess) -> Dashboard:
         for c in cases
         if c.status in LOCKED_STATUSES and (c.completed_at or c.updated_at) >= now - WINDOW
     )
-    counts: dict[Phase, int] = dict.fromkeys(
-        ("compose", "waiting", "review", "ready", "approved"), 0
-    )
+    counts: dict[Phase, int] = dict.fromkeys(OPEN_PHASES, 0)
     for c in open_cases:
         counts[phase_of[c.id]] += 1
     counts["closed"] = closed_30d

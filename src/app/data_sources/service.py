@@ -8,6 +8,7 @@ import contextlib
 import hashlib
 import secrets
 import uuid
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
@@ -437,6 +438,20 @@ async def _access_tokens(
         source.credentials_enc = crypto.encrypt_json(tokens.to_json())
         await session.flush()
     return tokens
+
+
+@contextlib.asynccontextmanager
+async def quickbooks_api(session: AsyncSession, source: DataSource) -> AsyncIterator[qb.Api]:
+    """A QuickBooks API session on a connected company, for callers that read a report of
+    their own (the Service POD's P&L evidence). Raises AppCredentialsError / QuickBooksError;
+    a rotated refresh token is committed before any request."""
+    if source.kind != SourceKind.QUICKBOOKS or not source.external_id:
+        raise qb.ReauthorizationRequired("This isn't an authorized QuickBooks connection.")
+    app = _app_for(source)
+    tokens = await _access_tokens(session, source, app)
+    await session.commit()
+    async with qb.client() as http:
+        yield qb.Api(http, app, source.external_id, tokens.access_token)
 
 
 async def _sync(

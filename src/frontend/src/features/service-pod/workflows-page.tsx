@@ -17,7 +17,7 @@ export function WorkflowCards() {
     <>
       {isPending && <Loading what="workflows" />}
       {isError && <LoadError what="workflows" />}
-      <ul className="grid gap-4 md:grid-cols-2">
+      <ul className={`grid gap-4 md:grid-cols-2 ${built.length > 2 ? "xl:grid-cols-3" : ""}`}>
         {built.map((w) => {
           const flow = FLOW_UI[w.key]
           return (

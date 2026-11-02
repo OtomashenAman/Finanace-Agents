@@ -16,4 +16,5 @@ SPEC = WorkflowSpec(
             Collection.TRANSACTIONS,
         }
     ),
+    signoff_as="Finance Head",
 )

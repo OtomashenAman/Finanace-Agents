@@ -37,6 +37,8 @@ export interface Workflow {
   prefix: string
   description: string
   required: Collection[]
+  /** The capacity sign-offs are given in, e.g. "Finance Head" (the Finance Admin signs) */
+  signoff_as: string
 }
 
 export interface Snapshot {
@@ -69,6 +71,8 @@ export interface Snapshot {
 export interface SnapshotImportResult {
   snapshot: Snapshot
   created: boolean
+  /** What the import couldn't include, and why */
+  notes: string[]
 }
 
 export interface CaseSummary {
@@ -93,6 +97,8 @@ export interface Approval {
   id: string
   user: PersonRef
   content_hash: string
+  /** e.g. "Finance Head": the sign-off this approval stands for */
+  capacity: string
   valid: boolean
   created_at: string
 }
@@ -354,7 +360,7 @@ export interface CaseDetail extends CaseSummary {
   allowed_actions: Record<CaseActionName, string | null>
 }
 
-export type DashboardPhase = "compose" | "waiting" | "review" | "ready" | "approved" | "closed"
+export type DashboardPhase = "compose" | "waiting" | "analysis" | "review" | "ready" | "approved" | "closed"
 
 export interface PromiseItem {
   case_id: string
@@ -387,6 +393,35 @@ export interface Dashboard {
     replies_30d: number
     avg_reply_hours: number | null
   }
+}
+
+export interface FpaPeriodSource {
+  snapshot: Snapshot
+  months: string[]
+  business_units: string[]
+  suggested_start: string | null
+  suggested_end: string | null
+}
+
+export interface FpaPeriods {
+  sources: FpaPeriodSource[]
+  cases: { id: string; reference: string; title: string; status: CaseStatus; start: string; end: string }[]
+}
+
+export interface FpaDrill {
+  account: { id: string; name: string; number: string | null; classification: string }
+  period: string
+  gl_lines: { id: string; amount: string; report_id: string; transaction_ids: string[] }[]
+  transactions: {
+    id: string
+    date: string
+    type: string
+    counterparty: string | null
+    amount: string
+    status: string
+    document_ref: string | null
+    gl_line_id: string | null
+  }[]
 }
 
 export interface ReviewQueueItem {
@@ -429,6 +464,11 @@ export const podApi = {
   workflows: () => apiRequest<Workflow[]>("/pod/workflows"),
   emailStatus: () => apiRequest<EmailStatus>("/pod/email-status"),
   dashboard: () => apiRequest<Dashboard>("/pod/dashboard"),
+  fpaPeriods: () => apiRequest<FpaPeriods>("/pod/fpa/periods"),
+  fpaCommentary: ({ caseId, version }: { caseId: string; version: number }) =>
+    apiRequest<CaseDetail>(`/pod/fpa/cases/${caseId}/commentary`, { method: "POST", json: { expected_version: version } }),
+  fpaDrill: ({ caseId, accountId, period }: { caseId: string; accountId: string; period: string }) =>
+    apiRequest<FpaDrill>(`/pod/fpa/cases/${caseId}/drill${qs({ account_id: accountId, period })}`),
 
   snapshots: (includeArchived = false) =>
     apiRequest<Snapshot[]>(`/pod/snapshots${includeArchived ? "?include_archived=true" : ""}`),

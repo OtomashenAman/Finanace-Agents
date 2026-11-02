@@ -25,7 +25,9 @@ import {
 import { COLLECTION_LABEL, formatDateTime, shortHash } from "./labels"
 
 function imported(result: SnapshotImportResult): string {
-  return result.created ? "Snapshot imported." : "Identical content was already imported: using that snapshot."
+  const head = result.created ? "Snapshot imported." : "Identical content was already imported: using that snapshot."
+  // e.g. the P&L detail FP&A needs couldn't be read: say so, it isn't silently missing
+  return result.notes?.length ? `${head} ${result.notes.join(" ")}` : head
 }
 
 function JsonImport() {

@@ -8,7 +8,9 @@ from pydantic import BaseModel
 from src.app.service_pod.core.workflows import WorkflowKey
 
 # Where a case stands, in the same words as the case page's status chip
-Phase = Literal["compose", "waiting", "review", "ready", "approved", "closed"]
+# "analysis": an internal workflow (FP&A, Reporting) whose findings are still being written
+Phase = Literal["compose", "waiting", "analysis", "review", "ready", "approved", "closed"]
+OPEN_PHASES: tuple[Phase, ...] = ("compose", "waiting", "analysis", "review", "ready", "approved")
 
 
 class MoneyTotal(BaseModel):

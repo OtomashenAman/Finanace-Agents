@@ -54,6 +54,7 @@ class ApprovalOut(BaseModel):
     id: uuid.UUID
     user: PersonRef
     content_hash: str
+    capacity: str  # e.g. "Finance Head": the sign-off this approval stands for
     valid: bool  # still matches the case's current content
     created_at: datetime
 

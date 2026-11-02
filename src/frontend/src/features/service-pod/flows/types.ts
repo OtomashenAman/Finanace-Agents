@@ -44,4 +44,13 @@ export interface NextAction {
   phase: CasePhase
 }
 
-export type CasePhase = "compose" | "waiting" | "review" | "ready" | "posting" | "approved" | "completed" | "cancelled"
+export type CasePhase =
+  | "compose"
+  | "waiting"
+  | "analysis"
+  | "review"
+  | "ready"
+  | "posting"
+  | "approved"
+  | "completed"
+  | "cancelled"

@@ -193,6 +193,7 @@ function EmailHealth({ d }: { d: Dashboard }) {
 function NeedsYou() {
   const q = useMyQueue()
   const items = [
+    ...q.signoffs.map((c) => ({ key: c.id, to: `/pod/cases/${c.id}`, tag: "Sign-off", ref: c.reference, text: c.title })),
     ...q.reviews.map((r) => ({
       key: r.task.id,
       to: `/pod/cases/${r.case_id}`,

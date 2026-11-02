@@ -10,10 +10,10 @@ import { TaskRow } from "./components/case-extras"
 import { TaskActions } from "./components/task-actions"
 import { Card, Empty, LoadError, Loading, Pill, PodTabs } from "./components/bits"
 import { selectClass } from "./ui"
-import { useMessages, useMyQueue } from "./hooks"
+import { useMessages, useMyQueue, useWorkflows } from "./hooks"
 import { formatDateTime, MESSAGE_STATUS, REVIEW_KIND, WORKFLOW_SHORT } from "./labels"
 
-type QueueType = "all" | "review" | "email" | "posting" | "log"
+type QueueType = "all" | "signoff" | "review" | "email" | "posting" | "log"
 
 const chip = (on: boolean) =>
   `rounded-full border px-3 py-1 text-xs font-medium transition-colors ${on ? "border-primary bg-primary/10 text-primary" : "bg-card text-muted-foreground hover:text-foreground"}`
@@ -79,9 +79,11 @@ export function MyQueuePage() {
   const [params, setParams] = useSearchParams()
   const type = (params.get("type") as QueueType | null) ?? "all"
   const q = useMyQueue()
+  const { data: workflows } = useWorkflows()
   const show = (t: QueueType) => type === "all" || type === t
   const tabs: [QueueType, string, number | null][] = [
     ["all", "Everything", q.count],
+    ["signoff", "Sign-offs", q.signoffs.length],
     ["review", "Review tasks", q.reviews.length],
     ["email", "Emails to send", q.emails.length],
     ["posting", "QuickBooks postings", q.postings.length],
@@ -109,6 +111,26 @@ export function MyQueuePage() {
             {q.isError && <LoadError what="your queue" />}
             {!q.isPending && q.count === 0 && <Empty>Nothing is waiting on you.</Empty>}
             <ul className="divide-y">
+              {show("signoff") &&
+                q.signoffs.map((c) => {
+                  const as = workflows?.find((w) => w.key === c.workflow)?.signoff_as ?? "Finance Admin"
+                  return (
+                    <li key={c.id} className="flex items-start gap-3 py-3 text-sm">
+                      <div className="min-w-0 flex-1">
+                        <p className="flex flex-wrap items-center gap-2">
+                          <Pill label="Sign-off" tone="good" />
+                          <span className="font-semibold">{c.reference}</span>
+                          <span>{c.title}</span>
+                          <span className="text-xs text-muted-foreground">{WORKFLOW_SHORT[c.workflow]}</span>
+                        </p>
+                        <p className="mt-1 text-muted-foreground">
+                          {as === "Finance Admin" ? "Everything is settled: approve the case" : `Everything is settled: sign off as ${as}`}
+                        </p>
+                      </div>
+                      <OpenButton to={`/pod/cases/${c.id}`} />
+                    </li>
+                  )
+                })}
               {show("review") &&
                 q.reviews.map((item) => (
                   <li key={item.task.id} className="flex items-start gap-3 py-3 text-sm">

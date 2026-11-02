@@ -10,3 +10,4 @@ class WorkflowOut(BaseModel):
     prefix: str
     description: str
     required: list[Collection]
+    signoff_as: str

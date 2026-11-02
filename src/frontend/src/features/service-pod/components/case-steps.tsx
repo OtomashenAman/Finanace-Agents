@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 import type { CaseDetail, WorkflowKey } from "../api"
-import { useCases } from "../hooks"
+import { useCases, useWorkflows } from "../hooks"
 import { CASE_PHASE, formatDateTime, WORKFLOW_SLUG } from "../labels"
 import { useRunAction } from "../use-run-action"
 import type { FlowStep, NextAction } from "../flows/types"
@@ -69,6 +69,8 @@ export function JourneyStrip({ workflow, home, steps }: { workflow: WorkflowKey;
 /** Where the case stands and the one thing to do now; approving and completing happen here. */
 function NextCard({ c, next, onGo }: { c: CaseDetail; next: NextAction; onGo: (step: string) => void }) {
   const { run, pending } = useRunAction(c)
+  const { data: workflows } = useWorkflows()
+  const signoff = workflows?.find((w) => w.key === c.workflow)?.signoff_as ?? "Finance Admin"
   const a = c.allowed_actions
   const [label, tone] = CASE_PHASE[next.phase]
   const Icon = next.kind === "done" ? CircleCheck : next.kind === "wait" ? Hourglass : ArrowRight
@@ -86,8 +88,8 @@ function NextCard({ c, next, onGo }: { c: CaseDetail; next: NextAction; onGo: (s
       </p>
       <div className="mt-3 flex flex-wrap gap-2">
         {canApprove ? (
-          <Button size="sm" disabled={pending} onClick={() => void run("approve", {}, "Case approved.")}>
-            Approve case
+          <Button size="sm" disabled={pending} onClick={() => void run("approve", {}, signoff === "Finance Admin" ? "Case approved." : `Signed off as ${signoff}.`)}>
+            {signoff === "Finance Admin" ? "Approve case" : `Sign off as ${signoff}`}
           </Button>
         ) : canComplete ? (
           <Button size="sm" disabled={pending} onClick={() => void run("complete", {}, "Case completed.")}>
@@ -126,7 +128,7 @@ function NextCard({ c, next, onGo }: { c: CaseDetail; next: NextAction; onGo: (s
         <ul className="mt-4 space-y-1 border-t pt-3 text-xs">
           {c.approvals.map((ap) => (
             <li key={ap.id} className={ap.valid ? "" : "text-muted-foreground line-through"}>
-              Approved by {ap.user.name} · {formatDateTime(ap.created_at)}
+              {ap.capacity === "Finance Admin" ? "Approved" : `Signed off as ${ap.capacity}`} by {ap.user.name} · {formatDateTime(ap.created_at)}
               {!ap.valid && " (content changed since)"}
             </li>
           ))}

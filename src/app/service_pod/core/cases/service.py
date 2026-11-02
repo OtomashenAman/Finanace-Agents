@@ -184,6 +184,9 @@ async def _completion_blockers(session: AsyncSession, case: PodCase) -> list[str
     )
     if in_flight:
         problems.append("A message is still sending or its outcome must be reconciled.")
+    workflow_checks = hooks_for(case.workflow).completion_blockers
+    if workflow_checks is not None and case.status not in LOCKED_STATUSES:
+        problems.extend(await workflow_checks(session, case))
     return problems
 
 
@@ -261,9 +264,17 @@ async def _edit(c: Ctx, p: BaseModel) -> tuple[str, bool]:
 
 
 async def _approve(c: Ctx, _: BaseModel) -> tuple[str, bool]:
-    c.session.add(PodApproval(case_id=c.case.id, user_id=c.user.id, content_hash=c.fingerprint))
+    capacity = WORKFLOWS[c.case.workflow].signoff_as
+    c.session.add(
+        PodApproval(
+            case_id=c.case.id,
+            user_id=c.user.id,
+            content_hash=c.fingerprint,
+            capacity=capacity,
+        )
+    )
     c.case.status = CaseStatus.APPROVED
-    return "Approved", False
+    return ("Approved" if capacity == "Finance Admin" else f"Signed off as {capacity}"), False
 
 
 async def _complete(c: Ctx, _: BaseModel) -> tuple[str, bool]:
@@ -674,6 +685,7 @@ async def get_case(session: AsyncSession, access: PodAccess, case_id: uuid.UUID)
                 id=a.id,
                 user=PersonRef(id=a.user_id, name=people.get(a.user_id, DELETED)),
                 content_hash=a.content_hash,
+                capacity=a.capacity,
                 valid=a.content_hash == c.fingerprint,
                 created_at=a.created_at,
             )
