@@ -36,7 +36,12 @@ from src.app.service_pod.core.snapshots.exceptions import (
     SnapshotNotFoundError,
 )
 from src.app.service_pod.core.snapshots.importers.quickbooks_pnl import PnlReports, fetch_pnl
-from src.app.service_pod.core.snapshots.models import PodSnapshot, PodSnapshotArchive, SourceType
+from src.app.service_pod.core.snapshots.models import (
+    PodSnapshot,
+    PodSnapshotArchive,
+    PodSnapshotSource,
+    SourceType,
+)
 from src.app.service_pod.core.snapshots.schemas import (
     QuickBooksSnapshotRequest,
     SnapshotImportResult,
@@ -260,6 +265,9 @@ async def import_quickbooks(
     )
     result = await _store(session, access, entity, doc, SourceType.QUICKBOOKS_ONLINE, ctx)
     result.notes = notes
+    if await session.get(PodSnapshotSource, result.snapshot.id) is None:
+        session.add(PodSnapshotSource(snapshot_id=result.snapshot.id, data_source_id=source.id))
+        await session.commit()
     return result
 
 

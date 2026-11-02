@@ -14,15 +14,18 @@ import { attempt, selectClass } from "./ui"
 import {
   useArchiveSnapshot,
   useDeleteSnapshot,
+  usePurgeSnapshot,
   useImportBankStatement,
   useImportJson,
   useImportQuickBooks,
   useRestoreSnapshot,
+  useSnapshotDependents,
   useSnapshotRows,
   useSnapshots,
 } from "./hooks"
 import { COLLECTION_LABEL, formatDateTime, shortHash } from "./labels"
 import { snapshotKey, splitLatest } from "./components/latest"
+import { PurgeSummary } from "./components/purge-summary"
 import { PodPage } from "./components/pod-page"
 
 function imported(result: SnapshotImportResult): string {
@@ -257,9 +260,12 @@ function Removal({ snapshot }: { snapshot: Snapshot }) {
   const archive = useArchiveSnapshot()
   const restore = useRestoreSnapshot()
   const remove = useDeleteSnapshot()
-  const [how, setHow] = useState<"archive" | "delete" | null>(null)
+  const purge = usePurgeSnapshot()
+  const [how, setHow] = useState<"archive" | "delete" | "purge" | null>(null)
   const [reason, setReason] = useState("")
-  const busy = archive.isPending || restore.isPending || remove.isPending
+  const [confirm, setConfirm] = useState("")
+  const preview = useSnapshotDependents(how === "purge" ? snapshot.id : null)
+  const busy = archive.isPending || restore.isPending || remove.isPending || purge.isPending
 
   if (snapshot.archived) {
     return (
@@ -279,22 +285,45 @@ function Removal({ snapshot }: { snapshot: Snapshot }) {
         <Button size="sm" variant="outline" disabled={busy} onClick={() => setHow(how === "archive" ? null : "archive")}>
           <Archive /> Archive
         </Button>
-        <span title={snapshot.in_use ? `Can't delete: ${snapshot.in_use}. Archive it instead.` : undefined}>
-          <Button
-            size="sm"
-            variant="outline"
-            className="text-red-800"
-            disabled={busy || !!snapshot.in_use}
-            onClick={() => setHow(how === "delete" ? null : "delete")}
-          >
+        {snapshot.in_use ? (
+          <Button size="sm" variant="outline" className="text-red-800" disabled={busy} onClick={() => setHow(how === "purge" ? null : "purge")}>
+            <Trash2 /> Delete everything…
+          </Button>
+        ) : (
+          <Button size="sm" variant="outline" className="text-red-800" disabled={busy} onClick={() => setHow(how === "delete" ? null : "delete")}>
             <Trash2 /> Delete
           </Button>
-        </span>
+        )}
         <span className="text-muted-foreground">
-          {snapshot.in_use ? `In use: ${snapshot.in_use}. It can only be archived.` : "Not used by any case: it can be deleted."}
+          {snapshot.in_use ? `In use: ${snapshot.in_use}. Archive it, or delete it with everything on it.` : "Not used by any case: it can be deleted."}
         </span>
       </div>
-      {how && (
+      {how === "purge" && (
+        <form
+          className="space-y-2"
+          onSubmit={(e) => {
+            e.preventDefault()
+            void attempt(
+              () => purge.mutateAsync({ id: snapshot.id, reason, confirm }),
+              (gone) => `Deleted ${gone.snapshots.length} snapshot(s) and ${gone.cases.length} case(s).`,
+            ).then((gone) => gone && setHow(null))
+          }}
+        >
+          {preview.isPending && <Loading what="what depends on it" />}
+          {preview.data && <PurgeSummary preview={preview.data} />}
+          <Input className="h-9 max-w-md" placeholder="Reason (kept in the audit trail)" value={reason} onChange={(e) => setReason(e.target.value)} />
+          <Input className="h-9 max-w-md" placeholder={`Type "${snapshot.company_name}" to confirm`} value={confirm} onChange={(e) => setConfirm(e.target.value)} aria-label="Company name to confirm" />
+          <Button
+            type="submit"
+            size="sm"
+            variant="destructive"
+            disabled={busy || !preview.data || reason.trim().length < 3 || confirm.trim().toLowerCase() !== snapshot.company_name.trim().toLowerCase()}
+          >
+            Delete everything
+          </Button>
+        </form>
+      )}
+      {(how === "archive" || how === "delete") && (
         <form
           className="flex flex-wrap gap-2"
           onSubmit={(e) => {

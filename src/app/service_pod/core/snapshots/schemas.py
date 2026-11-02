@@ -57,3 +57,53 @@ class SnapshotRemoval(BaseModel):
 class SnapshotRows(BaseModel):
     collection: Collection
     rows: list[dict[str, Any]]
+
+
+# --- deleting a snapshot with everything that depends on it ------------------------------
+
+
+class PurgeSnapshot(BaseModel):
+    id: uuid.UUID
+    company_name: str
+    as_of: date
+    source_type: str
+    is_demo: bool
+
+
+class PurgeCase(BaseModel):
+    id: uuid.UUID
+    reference: str
+    title: str
+    workflow: str
+    status: str
+
+
+class PurgePreview(BaseModel):
+    """What a deletion removes (shown before it happens, returned after)."""
+
+    snapshots: list[PurgeSnapshot]
+    cases: list[PurgeCase]
+    messages: int
+    documents: int
+    posting_tasks: int
+    review_tasks: int
+    commitments: int
+    approvals: int
+    verified_elsewhere: int  # postings of kept cases that lose their verifying snapshot
+    evidence: bool  # real books with approved / completed work or verified postings
+    all_demo: bool
+
+
+class PurgeRequest(BaseModel):
+    reason: str = Field(min_length=3, max_length=1000)
+    confirm: str = Field(min_length=1, max_length=200)  # the company name, typed
+
+
+class UserDataPreview(PurgePreview):
+    user_name: str
+    data_sources: list[str]
+
+
+class UserDataRemoval(BaseModel):
+    reason: str = Field(min_length=3, max_length=1000)
+    confirm: str = Field(min_length=3, max_length=320)  # the user's email, typed

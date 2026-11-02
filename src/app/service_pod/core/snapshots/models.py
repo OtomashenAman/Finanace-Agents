@@ -74,3 +74,18 @@ class PodSnapshotArchive(CreatedAtMixin, Base):
     )
     archived_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
     reason: Mapped[str] = mapped_column(Text)
+
+
+class PodSnapshotSource(Base):
+    """Which connected data source a snapshot was read from (snapshots themselves never
+    change, so the link lives here). Deleting the data source can then remove its
+    snapshots and everything on them."""
+
+    __tablename__ = "pod_snapshot_sources"
+
+    snapshot_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("pod_snapshots.id", ondelete="CASCADE"), primary_key=True
+    )
+    data_source_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("data_sources.id", ondelete="CASCADE"), index=True
+    )

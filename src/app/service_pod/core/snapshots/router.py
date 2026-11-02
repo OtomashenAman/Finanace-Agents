@@ -8,16 +8,24 @@ from src.app.common.context import RequestContextDep
 from src.app.common.schemas import ErrorResponse
 from src.app.core.config import get_settings
 from src.app.core.db import SessionDep
+from src.app.data_sources.models import DataSource
 from src.app.service_pod.core.access.service import PodAccessDep
-from src.app.service_pod.core.snapshots import service
+from src.app.service_pod.core.snapshots import purge, service, user_data
 from src.app.service_pod.core.snapshots.contract import Basis, Collection, Provenance
-from src.app.service_pod.core.snapshots.exceptions import SnapshotTooLargeError
+from src.app.service_pod.core.snapshots.exceptions import (
+    SnapshotNotFoundError,
+    SnapshotTooLargeError,
+)
 from src.app.service_pod.core.snapshots.schemas import (
+    PurgePreview,
+    PurgeRequest,
     QuickBooksSnapshotRequest,
     SnapshotImportResult,
     SnapshotRemoval,
     SnapshotRows,
     SnapshotSummary,
+    UserDataPreview,
+    UserDataRemoval,
 )
 
 router = APIRouter(prefix="/snapshots", tags=["service pod: snapshots"])
@@ -178,6 +186,60 @@ async def delete_snapshot(
     """Delete a snapshot nothing depends on (409 when a case, a verification or a later
     snapshot uses it: archive it instead)."""
     await service.delete_snapshot(session, access, snapshot_id, body.reason, ctx)
+
+
+@router.get("/sources/{source_id}/dependents", response_model=PurgePreview, responses=_ERRORS)
+async def data_source_dependents(
+    source_id: uuid.UUID, session: SessionDep, access: PodAccessDep
+) -> PurgePreview:
+    """What deleting your data source "with dependents" would remove from the Service POD."""
+    source = await session.get(DataSource, source_id)
+    if source is None or source.owner_id != access.user.id:
+        raise SnapshotNotFoundError("Data source not found.")
+    return await purge.data_source_preview(session, source_id)
+
+
+@router.get("/users/{user_id}/data", response_model=UserDataPreview, responses=_ERRORS)
+async def user_data_preview(
+    user_id: uuid.UUID, session: SessionDep, _: PodAccessDep
+) -> UserDataPreview:
+    """What removing this user's Service POD data would delete."""
+    return await user_data.preview(session, user_id)
+
+
+@router.post("/users/{user_id}/data/remove", response_model=UserDataPreview, responses=_ERRORS)
+async def remove_user_data(
+    user_id: uuid.UUID,
+    body: UserDataRemoval,
+    session: SessionDep,
+    access: PodAccessDep,
+    ctx: RequestContextDep,
+) -> UserDataPreview:
+    """Delete the user's data sources, imported snapshots and cases (with everything on them),
+    then deactivate the user (kept: other records name them). Their email confirms it."""
+    return await user_data.remove(session, access, user_id, body.reason, body.confirm, ctx)
+
+
+@router.get("/{snapshot_id}/dependents", response_model=PurgePreview, responses=_ERRORS)
+async def snapshot_dependents(
+    snapshot_id: uuid.UUID, session: SessionDep, _: PodAccessDep
+) -> PurgePreview:
+    """What deleting this snapshot with everything on it would remove."""
+    await service.load_snapshot(session, snapshot_id)
+    return await purge.snapshot_preview(session, snapshot_id)
+
+
+@router.post("/{snapshot_id}/purge", response_model=PurgePreview, responses=_ERRORS)
+async def purge_snapshot(
+    snapshot_id: uuid.UUID,
+    body: PurgeRequest,
+    session: SessionDep,
+    access: PodAccessDep,
+    ctx: RequestContextDep,
+) -> PurgePreview:
+    """Delete the snapshot, the snapshots built on it and every case on them (the company
+    name must be typed to confirm). The audit trail keeps the record."""
+    return await purge.purge_snapshot(session, access, snapshot_id, body.reason, body.confirm, ctx)
 
 
 @router.get("/{snapshot_id}", response_model=SnapshotSummary, responses=_ERRORS)

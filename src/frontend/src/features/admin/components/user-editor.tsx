@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { Panel } from "@/features/agent-catalog/workspace/components/panel"
+import { PurgeSummary } from "@/features/service-pod/components/purge-summary"
+import { useRemoveUserData, useUserData } from "@/features/service-pod/hooks"
 import { errorMessage } from "@/lib/api"
 import { formatDateTime } from "@/features/agent-catalog/workspace/format"
 
@@ -260,6 +262,76 @@ function PasswordSection({ user }: { user: ManagedUser }) {
   )
 }
 
+/** Remove the user's Service POD data (data sources, imported snapshots, cases and all on
+ *  them); the user is kept, deactivated, because other records still name them. */
+function PodDataSection({ user }: { user: ManagedUser }) {
+  const [open, setOpen] = useState(false)
+  const [reason, setReason] = useState("")
+  const [confirm, setConfirm] = useState("")
+  const preview = useUserData(open ? user.id : null)
+  const remove = useRemoveUserData()
+  const empty = preview.data && preview.data.snapshots.length === 0 && preview.data.cases.length === 0 && preview.data.data_sources.length === 0
+
+  const onRemove = () =>
+    remove.mutate(
+      { userId: user.id, reason, confirm },
+      {
+        onSuccess: (gone) => {
+          toast.success(`Removed ${gone.cases.length} case(s) and ${gone.snapshots.length} snapshot(s); ${user.full_name} is deactivated.`)
+          setOpen(false)
+        },
+      },
+    )
+
+  return (
+    <Section title="Service POD data">
+      <p className="text-sm text-muted-foreground">
+        Delete this user's data sources, the snapshots they imported and the cases they opened, with everything on them. The user is kept
+        but deactivated: approvals and the audit trail still name them. The agents' runs are not touched.
+      </p>
+      {remove.error && <Alert>{errorMessage(remove.error, "Couldn't remove the data.")}</Alert>}
+      {!open ? (
+        <Button type="button" size="sm" variant="outline" className="text-red-800" onClick={() => setOpen(true)}>
+          <Trash2 aria-hidden />
+          Remove Service POD data…
+        </Button>
+      ) : (
+        <div className="space-y-2">
+          {preview.isPending && <LoaderCircle className="animate-spin" aria-label="Loading" />}
+          {empty && <p className="text-sm">This user has no Service POD data.</p>}
+          {preview.data && !empty && (
+            <>
+              {preview.data.data_sources.length > 0 && (
+                <p className="text-xs">Data sources: {preview.data.data_sources.join(", ")}</p>
+              )}
+              <PurgeSummary preview={preview.data} />
+              <Input placeholder="Reason (kept in the audit trail)" value={reason} onChange={(e) => setReason(e.target.value)} />
+              <Input placeholder={`Type ${user.email} to confirm`} value={confirm} onChange={(e) => setConfirm(e.target.value)} aria-label="Email to confirm" />
+            </>
+          )}
+          <div className="flex flex-wrap gap-3">
+            {!empty && (
+              <Button
+                type="button"
+                size="sm"
+                variant="destructive"
+                onClick={onRemove}
+                disabled={remove.isPending || !preview.data || reason.trim().length < 3 || confirm.trim().toLowerCase() !== user.email.toLowerCase()}
+              >
+                {remove.isPending ? <LoaderCircle className="animate-spin" aria-hidden /> : <Trash2 aria-hidden />}
+                Remove and deactivate
+              </Button>
+            )}
+            <Button type="button" size="sm" variant="outline" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+    </Section>
+  )
+}
+
 function DeleteSection({ user, onDeleted }: { user: ManagedUser; onDeleted: () => void }) {
   const remove = useDeleteUser()
   const [confirming, setConfirming] = useState(false)
@@ -326,6 +398,7 @@ export function UserEditor({ user, isSelf, onDeleted }: UserEditorProps) {
         <AccessSection user={user} />
         <EntitiesSection user={user} />
         <PasswordSection user={user} />
+        {!isSelf && <PodDataSection user={user} />}
         {!isSelf && <DeleteSection user={user} onDeleted={onDeleted} />}
       </div>
     </Panel>

@@ -100,6 +100,18 @@ export function useFpaDrill(args: { caseId: string; accountId: string; period: s
   })
 }
 
+export function useSnapshotDependents(id: string | null) {
+  return useQuery({ queryKey: [POD_TAG, "dependents", id], queryFn: () => podApi.snapshotDependents(id!), enabled: id !== null })
+}
+
+export function useSourceDependents(sourceId: string | null) {
+  return useQuery({ queryKey: [POD_TAG, "source-dependents", sourceId], queryFn: () => podApi.sourceDependents(sourceId!), enabled: sourceId !== null })
+}
+
+export function useUserData(userId: string | null) {
+  return useQuery({ queryKey: [POD_TAG, "user-data", userId], queryFn: () => podApi.userData(userId!), enabled: userId !== null })
+}
+
 export function useTreasurySources() {
   return useQuery({ queryKey: [POD_TAG, "treasury-sources"], queryFn: podApi.treasurySources })
 }
@@ -127,6 +139,10 @@ export const useCreateCase = () => usePodMutation(podApi.createCase)
 export const useCaseAction = () => usePodMutation(podApi.caseAction)
 export const useFpaCommentary = () => usePodMutation(podApi.fpaCommentary)
 export const useExportPack = () => usePodMutation(podApi.exportPack)
+export const usePurgeSnapshot = () => usePodMutation(podApi.purgeSnapshot)
+// The user ends up deactivated: the admin users list refreshes too
+export const useRemoveUserData = () =>
+  useMutation({ mutationFn: podApi.removeUserData, meta: { invalidates: [POD_TAG, "users"] } })
 export const useCreateDraft = () => usePodMutation(podApi.createDraft)
 export const useUpdateMessage = () => usePodMutation(podApi.updateMessage)
 export const useSendMessage = () => usePodMutation(podApi.sendMessage)

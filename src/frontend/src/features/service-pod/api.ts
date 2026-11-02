@@ -488,6 +488,26 @@ export interface TreasurySources {
   cases: { id: string; reference: string; title: string; status: CaseStatus; as_of: string }[]
 }
 
+export interface PurgePreview {
+  snapshots: { id: string; company_name: string; as_of: string; source_type: string; is_demo: boolean }[]
+  cases: { id: string; reference: string; title: string; workflow: string; status: CaseStatus }[]
+  messages: number
+  documents: number
+  posting_tasks: number
+  review_tasks: number
+  commitments: number
+  approvals: number
+  verified_elsewhere: number
+  /** Real books with approved / completed work or verified postings */
+  evidence: boolean
+  all_demo: boolean
+}
+
+export interface UserDataPreview extends PurgePreview {
+  user_name: string
+  data_sources: string[]
+}
+
 export interface ReviewQueueItem {
   task: ReviewTask
   case_id: string
@@ -531,6 +551,13 @@ export const podApi = {
   fpaPeriods: () => apiRequest<FpaPeriods>("/pod/fpa/periods"),
   reportMonths: () => apiRequest<ReportMonths>("/pod/reporting/months"),
   treasurySources: () => apiRequest<TreasurySources>("/pod/treasury/sources"),
+  snapshotDependents: (id: string) => apiRequest<PurgePreview>(`/pod/snapshots/${id}/dependents`),
+  purgeSnapshot: ({ id, reason, confirm }: { id: string; reason: string; confirm: string }) =>
+    apiRequest<PurgePreview>(`/pod/snapshots/${id}/purge`, { method: "POST", json: { reason, confirm } }),
+  sourceDependents: (sourceId: string) => apiRequest<PurgePreview>(`/pod/snapshots/sources/${sourceId}/dependents`),
+  userData: (userId: string) => apiRequest<UserDataPreview>(`/pod/snapshots/users/${userId}/data`),
+  removeUserData: ({ userId, reason, confirm }: { userId: string; reason: string; confirm: string }) =>
+    apiRequest<UserDataPreview>(`/pod/snapshots/users/${userId}/data/remove`, { method: "POST", json: { reason, confirm } }),
   reportPacks: (caseId: string) => apiRequest<ReportPack[]>(`/pod/reporting/cases/${caseId}/packs`),
   exportPack: (caseId: string) => apiRequest<ReportPack>(`/pod/reporting/cases/${caseId}/packs`, { method: "POST" }),
   fpaCommentary: ({ caseId, version }: { caseId: string; version: number }) =>

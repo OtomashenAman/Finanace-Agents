@@ -166,7 +166,9 @@ export const dataSourcesApi = {
   sync: (id: string) => apiRequest<DataSource>(`${source(id)}/sync`, { method: "POST" }),
   rename: ({ id, name }: { id: string; name: string }) =>
     apiRequest<DataSource>(source(id), { method: "PATCH", json: { name } }),
-  remove: (id: string) => apiRequest<void>(source(id), { method: "DELETE" }),
+  /** withDependents: also delete the Service POD snapshots and cases made from it */
+  remove: ({ id, withDependents }: { id: string; withDependents: boolean }) =>
+    apiRequest<void>(`${source(id)}${withDependents ? "?with_dependents=true" : ""}`, { method: "DELETE" }),
   records: (id: string, type: string, search: string) =>
     apiRequest<FinanceRecord[]>(
       `${source(id)}/records?${new URLSearchParams({ type, ...(search ? { search } : {}) })}`,

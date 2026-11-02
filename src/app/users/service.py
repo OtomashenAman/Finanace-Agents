@@ -3,6 +3,7 @@
 import uuid
 
 from sqlalchemy import delete, exists, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.agent_catalog.models import Agent, AgentAssignment
@@ -273,4 +274,12 @@ async def delete_user(
         session, "user.deleted", ctx, actor_id=actor.id, user_id=str(user.id), email=user.email
     )
     await session.delete(user)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        # Other records still name this user (e.g. Service POD imports, cases, approvals)
+        await session.rollback()
+        raise UserHasHistoryError(
+            "This user has records that keep their name (runs, reviews or Service POD work). "
+            "Deactivate the account instead, or remove their Service POD data first."
+        ) from exc
