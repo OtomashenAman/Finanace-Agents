@@ -173,6 +173,13 @@ sync-agents = { cmd = "python -m src.app.cli.sync_agents", help = "Upsert agent_
 sample-workbook = { script = "scripts.dev:sample_workbook", help = "Rebuild docs/sample-uploads/all-agents.xlsx from its CSVs" }
 pod-samples = { script = "scripts.pod_samples:main", help = "Rebuild the Service POD test workbooks in docs/sample-uploads/service-pod" }
 
+# local ERPNext for the Finance POD (ops/erpnext, http://localhost:8090; dev and demo only)
+erpnext-up = { cmd = "docker compose -f ops/erpnext/docker-compose.yml -p erpnext up -d", help = "Start local ERPNext on :8090 (first start creates the site)" }
+erpnext-down = { cmd = "docker compose -f ops/erpnext/docker-compose.yml -p erpnext stop", help = "Stop local ERPNext (data kept)" }
+erpnext-logs = { cmd = "docker compose -f ops/erpnext/docker-compose.yml -p erpnext logs -f --tail 100", help = "Follow local ERPNext logs" }
+erpnext-reset = { cmd = "docker compose -f ops/erpnext/docker-compose.yml -p erpnext down -v", help = "Stop local ERPNext and DELETE its data" }
+erpnext-seed = { cmd = "python scripts/erpnext_seed.py", help = "Seed local ERPNext with GIA demo data (--new-keys for a new API secret)" }
+
 [tool.poe.tasks.migration]
 help = "Autogenerate a migration: poe migration \"add runs table\""
 cmd = "alembic revision --autogenerate -m \"${message}\""

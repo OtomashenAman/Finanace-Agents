@@ -173,6 +173,22 @@ folder gets an `input_schema`, `run_model` and `analyze()` (see `agents/ap_invoi
   engine results; output is schema-validated, may cite only real fields/documents, and every figure
   it quotes is checked against the source data. With `none`, runs work without explanations.
 
+### Local ERPNext (Finance POD source, dev and demo only)
+```bash
+uv run poe erpnext-up     # ERPNext v16 on http://localhost:8090 (first start: a few minutes)
+uv run poe erpnext-seed   # company "GIA Demo Labs" + demo AP data; prints the app's API key
+```
+Sign in as `Administrator` / `ERPNEXT_ADMIN_PASSWORD` (default `admin`). ERPNext's own demo data
+is only a few masters, so `scripts/erpnext_seed.py` builds what the AP agents need (all
+fictional, emails `@example.com`): labs (the "Lab" accounting dimension), departments (cost
+centres), grants (Projects with funder, period, restricted fund, allowed item groups), budgets
+(one grant nearly used up), suppliers (approved, one blocked, one on hold, one without an email),
+contract prices, purchase requests and three quotations, and POs / receipts / supplier invoices
+covering a clean match, a price variance, a short delivery billed in full, a service with no
+receipt, a duplicate bill, a non-PO invoice and goods received but not invoiced. Reruns are safe.
+"Maintain same rate" is off in Buying Settings so differing invoices can arrive as drafts.
+`erpnext-down` stops it; `erpnext-reset` deletes its data. It needs about 600 MB of Docker memory.
+
 ### Viewing the database
 - **VS Code:** accept the recommended extensions (*SQLTools* + *SQLTools PostgreSQL*), open the
   SQLTools sidebar and pick **FinanceACC (local docker)**. It's preconfigured in `.vscode/settings.json`.
