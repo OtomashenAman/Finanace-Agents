@@ -75,6 +75,7 @@ _TEXT: dict[str, Describe] = {
     "auth.login_blocked": lambda d, s: "Sign-in blocked: account is locked",
     "auth.account_locked": lambda d, s: "Account locked after repeated failed sign-ins",
     "auth.logout": lambda d, s: "Signed out",
+    "auth.act_as": lambda d, s: f"Opened a tab as {d.get('email', s)} to test a workflow",
     "auth.password_changed": lambda d, s: "Changed their own password",
     "auth.password_change_failed": lambda d, s: "Password change refused (wrong current password)",
     "auth.password_reset_requested": lambda d, s: (
@@ -174,6 +175,12 @@ _TEXT: dict[str, Describe] = {
 
 
 def describe(event_type: str, details: Mapping[str, Any], subject: str | None) -> str:
+    said = _sentence(event_type, details, subject)
+    # done in a Finance Admin's act-as session (testing a workflow as this user)
+    return f"{said} (a Finance Admin testing as this user)" if details.get("acted_by") else said
+
+
+def _sentence(event_type: str, details: Mapping[str, Any], subject: str | None) -> str:
     text = _TEXT.get(event_type)
     if text is None:
         # Service POD events carry their own sentence

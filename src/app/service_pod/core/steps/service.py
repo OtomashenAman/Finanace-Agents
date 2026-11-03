@@ -148,6 +148,11 @@ def _sod_problem(c: Ctx, step: StepSpec, user_id: uuid.UUID) -> str | None:
     return None
 
 
+def sod_problem(c: Ctx, step: StepSpec, user_id: uuid.UUID) -> str | None:
+    """Why segregation of duties keeps this person from the step (None: it doesn't)."""
+    return _sod_problem(c, step, user_id)
+
+
 def _phase_problem(c: Ctx, step: StepSpec) -> str | None:
     approved = c.case.status == CaseStatus.APPROVED
     if step.after_approval and not approved:

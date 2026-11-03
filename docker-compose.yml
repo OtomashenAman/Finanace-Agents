@@ -1,9 +1,25 @@
-# Development stack: Postgres/pgvector + FastAPI (hot reload) + Vite (HMR)
+# Development stack: Postgres/pgvector + FastAPI (hot reload) + Vite (HMR), and the local
+# ERPNext (ops/erpnext) with its demo company, all seeded on the first `up`:
 #   uv run poe docker-up   (or: docker compose up --build)
 #   uv run poe db-up       (only the database; run backend/frontend locally)
+# A fresh machine gets the Finance Admin and the Finance POD team (migrate), then ERPNext's
+# demo company and the app's connection to it with a first snapshot (erpnext-seed, once the
+# new ERPNext site is up: allow ~10 minutes; `docker compose logs -f erpnext-seed`).
+# ERPNext wants ~2 GB of RAM more.
 # Production stack lives in docker-compose.prod.yml
 
 name: finance-acc
+
+include:
+  - ops/erpnext/docker-compose.yml
+
+# Dev-only: the local ERPNext's API user is given this key/secret by its seed, and the app
+# connects with it (local demo data only; never a real ERPNext)
+x-erpnext-api: &erpnext-api
+  ERPNEXT_URL: http://host.docker.internal:${ERPNEXT_PORT:-8090}
+  ERPNEXT_API_KEY: ${ERPNEXT_API_KEY:-b60582c2633e4f6}
+  ERPNEXT_API_SECRET: ${ERPNEXT_API_SECRET:-db33a50acdce153}
+  ERPNEXT_ADMIN_PASSWORD: ${ERPNEXT_ADMIN_PASSWORD:-admin}
 
 x-db-env: &db-env
   POSTGRES_USER: ${POSTGRES_USER:-finance}
@@ -27,19 +43,27 @@ services:
       timeout: 5s
       retries: 10
 
-  # One-off: schema to head + agent catalog sync, so a fresh pull never runs on a stale DB
+  # One-off: schema to head + agent catalog sync, so a fresh pull never runs on a stale DB;
+  # then the Finance Admin and the Finance POD team (get-or-create: existing users untouched)
   migrate:
     build:
       context: .
       dockerfile: src/Dockerfile
       target: dev
     restart: "no"
-    command: ["sh", "-c", "alembic upgrade head && python -m src.app.cli.sync_agents"]
+    command:
+      - sh
+      - -c
+      - >-
+        alembic upgrade head && python -m src.app.cli.sync_agents &&
+        python -m src.app.cli.seed --finance-team --no-demo-user
     env_file:
       - path: .env
         required: false
     environment:
       ENVIRONMENT: development
+      # the demo users' password unless .env sets one (dev only: seed refuses production)
+      DEMO_ADMIN_PASSWORD: ${DEMO_ADMIN_PASSWORD:-FinanceDemo!2026}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-finance}:${POSTGRES_PASSWORD:-finance}@db:5432/${POSTGRES_DB:-finance_acc}
     volumes:
       - ./src:/app/src
@@ -48,6 +72,40 @@ services:
     depends_on:
       db:
         condition: service_healthy
+
+  # One-off, in the background: waits for the local ERPNext, seeds its demo company (safe to
+  # rerun: what exists is skipped), then connects the app to it and takes a first snapshot
+  erpnext-seed:
+    build:
+      context: .
+      dockerfile: src/Dockerfile
+      target: dev
+    restart: "no"
+    command:
+      - sh
+      - -c
+      - >-
+        python scripts/erpnext_seed.py --wait 1800 &&
+        python -m src.app.cli.seed --erpnext --no-demo-user
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      <<: *erpnext-api
+      ENVIRONMENT: development
+      DEMO_ADMIN_PASSWORD: ${DEMO_ADMIN_PASSWORD:-FinanceDemo!2026}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-finance}:${POSTGRES_PASSWORD:-finance}@db:5432/${POSTGRES_DB:-finance_acc}
+    volumes:
+      - ./src:/app/src
+      - ./scripts:/app/scripts
+      - ./pyproject.toml:/app/pyproject.toml
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      erpnext-frontend:
+        condition: service_started
 
   backend:
     build:

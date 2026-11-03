@@ -256,3 +256,44 @@ async def test_the_audit_trail_names_each_step(
     assert [d["summary"] for d in details] == [
         f"{case['reference']}: Step 1.1 Describe the need: done"
     ]
+
+
+async def test_an_admin_sees_who_can_do_a_step_and_does_it_as_them(
+    person: PersonFn, snapshot: dict[str, Any], demo_flow: Any, admin: AsyncClient,
+    db: AsyncSession,
+) -> None:  # fmt: skip
+    """Testing a workflow: a requester who is also a budget owner opened it, so segregation of
+    duties keeps them from approving; the admin opens a tab as the other budget owner and
+    approves there."""
+    _, req = await person("req@example.com", Cap.REQUESTER, Cap.BUDGET_OWNER)
+    other, _ = await person("bo@example.com", Cap.BUDGET_OWNER)
+    case = await _open(req, snapshot)
+    case = await _ok(req, case, "complete_step", step="1.1",
+                     results={"1.1.a": {"item": "Pipettes", "quantity": 20}})  # fmt: skip
+    case = await _ok(req, case, "run_agent_step", step="1.2")
+
+    r = await admin.get(f"/api/v1/finance/cases/{case['id']}/people", params={"step": "1.3"})
+    assert r.status_code == 200, r.text
+    people = {p["email"]: p["blocked"] for p in r.json()}
+    assert people["bo@example.com"] is None
+    assert "someone other than" in people["req@example.com"]
+    r = await req.get(f"/api/v1/finance/cases/{case['id']}/people", params={"step": "1.3"})
+    assert r.status_code == 403
+
+    tab = {"X-Session-Slot": "botab12345"}
+    body = {"user_id": str(other.id), "slot": "botab12345"}
+    r = await admin.post("/api/v1/auth/act-as", json=body)
+    assert r.status_code == 200
+    r = await admin.post(
+        f"/api/v1/finance/cases/{case['id']}/actions", headers=tab,
+        json={"action": "complete_step", "expected_version": case["version"],
+              "payload": {"step": "1.3"}},
+    )  # fmt: skip
+    assert r.status_code == 200, r.text
+    assert step(r.json(), "1.3")["l5"][0]["done_by"] == "Bo"
+    done = [  # their own sign-in (the fixture's) aside
+        e for e in await db.scalars(select(AuditEvent))
+        if e.actor_id == other.id and not e.event_type.startswith("auth.")
+    ]  # fmt: skip
+    assert done
+    assert all(e.details.get("acted_by") for e in done)

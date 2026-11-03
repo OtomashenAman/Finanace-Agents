@@ -13,6 +13,7 @@ import { CASE_STATUS, capacityLabel, KIND_META } from "./labels"
 import { FinancePage } from "./components/finance-page"
 import { ActionsPanel, DocumentsPanel, MessagesPanel, PostingsPanel } from "./components/case-panels"
 import { StepCard } from "./components/step-card"
+import { TestAs } from "./components/test-as"
 import { namesOf, ResultNames } from "./components/result-names"
 import type { CaseDetail } from "./api"
 
@@ -84,6 +85,7 @@ function WhatsNext({ c, onRun, onFix, onApprove, busy }: {
   let title: string
   let body: string | null = null
   let button: React.ReactNode = null
+  let testAs: React.ReactNode = null
   if (c.status === "completed" || c.status === "cancelled") {
     tone = "border-slate-200 bg-slate-50 text-slate-800"
     icon = <CircleCheck className="size-5 text-slate-600" aria-hidden />
@@ -123,9 +125,13 @@ function WhatsNext({ c, onRun, onFix, onApprove, busy }: {
     } else if (step.blocked === null) {
       button = <a href={`#step-${step.key}`} className="text-sm font-medium text-primary hover:underline">Go to the form ↓</a>
     }
+    if (step.kind !== "agent" && step.capacity && !/ waits on /.test(step.blocked ?? "")) {
+      testAs = <TestAs caseId={c.id} step={step.key} capacity={step.capacity} />
+    }
   } else if (c.status === "draft" && c.next_signoff) {
     title = `Every step is done: sign off as ${capacityLabel(c.next_signoff)}`
     button = <GuardedButton reason={c.allowed_actions.approve} onClick={onApprove} disabled={busy}>Sign off as {capacityLabel(c.next_signoff)}</GuardedButton>
+    testAs = <TestAs caseId={c.id} capacity={c.next_signoff} />
   } else if (c.status === "approved") {
     tone = "border-emerald-200 bg-emerald-50 text-emerald-950"
     icon = <CircleCheck className="size-5 text-emerald-700" aria-hidden />
@@ -147,6 +153,7 @@ function WhatsNext({ c, onRun, onFix, onApprove, busy }: {
             </ul>
           )}
           {button && <div className="pt-1">{button}</div>}
+          {testAs}
         </div>
       </div>
     </section>

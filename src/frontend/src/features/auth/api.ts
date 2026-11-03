@@ -12,6 +12,14 @@ export interface User {
   last_login_at: string | null
 }
 
+/** The signed-in user of this tab (from /auth/me) */
+export interface Me extends User {
+  /** This tab is a Finance Admin testing as this user */
+  acted_by: { id: string; full_name: string; email: string } | null
+  /** A Finance Admin who may open a tab as another user here (dev and demo) */
+  can_act_as: boolean
+}
+
 export const authApi = {
   login: (values: LoginFormValues) =>
     apiRequest<User>("/auth/login", { method: "POST", json: values, skipAuthRefresh: true }),
@@ -29,10 +37,14 @@ export const authApi = {
       skipAuthRefresh: true,
     }),
 
+  /** A Finance Admin opens `slot` (a new tab's) as another user, to do their step */
+  actAs: (userId: string, slot: string) =>
+    apiRequest<User>("/auth/act-as", { method: "POST", json: { user_id: userId, slot } }),
+
   /** Current user, or null when not signed in */
-  me: async (): Promise<User | null> => {
+  me: async (): Promise<Me | null> => {
     try {
-      return await apiRequest<User>("/auth/me")
+      return await apiRequest<Me>("/auth/me")
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) return null
       throw error

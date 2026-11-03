@@ -51,6 +51,11 @@ class RefreshToken(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     revoked_at: Mapped[datetime | None]
     user_agent: Mapped[str | None] = mapped_column(String(512))
     ip: Mapped[str | None] = mapped_column(String(45))
+    # A Finance Admin testing as this user ("act as"): the session is theirs, on the user's
+    # behalf. Deleting the admin ends it.
+    acted_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE")
+    )
 
 
 class PasswordResetRequest(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):

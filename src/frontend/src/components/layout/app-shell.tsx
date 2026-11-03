@@ -1,5 +1,7 @@
 import { useState } from "react"
 import { NavLink, Outlet } from "react-router"
+
+import { ActingBanner } from "./acting-banner"
 import {
   CircleCheck,
   Database,
@@ -152,6 +154,7 @@ export function AppShell() {
 
   return (
     <div className="min-h-svh bg-brand-page md:pl-[234px]">
+      <ActingBanner />
       {/* Desktop sidebar */}
       <aside className="fixed inset-y-0 left-0 hidden w-[234px] flex-col bg-brand-navy px-3 pt-5 pb-3 md:flex">
         <div className="px-2">

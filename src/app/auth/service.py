@@ -11,7 +11,7 @@ from src.app.auth.exceptions import (
     InvalidCredentialsError,
     InvalidRefreshTokenError,
 )
-from src.app.auth.models import PasswordResetRequest, RefreshToken, User
+from src.app.auth.models import PasswordResetRequest, RefreshToken, User, UserRole
 from src.app.auth.security import (
     burn_password_check,
     create_access_token,
@@ -23,6 +23,7 @@ from src.app.auth.security import (
 from src.app.common.clock import utcnow
 from src.app.common.context import RequestContext
 from src.app.core.config import get_settings
+from src.app.core.errors import AppError
 
 
 @dataclass(frozen=True)
@@ -79,6 +80,7 @@ def issue_tokens(
     user: User,
     ctx: RequestContext,
     family_id: uuid.UUID | None = None,
+    acted_by: uuid.UUID | None = None,
 ) -> IssuedTokens:
     """Create an access token + a new refresh token row (caller commits)."""
     settings = get_settings()
@@ -91,9 +93,10 @@ def issue_tokens(
             expires_at=utcnow() + timedelta(days=settings.refresh_token_ttl_days),
             user_agent=ctx.user_agent[:512] if ctx.user_agent else None,
             ip=ctx.ip,
+            acted_by_id=acted_by,
         )
     )
-    return IssuedTokens(create_access_token(user.id, user.role.value), raw_refresh)
+    return IssuedTokens(create_access_token(user.id, user.role.value, acted_by), raw_refresh)
 
 
 async def rotate_refresh_token(
@@ -126,9 +129,55 @@ async def rotate_refresh_token(
     user = await session.get(User, token.user_id)
     if user is None or not user.is_active:
         raise InvalidRefreshTokenError
+    if token.acted_by_id is not None and not await _may_act_as(session, token.acted_by_id):
+        raise InvalidRefreshTokenError
 
     token.revoked_at = now
-    return user, issue_tokens(session, user, ctx, family_id=token.family_id)
+    return user, issue_tokens(
+        session, user, ctx, family_id=token.family_id, acted_by=token.acted_by_id
+    )
+
+
+# --- a Finance Admin testing a workflow as another user -----------------------------------
+
+
+class ActAsDisabledError(AppError):
+    status_code = 403
+    code = "act_as_disabled"
+    message = "Opening a tab as another user is turned off here (ACT_AS_ALLOWED)."
+
+
+class ActAsRefusedError(AppError):
+    status_code = 422
+    code = "act_as_refused"
+
+
+async def _may_act_as(session: AsyncSession, admin_id: uuid.UUID) -> bool:
+    admin = await session.get(User, admin_id)
+    return (
+        get_settings().act_as_enabled
+        and admin is not None
+        and admin.is_active
+        and admin.role == UserRole.FINANCE_ADMIN
+    )
+
+
+async def act_as(
+    session: AsyncSession, admin: User, user_id: uuid.UUID, ctx: RequestContext
+) -> tuple[User, IssuedTokens]:
+    """A Finance Admin opens a session as another (active, non-admin) user to do their step
+    while testing. Everything done in it is audited as that user, on the admin's behalf
+    (caller commits)."""
+    if not await _may_act_as(session, admin.id):
+        raise ActAsDisabledError
+    target = await session.get(User, user_id)
+    if target is None or not target.is_active:
+        raise ActAsRefusedError("That user doesn't exist or is deactivated.")
+    if target.role == UserRole.FINANCE_ADMIN:
+        raise ActAsRefusedError("A Finance Admin can only act as a user, not another admin.")
+    record_event(session, "auth.act_as", ctx, actor_id=admin.id, user_id=str(target.id),
+                 email=target.email)  # fmt: skip
+    return target, issue_tokens(session, target, ctx, acted_by=admin.id)
 
 
 async def logout(session: AsyncSession, raw_refresh: str | None, ctx: RequestContext) -> None:

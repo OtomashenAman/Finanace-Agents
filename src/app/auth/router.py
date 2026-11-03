@@ -1,3 +1,4 @@
+import uuid
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request, Response, status
@@ -9,12 +10,22 @@ from src.app.auth.cookies import (
     refresh_cookie,
     set_auth_cookies,
 )
-from src.app.auth.dependencies import CurrentUser
-from src.app.auth.exceptions import InvalidRefreshTokenError
-from src.app.auth.models import User
-from src.app.auth.schemas import LoginRequest, PasswordChange, ResetRequest, UserOut
+from src.app.auth.dependencies import AdminUser, CurrentUser
+from src.app.auth.exceptions import InvalidRefreshTokenError, PermissionDeniedError
+from src.app.auth.models import User, UserRole
+from src.app.auth.schemas import (
+    ActAsRequest,
+    ActingAdmin,
+    LoginRequest,
+    MeOut,
+    PasswordChange,
+    ResetRequest,
+    UserOut,
+)
+from src.app.auth.service import ActAsRefusedError
 from src.app.common.context import RequestContextDep
 from src.app.common.schemas import ErrorResponse
+from src.app.core.config import get_settings
 from src.app.core.db import SessionDep
 from src.app.core.errors import app_error_response
 
@@ -82,13 +93,44 @@ async def logout(
     return response
 
 
-@router.get("/me", response_model=UserOut, responses=_UNAUTHORIZED)
-async def me(user: CurrentUser) -> User:
-    return user
+@router.get("/me", response_model=MeOut, responses=_UNAUTHORIZED)
+async def me(user: CurrentUser, request: Request, session: SessionDep) -> MeOut:
+    out = MeOut.model_validate(user, from_attributes=True)
+    if acted_by := getattr(request.state, "acted_by", None):
+        admin = await session.get(User, uuid.UUID(acted_by))
+        if admin is not None:
+            out.acted_by = ActingAdmin(id=admin.id, full_name=admin.full_name, email=admin.email)
+    out.can_act_as = user.role == UserRole.FINANCE_ADMIN and get_settings().act_as_enabled
+    return out
+
+
+@router.post(
+    "/act-as",
+    response_model=UserOut,
+    responses={**_UNAUTHORIZED, 403: {"model": ErrorResponse}, 422: {"model": ErrorResponse}},
+)
+async def act_as(
+    body: ActAsRequest,
+    response: Response,
+    session: SessionDep,
+    admin: AdminUser,
+    ctx: RequestContextDep,
+    slot: SessionSlot,
+) -> User:
+    """A Finance Admin (signed in in this tab) opens a session as another user in a new tab
+    (`slot`: that tab's session slot), to do their step while testing a workflow. Dev and demo
+    only (ACT_AS_ALLOWED); audited, and every event in it says it was the admin."""
+    if body.slot == slot:
+        raise ActAsRefusedError("Open the user in a new tab, not this one.")
+    target, tokens = await service.act_as(session, admin, body.user_id, ctx)
+    await session.commit()
+    set_auth_cookies(response, tokens.access_token, tokens.refresh_token, body.slot)
+    return target
 
 
 @router.post("/me/password", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
 async def change_password(
+    request: Request,
     body: PasswordChange,
     session: SessionDep,
     user: CurrentUser,
@@ -96,6 +138,10 @@ async def change_password(
     refresh_token: RefreshCookie,
 ) -> Response:
     """Change your own password. Your other sessions are signed out; this one stays."""
+    if getattr(request.state, "acted_by", None):
+        raise PermissionDeniedError(
+            "A Finance Admin testing as this user can't change their password."
+        )
     await service.change_password(
         session, user, body.current_password, body.new_password, refresh_token, ctx
     )

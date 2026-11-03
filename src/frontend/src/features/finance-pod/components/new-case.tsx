@@ -43,9 +43,29 @@ export function NewCase({ onClose }: { onClose?: () => void } = {}) {
   const [erpRequest, setErpRequest] = useState("")
   const [vendorName, setVendorName] = useState("")
   const [vendorEmail, setVendorEmail] = useState("")
-  const [period, setPeriod] = useState(lastMonth)
+  const [periodChoice, setPeriod] = useState<string | null>(null)
   const [showing, setShowing] = useState(Boolean(onClose))
   if (choices.length === 0) return null
+  // Month-end close: the newest month this snapshot can close that isn't closed yet
+  const closed = new Map((catalogue.data?.closed_periods ?? []).map((p) => [p.id, p.name]))
+  const until = catalogue.data?.closable_until ?? lastMonth()
+  const firstOpen = (() => {
+    const d = new Date(`${until}-01T00:00:00`)
+    for (let i = 0; i < 24; i += 1) {
+      const m = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
+      if (!closed.has(m)) return m
+      d.setMonth(d.getMonth() - 1)
+    }
+    return until
+  })()
+  const period = periodChoice ?? firstOpen
+  const periodProblem =
+    chosen !== "ap_month_close" ? null
+      : closed.has(period) ? `${period} is already closed in ${closed.get(period)}.`
+        : period > until ? `This snapshot can close up to ${until}: ${period} hasn't ended in it.`
+          : null
+  const missingPick =
+    (chosen === "ap_invoice_match" && !bill) || (chosen === "ar_billing" && !submission) || Boolean(periodProblem)
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
@@ -139,7 +159,12 @@ export function NewCase({ onClose }: { onClose?: () => void } = {}) {
               </select>
             </label>
           )}
-          {chosen === "ap_invoice_match" && (
+          {chosen === "ap_invoice_match" && catalogue.data && catalogue.data.incoming_invoices.length === 0 && (
+            <p className="rounded-md border border-dashed border-border px-3 py-2 text-sm text-muted-foreground">
+              {catalogue.data.empty_reason ?? "No incoming invoice to match."}
+            </p>
+          )}
+          {chosen === "ap_invoice_match" && (catalogue.data?.incoming_invoices.length ?? 0) > 0 && (
             <div className="space-y-2">
               <select aria-label="Incoming invoice" className={selectClass} value={bill} onChange={(e) => setBill(e.target.value)} required>
                 <option value="">An incoming invoice (ERPNext draft)…</option>
@@ -158,7 +183,12 @@ export function NewCase({ onClose }: { onClose?: () => void } = {}) {
               </Button>
             </div>
           )}
-          {chosen === "ar_billing" && (
+          {chosen === "ar_billing" && catalogue.data && catalogue.data.billable_submissions.length === 0 && (
+            <p className="rounded-md border border-dashed border-border px-3 py-2 text-sm text-muted-foreground">
+              {catalogue.data.empty_reason ?? "No lab submission to bill."}
+            </p>
+          )}
+          {chosen === "ar_billing" && (catalogue.data?.billable_submissions.length ?? 0) > 0 && (
             <div className="space-y-2">
               <select aria-label="Lab submission" className={selectClass} value={submission} onChange={(e) => setSubmission(e.target.value)} required>
                 <option value="">A submission whose report is issued…</option>
@@ -180,8 +210,17 @@ export function NewCase({ onClose }: { onClose?: () => void } = {}) {
           {chosen === "ap_month_close" && (
             <label className="block space-y-1 text-sm">
               <span className="font-medium">Month to close</span>
-              <Input type="month" value={period} onChange={(e) => setPeriod(e.target.value)} required className="max-w-48" />
-              <span className="block text-xs text-muted-foreground">The source data must be taken after the month ends.</span>
+              <Input type="month" value={period} max={until} onChange={(e) => setPeriod(e.target.value)} required className="max-w-48" />
+              {periodProblem ? (
+                <span className="block text-xs font-medium text-red-700">{periodProblem}</span>
+              ) : (
+                <span className="block text-xs text-muted-foreground">This snapshot can close up to {until}; a later month needs a snapshot taken after it ends.</span>
+              )}
+              {closed.size > 0 && (
+                <span className="block text-xs text-muted-foreground">
+                  Already closed: {[...closed.entries()].map(([m, ref]) => `${m} (${ref})`).join(", ")}
+                </span>
+              )}
             </label>
           )}
           {party && (
@@ -193,7 +232,7 @@ export function NewCase({ onClose }: { onClose?: () => void } = {}) {
           )}
           <Input placeholder="Title (optional)" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} />
           <div className="flex gap-2">
-            <Button type="submit" size="sm" disabled={open.isPending || !snapshot}>
+            <Button type="submit" size="sm" disabled={open.isPending || !snapshot || missingPick}>
               {open.isPending && <LoaderCircle className="size-4 animate-spin" aria-hidden />} Open
             </Button>
             <Button type="button" size="sm" variant="ghost" onClick={() => (onClose ? onClose() : setShowing(false))}>Cancel</Button>

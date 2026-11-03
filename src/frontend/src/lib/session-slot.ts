@@ -35,10 +35,20 @@ function newSlotId(): string {
 
 let current: string | null = null
 
+/** A tab a Finance Admin opened as another user arrives with its slot in the URL
+ *  (`#as=<slot>`): it adopts it, and the hash is dropped. */
+function slotFromUrl(): string | null {
+  const match = /(?:^#|&)as=([a-z0-9]{8,32})/.exec(window.location.hash)
+  if (!match) return null
+  const rest = window.location.hash.replace(match[0], "").replace(/^#&?/, "")
+  window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${rest ? `#${rest}` : ""}`)
+  return match[1]
+}
+
 export function sessionSlot(): string {
   if (current === null) {
     current =
-      read(() => sessionStorage, TAB_KEY) ?? read(() => localStorage, LAST_KEY) ?? newSlotId()
+      slotFromUrl() ?? read(() => sessionStorage, TAB_KEY) ?? read(() => localStorage, LAST_KEY) ?? newSlotId()
     write(() => sessionStorage, TAB_KEY, current)
   }
   return current
@@ -53,6 +63,11 @@ export function rememberSlot() {
 export function startNewSlot() {
   current = newSlotId()
   write(() => sessionStorage, TAB_KEY, current)
+}
+
+/** A fresh slot for a tab this one opens as another user (see slotFromUrl) */
+export function freshSlot(): string {
+  return newSlotId()
 }
 
 export const SLOT_HEADER = "X-Session-Slot"

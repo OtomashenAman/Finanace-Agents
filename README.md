@@ -35,10 +35,19 @@ uv run poe dev-backend  # terminal 1 → http://localhost:8088/docs
 uv run poe dev-frontend # terminal 2 → http://localhost:8081
 ```
 
-Or run everything in Docker instead (db + backend reload + Vite HMR):
+Or run everything in Docker instead (db + backend reload + Vite HMR + the local ERPNext):
 ```bash
-uv run poe docker-up
+cp .env.example .env    # once (or: uv run poe setup)
+uv run poe docker-up    # or: docker compose up -d --build
 ```
+The first `up` seeds everything on its own, on any machine:
+- `migrate`: the schema, then the Finance Admin and the Finance POD team (one user per capacity,
+  `req|bo|buyer|receiver|analyst|approver|controller|credit|billing.gia@example.com`), all with
+  `DEMO_ADMIN_PASSWORD` (unset: `FinanceDemo!2026`). Existing users are left as they are.
+- `erpnext-seed`: waits for the local ERPNext (a new site takes ~10 minutes), seeds the GIA demo
+  company, gives its API user `ERPNEXT_API_KEY` / `ERPNEXT_API_SECRET` (dev defaults in
+  `docker-compose.yml`), connects the app to it and takes a first snapshot. Follow it with
+  `docker compose logs -f erpnext-seed`. More work to do later: `uv run poe erpnext-seed --more`.
 - Frontend: http://localhost:8081 (`/api/*` is proxied to the backend)
 - Backend:  http://localhost:8088 (docs at `/docs`)
 - Postgres: localhost:5434 (user/password/db: `finance` / `finance` / `finance_acc`)
@@ -278,7 +287,14 @@ folder gets an `input_schema`, `run_model` and `analyze()` (see `agents/ap_invoi
     (`PrqPolicy` / `VndPolicy`), **demo values until GIA's**; each case records the version it
     was opened with.
 - Demo users from `uv run poe seed` (password = `DEMO_ADMIN_PASSWORD`): `finance.admin@example.com`
-  and `demo.user@example.com` (runs AP Invoice; the admin approves).
+  and `demo.user@example.com` (runs AP Invoice; the admin approves); `--finance-team` adds the
+  Finance POD team (Docker does that, without demo.user).
+- Testing a workflow as a Finance Admin: segregation of duties keeps you from approving what you
+  opened, so a case's "What's next" offers "Testing? Do it as the budget owner" (any person step or
+  sign-off): it lists who holds the capacity, and "Open as …" opens a new tab signed in as them, no
+  password (`POST /api/v1/auth/act-as`); this tab stays yours. The tab says so in a banner, and every
+  audit event in it is marked as the admin's test. Dev and demo only (`ACT_AS_ALLOWED`; unset: off
+  in production).
 - Each agent stores its fields as typed columns in its own table (`ap_invoice_runs`); the common
   lifecycle, findings, documents, LLM calls and reviews live in `agent_runs`, `run_flags`,
   `run_documents`, `run_narratives` and `run_reviews`.
@@ -289,9 +305,10 @@ folder gets an `input_schema`, `run_model` and `analyze()` (see `agents/ap_invoi
   it quotes is checked against the source data. With `none`, runs work without explanations.
 
 ### Local ERPNext (Finance POD source, dev and demo only)
+`docker compose up` starts it (`ops/erpnext`, included) and seeds it. By hand:
 ```bash
 uv run poe erpnext-up     # ERPNext v16 on http://localhost:8090 (first start: a few minutes)
-uv run poe erpnext-seed   # company "GIA Demo Labs" + demo AP data; prints the app's API key
+uv run poe erpnext-seed   # company "GIA Demo Labs" + demo AP/AR data (--more: a new batch)
 ```
 Sign in as `Administrator` / `ERPNEXT_ADMIN_PASSWORD` (default `admin`). ERPNext's own demo data
 is only a few masters, so `scripts/erpnext_seed.py` builds what the AP agents need (all
@@ -309,10 +326,12 @@ connected: custom "Report issued on" and "Fee estimate" fields stand in for it) 
 invoices across the ageing buckets with a late and a partial payment. Snapshots read them as
 clients, submissions, sales invoices, client payments, selling prices, pricing rules and sales
 tax rules.
-`erpnext-down` stops it; `erpnext-reset` deletes its data. It needs about 600 MB of Docker memory.
+`erpnext-down` stops it; `erpnext-reset` deletes its data. It needs about 2 GB of Docker memory.
+Moving from the old standalone stack (project `erpnext`): `docker compose -p erpnext down` (no
+`-v`), then `docker compose up -d`: the volumes keep their names, so the data carries on.
 
-Connect it under Data Sources → Connect ERPNext (address, company, the API key and secret the
-seed prints; from the app in Docker use `http://host.docker.internal:8090`). The key is checked
+Docker connects it by itself (above). By hand: Data Sources → Connect ERPNext (address, company,
+the API key and secret; from the app in Docker use `http://host.docker.internal:8090`). The key is checked
 before saving and the secret is encrypted with `DATA_ENCRYPTION_KEY`; in production the address
 must be https and listed in `ERPNEXT_ALLOWED_HOSTS`. A Finance Admin then takes a read-only
 snapshot on the Finance POD dashboard (`POST /api/v1/pod/snapshots/erpnext`): vendors (status and

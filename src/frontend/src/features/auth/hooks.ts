@@ -1,9 +1,9 @@
 import { hashKey, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { AUTH_ME_KEY } from "@/lib/query-client"
-import { rememberSlot, startNewSlot } from "@/lib/session-slot"
+import { freshSlot, rememberSlot, startNewSlot } from "@/lib/session-slot"
 
-import { authApi } from "./api"
+import { authApi, type Me } from "./api"
 
 export const authKeys = {
   me: AUTH_ME_KEY,
@@ -23,7 +23,9 @@ export function useLogin() {
     mutationFn: authApi.login,
     onSuccess: (user) => {
       rememberSlot()
-      queryClient.setQueryData(authKeys.me, user)
+      queryClient.setQueryData<Me>(authKeys.me, { ...user, acted_by: null, can_act_as: false })
+      // /auth/me carries what the login response doesn't (an admin's act-as permission)
+      void queryClient.invalidateQueries({ queryKey: authKeys.me })
     },
   })
 }
@@ -52,6 +54,26 @@ export function useLogout() {
     mutationFn: authApi.logout,
     // Even if the request fails, treat the user as signed out
     onSettled: signedOut,
+  })
+}
+
+/** A Finance Admin opens a new tab signed in as another user (testing a workflow), at
+ *  `path`; this tab stays the admin's. The tab is opened first so no pop-up blocker stops it. */
+export function useActAs() {
+  return useMutation({
+    mutationFn: async ({ userId, path }: { userId: string; path: string }) => {
+      const tab = window.open("about:blank", "_blank")
+      const slot = freshSlot()
+      try {
+        await authApi.actAs(userId, slot)
+      } catch (error) {
+        tab?.close()
+        throw error
+      }
+      const url = `${path}#as=${slot}`
+      if (tab) tab.location.href = url
+      else window.location.assign(url)
+    },
   })
 }
 

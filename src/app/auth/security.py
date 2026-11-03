@@ -36,10 +36,11 @@ def burn_password_check(password: str) -> None:
     _password_hash.verify(password, _dummy_hash())
 
 
-def create_access_token(user_id: uuid.UUID, role: str) -> str:
+def create_access_token(user_id: uuid.UUID, role: str, acted_by: uuid.UUID | None = None) -> str:
+    """`acted_by`: the Finance Admin acting as this user (claim "act")."""
     settings = get_settings()
     now = utcnow()
-    payload = {
+    payload: dict[str, Any] = {
         "sub": str(user_id),
         "role": role,
         "type": "access",
@@ -48,6 +49,8 @@ def create_access_token(user_id: uuid.UUID, role: str) -> str:
         "exp": now + timedelta(minutes=settings.access_token_ttl_minutes),
         "jti": uuid.uuid4().hex,
     }
+    if acted_by is not None:
+        payload["act"] = str(acted_by)
     return jwt.encode(payload, settings.secret_key.get_secret_value(), algorithm=JWT_ALGORITHM)
 
 

@@ -27,6 +27,8 @@ async def get_current_user(session: SessionDep, request: Request, slot: SessionS
     user = await session.get(User, user_id)
     if user is None or not user.is_active:
         raise NotAuthenticatedError
+    # a Finance Admin's act-as session (testing as this user): their id, else None
+    request.state.acted_by = payload.get("act")
     return user
 
 

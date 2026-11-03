@@ -1,13 +1,15 @@
 # Local ERPNext for the Finance POD (development and demo only, never production).
 #
-#   uv run poe erpnext-up      # first start creates the site (a few minutes)
+# The app's docker-compose.yml includes this file, so `docker compose up` starts it too, and
+# its erpnext-seed service fills it with the GIA demo company (scripts/erpnext_seed.py) and
+# connects the app. The first start creates the site: a few minutes, then the seed.
 #   open http://localhost:8090 # Administrator / $ERPNEXT_ADMIN_PASSWORD (default "admin")
-#   uv run poe erpnext-down    # stop (data kept); erpnext-reset wipes it
+#   uv run poe erpnext-down    # stop ERPNext only (data kept); erpnext-reset wipes it
 #
 # Based on frappe_docker's pwd.yml (one worker instead of two, to fit a 4 GB Docker VM).
-# Its own compose project ("erpnext") and network: nothing is shared with the app's stack.
-# The app reaches it at http://host.docker.internal:8090 (or http://localhost:8090 outside
-# Docker) with an API key/secret made by `uv run poe erpnext-seed`.
+# Its services are named erpnext-* and keep to their own network. The app reaches it at
+# http://host.docker.internal:8090 (http://localhost:8090 outside Docker). The volumes keep
+# the names of the old standalone "erpnext" project (ERPNEXT_VOLUMES), so its data carries on.
 
 x-erpnext: &erpnext
   image: frappe/erpnext:v16.53.0
@@ -17,11 +19,11 @@ x-erpnext: &erpnext
     - logs:/home/frappe/frappe-bench/logs
 
 x-redis-env: &redis-env
-  FRAPPE_REDIS_CACHE: redis://redis-cache:6379
-  FRAPPE_REDIS_QUEUE: redis://redis-queue:6379
+  FRAPPE_REDIS_CACHE: redis://erpnext-redis-cache:6379
+  FRAPPE_REDIS_QUEUE: redis://erpnext-redis-queue:6379
 
 services:
-  configurator:
+  erpnext-configurator:
     <<: *erpnext
     restart: "no"
     entrypoint: [bash, -c]
@@ -35,21 +37,21 @@ services:
         bench set-config -g redis_socketio "redis://$$REDIS_QUEUE";
         bench set-config -gp socketio_port $$SOCKETIO_PORT;
     environment:
-      DB_HOST: db
+      DB_HOST: erpnext-db
       DB_PORT: "3306"
-      REDIS_CACHE: redis-cache:6379
-      REDIS_QUEUE: redis-queue:6379
+      REDIS_CACHE: erpnext-redis-cache:6379
+      REDIS_QUEUE: erpnext-redis-queue:6379
       SOCKETIO_PORT: "9000"
 
-  create-site:
+  erpnext-create-site:
     <<: *erpnext
     restart: "no"
     entrypoint: [bash, -c]
     command:
       - >
-        wait-for-it -t 180 db:3306;
-        wait-for-it -t 120 redis-cache:6379;
-        wait-for-it -t 120 redis-queue:6379;
+        wait-for-it -t 180 erpnext-db:3306;
+        wait-for-it -t 120 erpnext-redis-cache:6379;
+        wait-for-it -t 120 erpnext-redis-queue:6379;
         export start=`date +%s`;
         until [[ -n `grep -hs ^ sites/common_site_config.json | jq -r ".db_host // empty"` ]] &&
           [[ -n `grep -hs ^ sites/common_site_config.json | jq -r ".redis_cache // empty"` ]] &&
@@ -68,12 +70,12 @@ services:
       ADMIN_PASSWORD: ${ERPNEXT_ADMIN_PASSWORD:-admin}
       DB_ROOT_PASSWORD: ${ERPNEXT_DB_ROOT_PASSWORD:-admin}
     depends_on:
-      db:
+      erpnext-db:
         condition: service_healthy
-      configurator:
+      erpnext-configurator:
         condition: service_completed_successfully
 
-  db:
+  erpnext-db:
     image: mariadb:11.8
     networks: [erpnext]
     restart: unless-stopped
@@ -94,24 +96,24 @@ services:
     volumes:
       - db-data:/var/lib/mysql
 
-  backend:
+  erpnext-backend:
     <<: *erpnext
     restart: unless-stopped
     environment:
-      DB_HOST: db
+      DB_HOST: erpnext-db
       DB_PORT: "3306"
     depends_on:
-      create-site:
+      erpnext-create-site:
         condition: service_completed_successfully
 
-  frontend:
+  erpnext-frontend:
     <<: *erpnext
     restart: unless-stopped
     command: [nginx-entrypoint.sh]
     environment:
-      BACKEND: backend:8000
+      BACKEND: erpnext-backend:8000
       FRAPPE_SITE_NAME_HEADER: frontend
-      SOCKETIO: websocket:9000
+      SOCKETIO: erpnext-websocket:9000
       UPSTREAM_REAL_IP_ADDRESS: 127.0.0.1
       UPSTREAM_REAL_IP_HEADER: X-Forwarded-For
       UPSTREAM_REAL_IP_RECURSIVE: "off"
@@ -119,51 +121,55 @@ services:
       CLIENT_MAX_BODY_SIZE: 50m
     ports:
       - "${ERPNEXT_PORT:-8090}:8080"
-    depends_on: [backend, websocket]
+    depends_on: [erpnext-backend, erpnext-websocket]
 
-  queue:
+  erpnext-queue:
     <<: *erpnext
     restart: unless-stopped
     command: [bench, worker, --queue, "long,default,short"]
     environment: *redis-env
     depends_on:
-      create-site:
+      erpnext-create-site:
         condition: service_completed_successfully
 
-  scheduler:
+  erpnext-scheduler:
     <<: *erpnext
     restart: unless-stopped
     command: [bench, schedule]
     depends_on:
-      create-site:
+      erpnext-create-site:
         condition: service_completed_successfully
 
-  websocket:
+  erpnext-websocket:
     <<: *erpnext
     restart: unless-stopped
     command: [node, /home/frappe/frappe-bench/apps/frappe/socketio.js]
     environment: *redis-env
     depends_on:
-      create-site:
+      erpnext-create-site:
         condition: service_completed_successfully
 
-  redis-queue:
+  erpnext-redis-queue:
     image: redis:6.2-alpine
     networks: [erpnext]
     restart: unless-stopped
     volumes:
       - redis-queue-data:/data
 
-  redis-cache:
+  erpnext-redis-cache:
     image: redis:6.2-alpine
     networks: [erpnext]
     restart: unless-stopped
 
 volumes:
   db-data:
+    name: ${ERPNEXT_VOLUMES:-erpnext}_db-data
   redis-queue-data:
+    name: ${ERPNEXT_VOLUMES:-erpnext}_redis-queue-data
   sites:
+    name: ${ERPNEXT_VOLUMES:-erpnext}_sites
   logs:
+    name: ${ERPNEXT_VOLUMES:-erpnext}_logs
 
 networks:
   erpnext:

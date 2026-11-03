@@ -4,23 +4,27 @@ the ERP postings (posted and verified by the task kind's capacity)."""
 
 import re
 import uuid
+from datetime import timedelta
 from decimal import Decimal
 from typing import Annotated, Any
 from urllib.parse import quote
 
 from fastapi import APIRouter, Form, Response, UploadFile, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
+from src.app.auth.models import User, UserRole
 from src.app.common.context import RequestContextDep
 from src.app.common.schemas import ErrorResponse
 from src.app.core.config import get_settings
 from src.app.core.db import SessionDep
 from src.app.core.errors import AppError
 from src.app.finance_pod.access import FinanceAccessDep
+from src.app.finance_pod.models import FinanceCapacityAssignment
 from src.app.service_pod.core.access.service import PodAccess
 from src.app.service_pod.core.cases.access import load_case
 from src.app.service_pod.core.cases.models import CaseStatus, PodCase
+from src.app.service_pod.core.cases.service import case_context
 from src.app.service_pod.core.messaging import service as messaging
 from src.app.service_pod.core.messaging.models import ArtifactKind, PodArtifact, PodMessage
 from src.app.service_pod.core.messaging.schemas import (
@@ -33,6 +37,7 @@ from src.app.service_pod.core.snapshots import service as snapshots
 from src.app.service_pod.core.snapshots.contract import Collection, SnapshotDocument
 from src.app.service_pod.core.snapshots.exceptions import SnapshotTooLargeError
 from src.app.service_pod.core.snapshots.schemas import SnapshotSummary
+from src.app.service_pod.core.steps.service import plan_of, sod_problem
 from src.app.service_pod.core.tasks import service as tasks
 from src.app.service_pod.core.tasks.models import PodPostingTask
 from src.app.service_pod.core.tasks.schemas import TaskAction, TaskOut
@@ -53,6 +58,55 @@ FINANCE_DOCUMENTS = (
 class CapacityRequiredError(AppError):
     status_code = 403
     code = "capacity_required"
+
+
+class StepPerson(BaseModel):
+    id: uuid.UUID
+    full_name: str
+    email: str
+    # segregation of duties: why they can't do this step of this case (None: they can)
+    blocked: str | None = None
+
+
+@router.get("/cases/{case_id}/people", response_model=list[StepPerson], responses=_ERRORS)
+async def step_people(
+    case_id: uuid.UUID,
+    session: SessionDep,
+    access: FinanceAccessDep,
+    step: str | None = None,
+    capacity: str | None = None,
+) -> list[StepPerson]:
+    """Who holds the capacity of a step (or a sign-off's `capacity`) for the case's entity,
+    for a Finance Admin testing the workflow to open a tab as one of them ("act as"). Each
+    says whether segregation of duties keeps them from this step."""
+    if not (access.is_admin and get_settings().act_as_enabled):
+        raise CapacityRequiredError("Only a Finance Admin testing a workflow sees this.")
+    case = await load_case(session, case_id, access=access)
+    spec = next((s for s in plan_of(case).steps if s.key == step), None) if step else None
+    wanted = spec.capacity if spec else capacity
+    if not wanted:
+        return []
+    rows = await session.scalars(
+        select(User)
+        .join(FinanceCapacityAssignment, FinanceCapacityAssignment.user_id == User.id)
+        .where(
+            FinanceCapacityAssignment.capacity == wanted,
+            or_(FinanceCapacityAssignment.entity_id.is_(None),
+                FinanceCapacityAssignment.entity_id == case.entity_id),
+            User.is_active.is_(True),
+            User.role == UserRole.USER,
+        )
+        .distinct()
+        .order_by(User.full_name)
+    )  # fmt: skip
+    c = await case_context(session, access, case) if spec else None
+    return [
+        StepPerson(
+            id=u.id, full_name=u.full_name, email=u.email,
+            blocked=sod_problem(c, spec, u.id) if c and spec else None,
+        )
+        for u in rows
+    ]  # fmt: skip
 
 
 @router.get("/sources", response_model=list[SnapshotSummary])
@@ -97,6 +151,12 @@ class Catalogue(BaseModel):
     incoming_invoices: list[CatalogueEntry]  # ERPNext drafts a matching case can start from
     # Lab submissions whose report is issued and aren't billed (a billing case starts from one)
     billable_submissions: list[CatalogueEntry] = []
+    # Month-end close: months already closed (id: YYYY-MM, name: the case), and the last month
+    # this snapshot can close (it must be taken after the month ends)
+    closed_periods: list[CatalogueEntry] = []
+    closable_until: str | None = None
+    # Why a list to pick from is empty, in words (None: it isn't, or nothing to say)
+    empty_reason: str | None = None
 
 
 @router.get("/cases/{case_id}/sources", response_model=list[SnapshotSummary], responses=_ERRORS)
@@ -140,7 +200,33 @@ async def source_catalogue(
                 )
             )
         )
+        drafts = len(found.incoming_invoices)
         found.incoming_invoices = [b for b in found.incoming_invoices if b.id not in taken]
+        if not found.incoming_invoices:
+            found.empty_reason = (
+                f"Every incoming invoice in this snapshot ({drafts}) already has a matching "
+                "case. A new supplier invoice (an ERPNext draft) shows here after a fresh "
+                "snapshot (Setup → Take snapshot)."
+                if drafts
+                else "This snapshot has no incoming supplier invoice (no ERPNext draft)."
+            )
+    if workflow == WorkflowKey.AP_MONTH_CLOSE:
+        snap = await snapshots.load_snapshot(session, snapshot_id)
+        doc = snapshots.document(snap)
+        last = (doc.as_of.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+        found.closable_until = last
+        closes = await session.scalars(
+            select(PodCase).where(
+                PodCase.workflow == workflow,
+                PodCase.entity_id == snap.entity_id,
+                PodCase.status != CaseStatus.CANCELLED,
+            )
+        )
+        found.closed_periods = sorted(
+            (CatalogueEntry(id=str(c.selection.get("period")), name=c.reference,
+                            detail=c.status.value) for c in closes),
+            key=lambda e: e.id, reverse=True,
+        )  # fmt: skip
     if workflow == WorkflowKey.AR_BILLING:
         from src.app.finance_pod.flows.ar_billing.service import live_cases, to_bill
 
@@ -154,6 +240,15 @@ async def source_catalogue(
             )
             for s in to_bill(doc, await live_cases(session))
         ]
+        if not found.billable_submissions:
+            subs = doc.submissions or []
+            in_lab = sum(1 for s in subs if s.report_issued_on is None)
+            billed = len(subs) - in_lab
+            found.empty_reason = (
+                f"No lab submission is waiting to be billed: {billed} with an issued report "
+                f"already have a billing case or are billed, {in_lab} still in the lab. New "
+                "ones show here after a fresh snapshot (Setup → Take snapshot)."
+            )
     return found
 
 

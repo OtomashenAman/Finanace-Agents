@@ -34,7 +34,10 @@ def record_event(
     actor_id: uuid.UUID | None = None,
     **details: Any,
 ) -> None:
-    """Add an audit event to the current transaction (caller commits)."""
+    """Add an audit event to the current transaction (caller commits). In a Finance Admin's
+    act-as session the event says so (details.acted_by: the admin's id)."""
+    if ctx.acted_by and "acted_by" not in details:
+        details["acted_by"] = ctx.acted_by
     session.add(
         AuditEvent(
             event_type=event_type,

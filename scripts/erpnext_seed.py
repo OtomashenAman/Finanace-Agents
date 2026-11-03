@@ -2,6 +2,11 @@
 
     uv run poe erpnext-seed              # setup wizard, masters, transactions, API user
     uv run poe erpnext-seed --new-keys   # also issue a new API secret for the app
+    uv run poe erpnext-seed --more       # a new batch of invoices to match, submissions to bill
+
+`docker compose up` runs it by itself (the erpnext-seed service): it waits for a new site,
+seeds it, and gives the API user the key/secret of ERPNEXT_API_KEY / ERPNEXT_API_SECRET, so
+the app connects with no copy-pasting.
 
 ERPNext v16's own demo data is only a few masters (3 suppliers, 10 items, no transactions),
 so this builds what the AP agents need, every figure fictional and every email @example.com:
@@ -68,12 +73,23 @@ class Erp:
     def __init__(self) -> None:
         self.http = httpx.Client(base_url=URL, timeout=300)
 
-    def login(self) -> None:
-        r = self.http.post(
-            "/api/method/login", json={"usr": "Administrator", "pwd": ADMIN_PASSWORD}
-        )
-        if r.status_code != 200:
-            raise ErpError(f"Can't sign in to ERPNext at {URL}: {r.text[:200]}")
+    def login(self, wait: int = 0) -> None:
+        """Sign in as Administrator; `wait` seconds for a site still being created."""
+        deadline = time.monotonic() + wait
+        while True:
+            try:
+                r = self.http.post(
+                    "/api/method/login", json={"usr": "Administrator", "pwd": ADMIN_PASSWORD}
+                )
+                if r.status_code == 200:
+                    return
+                problem = r.text[:200]
+            except httpx.HTTPError as exc:
+                problem = str(exc)
+            if time.monotonic() >= deadline:
+                raise ErpError(f"Can't sign in to ERPNext at {URL}: {problem}")
+            print(f"Waiting for ERPNext at {URL} ({problem[:80]})...")
+            time.sleep(15)
 
     def _check(self, r: httpx.Response) -> Any:
         if r.status_code >= 400:
@@ -947,6 +963,46 @@ def receivables(erp: Erp) -> None:
                 "content": "AR demo transactions created by scripts/erpnext_seed.py"})  # fmt: skip
 
 
+# --- more work to do: a fresh batch for the demo -------------------------------------------
+# Every seeded invoice and submission ends up with a case; --more adds a new batch (its own
+# refs, so it can be run again and again) for new invoice-matching and billing cases.
+
+TOPUP = "finance-acc-topup"
+
+
+def topup(erp: Erp) -> None:
+    batch = len(erp.http.get("/api/resource/Note", params={
+        "filters": json.dumps([["title", "like", f"{TOPUP}-%"]]), "limit_page_length": 0,
+    }).json()["data"]) + 1  # fmt: skip
+    tag = f"T{batch}"
+    print(f"More work (batch {tag}): supplier invoices to match, submissions to bill...")
+    # AP-3: a clean three-way match, and one billed above the PO price
+    po = order(
+        erp, f"PO-{tag}-TUBES", "LabChem Supply Co", "2026-10-26",
+        [line("LC-BAGS", 30, 32, "Grading Operations", "Mumbai Lab", None, "2026-11-01")],
+    )  # fmt: skip
+    pr = receive(erp, f"PR-{tag}-TUBES", po, "2026-10-31")
+    invoice(erp, f"PI-{tag}-TUBES", ("Purchase Receipt", pr), f"LC-INV-{4700 + batch}",
+            "2026-11-02")  # clean  # fmt: skip
+    po = order(
+        erp, f"PO-{tag}-LAMP", "Precision Optics Inc", "2026-10-25",
+        [line("LC-LAMP", 40, 12, "Grading Operations", "Carlsbad Lab", None, "2026-11-01")],
+    )  # fmt: skip
+    pr = receive(erp, f"PR-{tag}-LAMP", po, "2026-10-30")
+    invoice(erp, f"PI-{tag}-LAMP", ("Purchase Receipt", pr), f"PO-INV-{2300 + batch}",
+            "2026-11-02", rates={"LC-LAMP": 12.80})  # 6.7% above the PO  # fmt: skip
+    # AR-3: reports issued, not billed
+    submission(erp, f"SO-{tag}-BRILLIANT", "Brilliant Gems LLC", "2026-10-28",
+               [("GR-DIA", 6, 150, False)], 900, "2026-11-02")  # clean  # fmt: skip
+    submission(erp, f"SO-{tag}-RIVERA", "Rivera Fine Jewelry", "2026-10-29",
+               [("ID-COL", 4, 120, False), ("SV-RUSH", 4, 75, True)], 480,
+               "2026-11-02")  # a rush added: over the estimate  # fmt: skip
+    submission(erp, f"SO-{tag}-ANTWERP", "Antwerp Diamond House", "2026-10-30",
+               [("GR-DOS", 5, 90, False)], 450, "2026-11-03")  # export  # fmt: skip
+    erp.insert({"doctype": "Note", "title": f"{TOPUP}-{tag}", "public": 0,
+                "content": "More demo work created by scripts/erpnext_seed.py --more"})  # fmt: skip
+
+
 # --- the app's API user --------------------------------------------------------------------
 
 
@@ -960,6 +1016,10 @@ def api_user(erp: Erp, new_keys: bool) -> None:
         new_keys = True
     else:  # keep its roles current
         erp.update("User", API_USER, {"roles": [{"role": r} for r in API_ROLES]})
+    key, secret = os.environ.get("ERPNEXT_API_KEY"), os.environ.get("ERPNEXT_API_SECRET")
+    if key and secret and not new_keys:
+        _fixed_keys(erp, key, secret)
+        return
     if not new_keys:
         print(f"\nAPI user {API_USER} exists. Run with --new-keys for a new secret.")
         return
@@ -971,16 +1031,42 @@ def api_user(erp: Erp, new_keys: bool) -> None:
     print(f"  ERPNEXT_API_SECRET={secret}")
 
 
+def _fixed_keys(erp: Erp, key: str, secret: str) -> None:
+    """The API user gets the key/secret the app is configured with (docker compose: dev
+    defaults), unless it already has them."""
+    probe = httpx.get(f"{URL}/api/method/frappe.auth.get_logged_user",
+                      headers={"Authorization": f"token {key}:{secret}"}, timeout=60)  # fmt: skip
+    if probe.status_code == 200 and probe.json().get("message") == API_USER:
+        print(f"\nAPI user {API_USER} already has ERPNEXT_API_KEY's key.")
+        return
+    erp.update("User", API_USER, {"api_key": key, "api_secret": secret})
+    print(f"\nAPI user {API_USER} now has ERPNEXT_API_KEY / ERPNEXT_API_SECRET.")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Seed the local ERPNext with GIA demo data.")
     parser.add_argument("--new-keys", action="store_true", help="issue a new API secret")
+    parser.add_argument(
+        "--wait",
+        type=int,
+        default=0,
+        metavar="SECONDS",
+        help="wait this long for ERPNext to come up (a new site takes minutes)",
+    )
+    parser.add_argument(
+        "--more",
+        action="store_true",
+        help="add a new batch of invoices to match and submissions to bill",
+    )
     args = parser.parse_args()
     erp = Erp()
     try:
-        erp.login()
+        erp.login(args.wait)
         setup_company(erp)
         transactions(erp, masters(erp))
         receivables(erp)
+        if args.more:
+            topup(erp)
         api_user(erp, args.new_keys)
     except (ErpError, httpx.HTTPError) as exc:
         sys.exit(f"ERPNext seed failed: {exc}")

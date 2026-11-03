@@ -85,6 +85,9 @@ class Settings(BaseSettings):
     # Snapshots labelled SYNTHETIC_DEMO (or from a QuickBooks sandbox). Unset: allowed outside
     # production only, so a client installation never shows demo figures as its books
     pod_allow_demo_snapshots: bool | None = None
+    # A Finance Admin may open a tab as another user to test a workflow (who has to do the
+    # next step), without their password; audited. Unset: allowed outside production only
+    act_as_allowed: bool | None = None
 
     # Service POD: email. "outbox" records approved messages without sending anything
     # (labelled as simulated); "brevo" sends through Brevo's transactional API; "microsoft"
@@ -144,6 +147,7 @@ class Settings(BaseSettings):
         "mailbox_poll_seconds",
         "email_test_recipient",
         "pod_allow_demo_snapshots",
+        "act_as_allowed",
         mode="before",
     )
     @classmethod
@@ -159,6 +163,12 @@ class Settings(BaseSettings):
         if self.pod_allow_demo_snapshots is None:
             return not self.is_production
         return self.pod_allow_demo_snapshots
+
+    @property
+    def act_as_enabled(self) -> bool:
+        if self.act_as_allowed is None:
+            return not self.is_production
+        return self.act_as_allowed
 
     @model_validator(mode="after")
     def _check_email_config(self) -> Self:

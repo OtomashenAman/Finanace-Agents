@@ -253,6 +253,12 @@ export interface Catalogue {
   purchase_requests: CatalogueEntry[]
   incoming_invoices: CatalogueEntry[]
   billable_submissions: CatalogueEntry[]
+  /** Month-end close: months already closed (id YYYY-MM, name the case) */
+  closed_periods: CatalogueEntry[]
+  /** The last month this snapshot can close */
+  closable_until: string | null
+  /** Why the list to pick from is empty, in words */
+  empty_reason: string | null
 }
 
 export interface SanctionsStatus {
@@ -272,6 +278,15 @@ export interface PortalView {
 }
 
 const base = "/finance"
+
+/** Who holds a step's capacity for the case's entity (a Finance Admin testing the workflow) */
+export interface StepPerson {
+  id: string
+  full_name: string
+  email: string
+  /** segregation of duties: why they can't do this step (null: they can) */
+  blocked: string | null
+}
 
 export const financeApi = {
   me: () => apiRequest<FinanceMe>(`${base}/me`),
@@ -296,6 +311,8 @@ export const financeApi = {
   caseSources: (caseId: string) => apiRequest<Snapshot[]>(`${base}/cases/${caseId}/sources`),
   sourceCatalogue: (snapshotId: string, workflow: string) =>
     apiRequest<Catalogue>(`${base}/sources/${snapshotId}/catalogue?workflow=${encodeURIComponent(workflow)}`),
+  stepPeople: (caseId: string, by: { step?: string; capacity?: string }) =>
+    apiRequest<StepPerson[]>(`${base}/cases/${caseId}/people?${new URLSearchParams(by as Record<string, string>)}`),
   caseCatalogue: (caseId: string) => apiRequest<Catalogue>(`${base}/cases/${caseId}/catalogue`),
   upload: ({ caseId, kind, file }: { caseId: string; kind: string; file: File }) => {
     const form = new FormData()
