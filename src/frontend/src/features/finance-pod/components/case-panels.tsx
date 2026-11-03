@@ -31,16 +31,29 @@ export function DocumentsPanel({ c }: { c: CaseDetail }) {
           : "quote",
   )
   const [file, setFile] = useState<File | null>(null)
+  const [adding, setAdding] = useState(false)
   const submit = (e: FormEvent) => {
     e.preventDefault()
     if (!file) return
     upload.mutate(
       { caseId: c.id, kind, file },
-      { onSuccess: () => { toast.success(`${file.name} added`); setFile(null) }, onError: (e) => fail(e, "Upload failed") },
+      {
+        onSuccess: () => { toast.success(`${file.name} added`); setFile(null); setAdding(false) },
+        onError: (e) => fail(e, "Upload failed"),
+      },
     )
   }
+  const HINTS: Record<string, string> = {
+    ap_purchase_request: "A supplier's quote, if you have one.",
+    ap_vendor_onboarding: "Tax forms and bank letters only count when the vendor uploads them through the portal.",
+    ap_invoice_match: "The vendor's invoice (kind: Invoice copy) is needed before matching starts.",
+    ap_month_close: "Vendor statements to read for gaps.",
+    ar_client_account: "The client uploads its own papers through the portal.",
+    ar_billing: "Anything supporting the invoice.",
+  }
+  if (c.artifacts.length === 0 && c.status !== "draft") return null
   return (
-    <Card title="Documents" hint="Tax forms and bank letters only count when the vendor uploads them through the portal.">
+    <Card title="Documents" hint={HINTS[c.workflow]}>
       {c.artifacts.length > 0 && (
         <ul className="mb-3 space-y-1 text-sm">
           {c.artifacts.map((a) => (
@@ -59,7 +72,12 @@ export function DocumentsPanel({ c }: { c: CaseDetail }) {
           ))}
         </ul>
       )}
-      {c.status === "draft" && (
+      {c.status === "draft" && !adding && (
+        <Button size="sm" variant="outline" onClick={() => setAdding(true)}>
+          <Upload className="size-4" aria-hidden /> Add a document
+        </Button>
+      )}
+      {c.status === "draft" && adding && (
         <form onSubmit={submit} className="flex flex-wrap items-center gap-2">
           <select aria-label="Kind" className={cn(selectClass, "h-9 w-44")} value={kind} onChange={(e) => setKind(e.target.value)}>
             {KINDS.map((k) => (
@@ -224,7 +242,8 @@ export function ActionsPanel({ c }: { c: CaseDetail }) {
   const newer = (sources.data ?? []).filter((s) => s.id !== c.snapshot_id)
   const quotes = c.artifacts.filter((a) => a.kind === "quote")
   const actions = [
-    allowed("record_quote") && "record_quote",
+    // A quote is recorded while quotes are being gathered (sourcing, AP-1 1.3.1)
+    allowed("record_quote") && (c.steps.find((s) => s.status === "pending" || s.status === "failed")?.key ?? "").startsWith("1.3.1") && "record_quote",
     allowed("log_acknowledgement") && "log_acknowledgement",
     allowed("enter_vendor_details") && "enter_vendor_details",
     allowed("invite_client") && "invite_client",

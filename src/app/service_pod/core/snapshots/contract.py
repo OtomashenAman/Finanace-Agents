@@ -265,6 +265,8 @@ class Item(_Row):
     name: Name
     group: Name
     stock_item: bool
+    purchasable: bool = True  # bought (a purchase request may ask for it)
+    sellable: bool = False  # sold (e.g. a lab service billed to clients)
     standard_rate: Rate | None = None
     expense_account_id: Id | None = None
 

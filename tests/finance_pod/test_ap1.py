@@ -160,6 +160,11 @@ async def test_a_small_request_goes_from_need_to_po(
     # AP1.P4: the requester sees where their request is and who it waits on
     mine = (await w["req"].get("/api/v1/finance/cases")).json()
     assert [(c["reference"], c["stage"]) for c in mine] == [(case["reference"], "1.2.2")]
+    assert (mine[0]["next_title"], mine[0]["next_who"], mine[0]["next_failed"]) == (
+        "Budget owner decides",
+        "budget_owner",
+        False,
+    )
     assert step(case, "1.2.2")["capacity"] == "budget_owner"
 
     case = await ok(
@@ -295,10 +300,25 @@ async def test_a_request_without_budget_codes_is_flagged(world: World, db: Async
         step="1.1.1",
         results=need([("LC-PASTE", "10")], cost_centre_id=None, lab_id=None),
     )
+    # The agent doesn't run: the case says what to fill in, and where
+    needs = step(case, "1.1.2")["needs"]
+    assert needs["fix_step"] == "1.1.1" and "a cost centre, a lab" in needs["message"]
+    r = await act(w["req"], case, "run_agent_step", step="1.1.2")
+    assert r.status_code == 409 and "Fix it in step 1.1.1" in r.json()["detail"]["message"]
+    fresh = (await w["req"].get(f"/api/v1/finance/cases/{case['id']}")).json()
+    assert step(fresh, "1.1.2")["status"] == "pending"
+    queue = (await w["req"].get("/api/v1/finance/dashboard")).json()["my_queue"]
+    assert [(q["step_key"], q["step_title"][:30]) for q in queue] == [
+        ("1.1.1", "Fix before the agent runs: cho")
+    ]
+    # Sent back, the form starts from what was filled in; fixed, the agent runs
+    case = await ok(w["req"], case, "redo_step", step="1.1.1", reason="add the coding")
+    previous = step(case, "1.1.1")["l5"][0]["previous"]
+    assert previous["lines"][0]["item_code"] == "LC-PASTE" and previous["cost_centre_id"] is None
+    case = await ok(w["req"], case, "complete_step", step="1.1.1",
+                    results=need([("LC-PASTE", "10")]))  # fmt: skip
     case = await run(w["req"], case, "1.1.2")
-    assert step(case, "1.1.2")["status"] == "failed"
-    assert "cost centre" in step(case, "1.1.2")["l5"][0]["note"]
-    assert any("Failed step" in b for b in case["blockers"])
+    assert step(case, "1.1.2")["status"] == "done" and step(case, "1.1.2")["needs"] is None
 
 
 @pytest.mark.requirement("AP1.P2")

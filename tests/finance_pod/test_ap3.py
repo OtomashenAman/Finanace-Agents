@@ -107,8 +107,11 @@ async def test_an_invoice_needs_its_source_document(world: World, db: AsyncSessi
             "selection": {"bill_id": "BILL-OK"},
         },
     )
-    case = await run(w["analyst"], r.json(), "3.2.1")
-    assert "attach the vendor's invoice document" in step(case, "3.2.1")["l5"][0]["note"]
+    case = r.json()
+    assert "attach the vendor's invoice document" in step(case, "3.2.1")["needs"]["message"]
+    assert step(case, "3.2.1")["needs"]["fix_step"] is None  # an upload, not an earlier step
+    refused = await act(w["analyst"], case, "run_agent_step", step="3.2.1")
+    assert refused.status_code == 409 and "can't run yet" in refused.json()["detail"]["message"]
     again = await w["analyst"].post(
         "/api/v1/finance/cases",
         json={

@@ -40,7 +40,7 @@ from src.app.finance_pod.models import FinanceCapacityAssignment
 from src.app.service_pod.core.cases.models import PodReviewTask, ReviewTaskKind
 from src.app.service_pod.core.messaging.models import ArtifactKind, Audience, PodArtifact
 from src.app.service_pod.core.snapshots.contract import Bill, SnapshotDocument
-from src.app.service_pod.core.steps.spec import StepFailedError, StepSpec, StepStatus
+from src.app.service_pod.core.steps.spec import StepFailedError, StepSpec, StepStatus, Unready
 from src.app.service_pod.core.tasks.models import PodPostingTask, TaskKind, TaskStatus
 
 if TYPE_CHECKING:
@@ -63,6 +63,20 @@ def _policy(c: Ctx) -> ApmPolicy:
 
 
 # --- 3.2.1 Create invoice in ERP ----------------------------------------------------------
+
+
+async def ready_to_validate(c: Ctx) -> Unready | None:
+    """3.2.1 needs the vendor's own invoice document in the case."""
+    source = await c.session.scalar(
+        select(PodArtifact.id).where(
+            PodArtifact.case_id == c.case.id, PodArtifact.kind == ArtifactKind.INVOICE_COPY
+        )
+    )
+    if source is None:
+        return Unready(
+            message="attach the vendor's invoice document (Documents, kind: Invoice copy)."
+        )
+    return None
 
 
 async def validate_invoice(c: Ctx, step: StepSpec) -> Results:

@@ -177,6 +177,10 @@ async def test_a_clean_invoice_goes_out_and_onto_the_statement(
 
     case = await run(w["billing"], case, "3.5.1.a")
     assert "verify it with a fresh snapshot" in step(case, "3.5.1.a")["l5"][0]["note"]
+    queue = (await w["billing"].get("/api/v1/finance/dashboard")).json()["my_queue"]
+    verify = [q for q in queue if q["type"] == "verify"]
+    assert [q["reference"] for q in verify] == [case["reference"]]
+    assert verify[0]["step_title"].startswith("Verify the sales invoice")
     fresh = await take(w, db, sales_invoices=[posted_row(invoice, "Brilliant", "1434.38", "84.38")])
     task = case["posting_tasks"][0]
     r = await w["billing"].post(
@@ -186,6 +190,9 @@ async def test_a_clean_invoice_goes_out_and_onto_the_statement(
     assert r.status_code == 200, r.text
     case = await run(w["billing"], case, "3.5.1.a")
     assert "drafted" in step(case, "3.5.1.a")["l5"][0]["note"]
+    queue = (await w["billing"].get("/api/v1/finance/dashboard")).json()["my_queue"]
+    mine = [(q["type"], q["reference"]) for q in queue if q["reference"] == case["reference"]]
+    assert ("mail", case["reference"]) in mine  # the drafted invoice email waits on them
     assert await send_drafts(w["billing"], case, "client_invoice") == 1
     case = await run(w["billing"], case, "3.5.1.a")
     assert step(case, "3.5.1.a")["status"] == "done", step(case, "3.5.1.a")["l5"][0]["note"]
@@ -203,9 +210,17 @@ async def test_a_clean_invoice_goes_out_and_onto_the_statement(
     assert step(case, "3.5.1.b")["l5"][0]["result"]["statement_month"] == "2026-11"
     case = await ok(w["billing"], case, "complete")
     assert case["status"] == "completed"
-    tiles = (await w["billing"].get("/api/v1/finance/dashboard")).json()["workflows"]
+    board = (await w["billing"].get("/api/v1/finance/dashboard")).json()
+    tiles = board["workflows"]
     measures = {m["id"]: m["value"] for t in tiles if t["key"] == BIL for m in t["measures"]}
     assert measures["AR3.M1"] == "100.00" and measures["AR3.M2"] is not None
+    # A billing analyst sees the AR workflows only, the receivables, and what the AI did
+    assert {(t["key"], t["area"]) for t in tiles} == {(BIL, "AR"), ("ar_client_account", "AR")}
+    kpis = board["kpis"]
+    assert (kpis["open_ap"], kpis["erp_pending"], kpis["overdue_receivables"]) == (0, 0, "0")
+    kinds = {e["kind"] for e in board["ai"]["recent"]}
+    assert {"agent_step", "posted", "verified"} <= kinds
+    assert board["ai"]["last_7_days"]["posted"] == 1
 
 
 @pytest.mark.requirement("AR3.P2")

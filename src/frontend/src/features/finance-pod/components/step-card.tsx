@@ -24,6 +24,18 @@ const FORMS: Record<string, typeof NeedForm> = {
   "ap_invoice_match:3.6.2": ReceiptForm,
 }
 
+/** A line above a person's form: what the step is for, and where its inputs come from */
+const STEP_HINTS: Record<string, string> = {
+  "ar_client_account:1.1.1":
+    "The client normally fills this in through the portal (Actions → Invite the client). Fill it in here only for an application on paper, after adding its tax form and registration papers under Documents.",
+  "ar_client_account:1.2.2": "Read the credit agent's score and proposal above, then decide.",
+  "ar_billing:3.3.1": "Read the flags above. Override a rate only if this invoice should differ from the fee schedule.",
+  "ap_purchase_request:1.2.2": "Read the budget lines above: an approval over a flagged budget needs a comment.",
+  "ap_vendor_onboarding:1.5.2.a": "Call the vendor on a number you found yourself (never the one in the letter or an email), and ask them to read the account's last 4 digits.",
+  "ap_invoice_match:3.5.2": "Compare the PO, the receipt and the invoice above, then choose how to settle the difference.",
+  "ap_month_close:6.2.1": "Read the accruals, the reconciliation and the statement gaps above.",
+}
+
 const STATUS_ICON: Record<StepStatus, typeof CircleCheck> = {
   pending: CircleDashed,
   done: CircleCheck,
@@ -33,10 +45,11 @@ const STATUS_ICON: Record<StepStatus, typeof CircleCheck> = {
 
 /** One L4 task as the requirement draws it: a box in its kind's colour with its L5 steps,
  *  who did each and when, and what the viewer can do on it now. */
-export function StepCard({ c, step, open }: { c: CaseDetail; step: Step; open: boolean }) {
+export function StepCard({ c, step, open, expandAll = false }: { c: CaseDetail; step: Step; open: boolean; expandAll?: boolean }) {
   const meta = KIND_META[step.kind]
   const action = useCaseAction()
   const [mode, setMode] = useState<"none" | "fail" | "redo">("none")
+  const [shown, setShown] = useState(false)
   const [reason, setReason] = useState("")
   const run = (name: string, payload: Record<string, unknown>, done: string) =>
     action.mutate(
@@ -51,18 +64,36 @@ export function StepCard({ c, step, open }: { c: CaseDetail; step: Step; open: b
       },
     )
   const canAct = step.blocked === null && c.status !== "completed" && c.status !== "cancelled"
+  // Send the earlier step back with the reason, then take the person to its form
+  const fixEarlier = (key: string, why: string) =>
+    action.mutate(
+      { id: c.id, version: c.version, action: "redo_step", payload: { step: key, reason: `To fix: ${why}` } },
+      {
+        onSuccess: () => {
+          toast.success(`Step ${key} is open again: fix it there`)
+          setTimeout(() => document.getElementById(`step-${key}`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 400)
+        },
+        onError: (error) => toast.error(errorMessage(error, "Couldn't send it back.")),
+      },
+    )
   const settled = step.status === "done" || step.status === "not_applicable" || step.status === "failed"
   const KindIcon = step.kind === "agent" ? Bot : User
+  // A finished step folds to one line; the current one, a failed one, or one you can act
+  // on stays open
+  const folded = !open && !expandAll && !shown && (step.status === "done" || step.status === "not_applicable")
+  const last = step.l5.filter((l) => l.done_at).at(-1)
+  const notes = step.l5.map((l) => l.note)
+  const oneNote = step.status === "failed" && notes.every((n) => n && n === notes[0]) ? notes[0] : null
 
   return (
     <article className={cn("rounded-xl border-2 p-3", meta.box, open && "ring-2 ring-primary/30")} aria-label={`Step ${step.key}`}>
       <header className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <span className={cn("inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide", meta.chip)}>
-            <KindIcon className="size-3" aria-hidden />
-            {meta.label} · L4 {step.l4}
+        <div className="flex min-w-0 items-center gap-2">
+          <span className={cn("flex size-6 shrink-0 items-center justify-center rounded-full", meta.chip)} title={meta.label}>
+            <KindIcon className="size-3.5" aria-hidden />
           </span>
-          <h3 className="text-sm font-semibold">{step.title}</h3>
+          <h3 className="truncate text-sm font-semibold">{step.title}</h3>
+          <span className="shrink-0 font-mono text-[11px] text-muted-foreground">L4 {step.l4}</span>
         </div>
         <div className="flex items-center gap-2 text-xs">
           {step.capacity && <span className="text-muted-foreground">{capacityLabel(step.capacity)}</span>}
@@ -72,6 +103,27 @@ export function StepCard({ c, step, open }: { c: CaseDetail; step: Step; open: b
         </div>
       </header>
 
+      {folded ? (
+        <p className="mt-1.5 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+          <span>
+            {step.status === "not_applicable"
+              ? `Not applicable: ${step.l5[0]?.note ?? ""}`
+              : last
+                ? `${last.done_by} · ${new Date(last.done_at!).toLocaleString()}`
+                : "Done"}
+          </span>
+          <button type="button" className="font-medium text-primary hover:underline" onClick={() => setShown(true)}>
+            Show details
+          </button>
+        </p>
+      ) : (
+      <>
+      {oneNote && (
+        <p className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+          {oneNote}
+          {last?.done_at && <span className="block text-xs text-red-700/80">{last.done_by} · {new Date(last.done_at).toLocaleString()}</span>}
+        </p>
+      )}
       <ul className="mt-2 space-y-1.5">
         {step.l5.map((l5) => {
           const Icon = STATUS_ICON[l5.status]
@@ -89,8 +141,8 @@ export function StepCard({ c, step, open }: { c: CaseDetail; step: Step; open: b
                   <span className="font-mono text-xs text-muted-foreground">{l5.code}</span> {l5.text}
                 </p>
                 {l5.result && <ResultView value={l5.result} />}
-                {l5.note && <p className="text-xs italic text-muted-foreground">{l5.note}</p>}
-                {l5.done_at && (
+                {l5.note && !oneNote && <p className="text-xs italic text-muted-foreground">{l5.note}</p>}
+                {l5.done_at && !oneNote && (
                   <p className="text-[11px] text-muted-foreground">
                     {l5.done_by} · {new Date(l5.done_at).toLocaleString()}
                   </p>
@@ -100,8 +152,31 @@ export function StepCard({ c, step, open }: { c: CaseDetail; step: Step; open: b
           )
         })}
       </ul>
+      </>
+      )}
+      {shown && !expandAll && (
+        <button type="button" className="mt-1 text-xs font-medium text-primary hover:underline" onClick={() => setShown(false)}>
+          Hide details
+        </button>
+      )}
 
-      {!settled && step.blocked && step.kind !== "system" && (
+      {step.needs && (
+        <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+          <p className="font-medium">The agent won't run yet</p>
+          <p className="mt-0.5">
+            {step.needs.fix_title ? `In "${step.needs.fix_title}" (${step.needs.fix_step}), ` : ""}
+            {step.needs.message}
+          </p>
+          {step.needs.fix_step && (
+            <Button size="sm" className="mt-2" disabled={action.isPending}
+              onClick={() => fixEarlier(step.needs!.fix_step!, step.needs!.message)}>
+              <RotateCcw className="size-3.5" aria-hidden /> Go back to "{step.needs.fix_title}" and fix it
+            </Button>
+          )}
+        </div>
+      )}
+
+      {!settled && !step.needs && step.blocked && step.kind !== "system" && (
         <p className="mt-2 text-xs text-muted-foreground">{step.blocked}</p>
       )}
 
@@ -115,6 +190,9 @@ export function StepCard({ c, step, open }: { c: CaseDetail; step: Step; open: b
 
       {canAct && (step.kind === "person" || step.kind === "manual") && mode === "none" && (
         <div className="mt-3 space-y-2">
+          {STEP_HINTS[`${c.workflow}:${step.key}`] && (
+            <p className="rounded-md bg-sky-50 px-3 py-2 text-xs text-sky-900">{STEP_HINTS[`${c.workflow}:${step.key}`]}</p>
+          )}
           {(() => {
             const Custom = FORMS[`${c.workflow}:${step.key}`]
             const submit = (results: Record<string, Record<string, unknown>>) =>
@@ -122,7 +200,7 @@ export function StepCard({ c, step, open }: { c: CaseDetail; step: Step; open: b
             return Custom ? (
               <Custom c={c} busy={action.isPending} onSubmit={submit} />
             ) : (
-              <ResultForm l5={step.l5} busy={action.isPending} submitLabel={`Complete ${step.key}`} onSubmit={submit} />
+              <ResultForm l5={step.l5} busy={action.isPending} submitLabel={`Complete: ${step.title}`} onSubmit={submit} documents={c.artifacts} />
             )
           })()}
           <Button variant="outline" size="sm" onClick={() => setMode("fail")}>
@@ -131,7 +209,7 @@ export function StepCard({ c, step, open }: { c: CaseDetail; step: Step; open: b
         </div>
       )}
 
-      {settled && c.status !== "completed" && c.status !== "cancelled" && mode === "none" && (
+      {!folded && settled && c.status !== "completed" && c.status !== "cancelled" && mode === "none" && (
         <div className="mt-2">
           <Button variant="ghost" size="sm" onClick={() => setMode("redo")}>
             <RotateCcw className="size-3.5" aria-hidden /> Send back…

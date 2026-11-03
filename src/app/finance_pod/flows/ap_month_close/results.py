@@ -130,11 +130,20 @@ class Review(_Result):
     exceptions_reviewed: Literal[True] = Field(
         title="I reviewed the differences, statement gaps and held invoices"
     )
-    comment: str | None = Field(default=None, max_length=2000, title="Comment")
+    comment: str | None = Field(
+        default=None, max_length=2000, title="Comment",
+        description="Needed when a difference is unexplained: what it is and who follows up.",
+        examples=["Rebate journal explains the Creditors difference"],
+    )  # fmt: skip
 
 
 class SignOff(_Result):
     """6.2.2.a Approve; evidence auto-filed."""
 
     approved: Literal[True] = Field(title="I sign off this month's AP close")
-    comment: str | None = Field(default=None, max_length=2000, title="Comment")
+    comment: str | None = Field(
+        default=None,
+        max_length=2000,
+        title="Comment",
+        description="Optional: anything for the auditors.",
+    )

@@ -22,10 +22,11 @@ from src.app.service_pod.common.people import DELETED, names
 from src.app.service_pod.core.cases.exceptions import CaseActionError, InvalidActionPayloadError
 from src.app.service_pod.core.cases.models import CaseStatus
 from src.app.service_pod.core.steps.models import PodCaseStep
-from src.app.service_pod.core.steps.schemas import L5Out, StepOut
+from src.app.service_pod.core.steps.schemas import L5Out, NeedsFix, StepOut
 from src.app.service_pod.core.steps.spec import (
     OWNER,
     SETTLED,
+    L5Spec,
     StepFailedError,
     StepKind,
     StepPlan,
@@ -219,6 +220,25 @@ def _spec(c: Ctx, key: str) -> StepSpec:
     return step
 
 
+def _readable(l5: L5Spec, exc: ValidationError) -> str:
+    """The first problem in the words the form shows: the field's title (and the row of a
+    list), then what's wrong, e.g. "Trade references, row 2, Contact email: not a valid
+    email address"."""
+    first = exc.errors()[0]
+    props = l5.result.model_json_schema().get("properties", {})
+    parts: list[str] = []
+    for i, part in enumerate(first["loc"]):
+        if isinstance(part, int):
+            parts.append(f"row {part + 1}")
+        elif i == 0 and part in props:
+            parts.append(str(props[part].get("title") or part))
+        else:
+            parts.append(str(part).replace("_", " ").capitalize())
+    where = ", ".join(parts) or l5.text
+    message = str(first["msg"]).removeprefix("Value error, ")
+    return f"{where}: {message[0].lower()}{message[1:]}" if message else where
+
+
 def _validated(step: StepSpec, results: dict[str, dict[str, Any]]) -> dict[str, BaseModel]:
     unknown = set(results) - {l5.code for l5 in step.l5}
     if unknown:
@@ -230,9 +250,7 @@ def _validated(step: StepSpec, results: dict[str, dict[str, Any]]) -> dict[str, 
         try:
             out[l5.code] = l5.result.model_validate(results.get(l5.code, {}))
         except ValidationError as exc:
-            first = exc.errors()[0]
-            where = ".".join(str(p) for p in first["loc"])
-            raise InvalidActionPayloadError(f"{l5.code} {where}: {first['msg']}") from exc
+            raise InvalidActionPayloadError(_readable(l5, exc)) from exc
     return out
 
 
@@ -296,6 +314,10 @@ async def run_agent_step(c: Ctx, p: BaseModel) -> tuple[str, bool]:
     if problem := agent_problem(c, step):
         raise CaseActionError(problem)
     assert step.handler is not None  # noqa: S101 - agent_problem checked it
+    if step.ready is not None and (unready := await step.ready(c)) is not None:
+        fix = plan_of(c.case).step(unready.fix_step) if unready.fix_step else None
+        where = f" Fix it in step {fix.key} ({fix.title}) first." if fix else ""
+        raise CaseActionError(f"The agent can't run yet: {unready.message}{where}")
     try:
         produced = await step.handler(c, step)
         expected = {l5.code: l5.result for l5 in step.l5}
@@ -340,11 +362,19 @@ async def send_back(c: Ctx, key: str, reason: str) -> list[str]:
     reset = [step, *_dependents(plan_of(c.case), step.key)]
     if c.case.status == CaseStatus.APPROVED and step.after_approval:
         reset = [s for s in reset if s.after_approval]
+    # What the sent-back step held, so its form starts from it
+    previous = {r.l5_code: r.result for r in _rows_of(c.children.steps, step.key) if r.result}
+    if previous:
+        c.case.state = {**c.case.state, "_previous": {**c.case.state.get("_previous", {}),
+                                                      **previous}}  # fmt: skip
     for s in reset:
         for r in _rows_of(c.children.steps, s.key):
             r.status, r.result, r.note, r.done_by, r.done_at = (
                 StepStatus.PENDING, None, None, None, None,
             )  # fmt: skip
+    # The person who fills it in again sees why it came back
+    for r in _rows_of(c.children.steps, step.key):
+        r.note = f"Sent back: {reason}"
     if c.request is not None:
         record_event(
             c.session,
@@ -385,6 +415,7 @@ async def record_system_step(
 async def outs(c: Ctx) -> list[StepOut]:
     rows = c.children.steps
     people = await names(c.session, (r.done_by for r in rows))
+    previous = c.case.state.get("_previous", {})
     out = []
     for step in plan_of(c.case).steps:
         mine = {r.l5_code: r for r in _rows_of(rows, step.key)}
@@ -396,6 +427,15 @@ async def outs(c: Ctx) -> list[StepOut]:
             blocked = "Recorded by the system."
         else:
             blocked = person_problem(c, step)
+        needs = None
+        if not c.locked and step.kind == StepKind.AGENT and step.ready is not None:
+            settled = _settled(rows, step.key)
+            waiting = _order_problem(rows, step) is not None
+            if not settled and not waiting and (unready := await step.ready(c)) is not None:
+                fix = plan_of(c.case).step(unready.fix_step) if unready.fix_step else None
+                needs = NeedsFix(message=unready.message, fix_step=fix.key if fix else None,
+                                 fix_title=fix.title if fix else None)  # fmt: skip
+                blocked = f"Can't run yet: {unready.message}"
         out.append(
             StepOut(
                 key=step.key,
@@ -406,6 +446,7 @@ async def outs(c: Ctx) -> list[StepOut]:
                 after=list(step.after),
                 status=status_of(rows, step.key),
                 blocked=blocked,
+                needs=needs,
                 l5=[
                     L5Out(
                         code=l5.code,
@@ -416,6 +457,10 @@ async def outs(c: Ctx) -> list[StepOut]:
                         done_by=_who(people, step.kind, mine.get(l5.code)),
                         done_at=mine[l5.code].done_at if l5.code in mine else None,
                         result_schema=l5.result.model_json_schema(),
+                        previous=previous.get(l5.code)
+                        if (mine[l5.code].status if l5.code in mine else StepStatus.PENDING)
+                        == StepStatus.PENDING
+                        else None,
                     )
                     for l5 in step.l5
                 ],

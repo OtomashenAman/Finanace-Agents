@@ -15,6 +15,16 @@ class L5Out(BaseModel):
     done_by: str | None  # a person's name, "Agent" or "System"
     done_at: datetime | None
     result_schema: dict[str, Any]  # JSON schema of the result a person fills in
+    # What was filled in before the step was sent back (to start the form from)
+    previous: dict[str, Any] | None = None
+
+
+class NeedsFix(BaseModel):
+    """An agent step that won't run until something earlier is fixed."""
+
+    message: str
+    fix_step: str | None  # the earlier step to send back and fill in again
+    fix_title: str | None
 
 
 class StepOut(BaseModel):
@@ -26,4 +36,5 @@ class StepOut(BaseModel):
     after: list[str]
     status: StepStatus
     blocked: str | None  # why the viewer can't act on it now (None: they can)
+    needs: NeedsFix | None = None
     l5: list[L5Out]

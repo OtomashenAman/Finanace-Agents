@@ -41,6 +41,11 @@ class CaseSummary(BaseModel):
     title: str
     status: CaseStatus
     stage: str | None  # the step an open case is on (workflows with steps), "done" when closed
+    # Workflows with steps: what happens next, in words, and who does it ("agent", or the
+    # capacity of a person's step); failed: the agent tried and couldn't finish
+    next_title: str | None = None
+    next_who: str | None = None
+    next_failed: bool = False
     version: int
     entity: EntityRef
     owner: PersonRef

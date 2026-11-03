@@ -41,7 +41,7 @@ STEPS = (
         L5Spec("1.1.2.a", "Reads and validates documents", DocumentsChecked),
         L5Spec("1.1.2.b", "Runs compliance screening", Screening),
         L5Spec("1.1.2.c", "Flags gaps to client", Gaps),
-    ), after=("1.1.1",), handler=agents.onboard, run_by=DESK),
+    ), after=("1.1.1",), handler=agents.onboard, run_by=DESK, ready=agents.ready_to_onboard),
     StepSpec("1.2.1", "1.2.1", "Credit agent", AGENT, (
         L5Spec("1.2.1.a", "Scores risk from data", RiskScore),
         L5Spec("1.2.1.b", "Proposes limit or deposit", CreditProposal),

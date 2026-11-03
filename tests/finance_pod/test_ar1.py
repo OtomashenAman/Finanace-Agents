@@ -291,6 +291,8 @@ async def test_a_sanctions_match_blocks_the_account(
     case = await run(w["credit"], case, "1.1.2")
     review = next(t for t in case["review_tasks"] if t["subject"] == "Sanctions screening")
     assert review["blocking"] is True and "NOVA GEM TRADING" in review["detail"]
+    queue = (await w["credit"].get("/api/v1/finance/dashboard")).json()["my_queue"]
+    assert ("review", "Sanctions screening") in {(q["type"], q["step_title"]) for q in queue}
     case = await run(w["credit"], case, "1.2.1")
     factors = step(case, "1.2.1")["l5"][0]["result"]["factors"]
     assert any(f["points"] == -40 for f in factors)
@@ -364,3 +366,29 @@ async def test_the_daily_review_flags_a_limit_nearly_used(
     )
     assert task_row is not None and "96.00% of the limit" in task_row.detail
     assert row.state["_review"]["outstanding"] == str(Decimal("14400.00"))
+
+
+async def test_a_paper_application_is_completed_before_the_agent_reads_it(
+    desk: World, db: AsyncSession, erp: FakeErpNext
+) -> None:
+    """Entered in the app (not the client's portal): what's missing is fixed in 1.1.1, the
+    agent doesn't run and nothing is emailed."""
+    w = desk
+    snap = await take(w, db)
+    r = await w["credit"].post(
+        "/api/v1/finance/cases",
+        json={"workflow": CLT, "snapshot_id": snap["id"], "title": "Paper",
+              "selection": {"client_name": "Lumen Gem Traders LLC",
+                            "contact_email": "ap@lumengem.example.com"}},
+    )  # fmt: skip
+    case = r.json()
+    paper = {"1.1.1.a": {**application(), "trade_references": []}, "1.1.1.b": {}}
+    case = await ok(w["credit"], case, "complete_step", step="1.1.1", results=paper)
+    needs = step(case, "1.1.2")["needs"]
+    assert needs["fix_step"] == "1.1.1" and "choose the tax form" in needs["message"]
+    assert "trade references" in needs["message"]
+    refused = await act(w["credit"], case, "run_agent_step", step="1.1.2")
+    assert (
+        refused.status_code == 409 and "Fix it in step 1.1.1" in refused.json()["detail"]["message"]
+    )
+    assert [m for m in case["messages"] if m["purpose"] == "client_gaps"] == []

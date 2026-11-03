@@ -18,9 +18,10 @@ function lastMonth(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
 }
 
-/** Open a case on the newest snapshot that supplies what the workflow needs: a purchase
- *  request (new, or one already raised in ERPNext) or a vendor onboarding. */
-export function NewCase() {
+/** Open a case on the newest snapshot that supplies what the workflow needs. With `onClose`
+ *  it opens straight away (started from elsewhere, e.g. the dashboard's hero) and Cancel
+ *  closes it. */
+export function NewCase({ onClose }: { onClose?: () => void } = {}) {
   const me = useFinanceMe()
   const workflows = useFinanceWorkflows()
   const open = useOpenCase()
@@ -43,7 +44,7 @@ export function NewCase() {
   const [vendorName, setVendorName] = useState("")
   const [vendorEmail, setVendorEmail] = useState("")
   const [period, setPeriod] = useState(lastMonth)
-  const [showing, setShowing] = useState(false)
+  const [showing, setShowing] = useState(Boolean(onClose))
   if (choices.length === 0) return null
 
   const submit = (e: FormEvent) => {
@@ -94,7 +95,7 @@ export function NewCase() {
 
   return (
     <Card
-      title="Start"
+      title={onClose ? "New case" : "Start"}
       actions={
         !showing && (
           <Button size="sm" onClick={() => setShowing(true)}>
@@ -195,7 +196,7 @@ export function NewCase() {
             <Button type="submit" size="sm" disabled={open.isPending || !snapshot}>
               {open.isPending && <LoaderCircle className="size-4 animate-spin" aria-hidden />} Open
             </Button>
-            <Button type="button" size="sm" variant="ghost" onClick={() => setShowing(false)}>Cancel</Button>
+            <Button type="button" size="sm" variant="ghost" onClick={() => (onClose ? onClose() : setShowing(false))}>Cancel</Button>
           </div>
         </form>
       )}

@@ -59,7 +59,7 @@ from src.app.service_pod.core.messaging.models import Audience
 from src.app.service_pod.core.snapshots import service as snapshots
 from src.app.service_pod.core.snapshots.contract import SnapshotDocument
 from src.app.service_pod.core.steps.models import PodCaseStep
-from src.app.service_pod.core.steps.spec import StepFailedError, StepSpec, StepStatus
+from src.app.service_pod.core.steps.spec import StepFailedError, StepSpec, StepStatus, Unready
 from src.app.service_pod.core.tasks import service as tasks
 from src.app.service_pod.core.tasks.models import PodPostingTask, TaskKind, TaskStatus
 from src.app.service_pod.core.tasks.schemas import TaskCreate
@@ -114,6 +114,41 @@ def _history(doc: SnapshotDocument, items: set[str]) -> dict[str, str | None]:
             ("cost_centre_id", "lab_id", "grant_id")}  # fmt: skip
 
 
+async def ready_to_enrich(c: Ctx) -> Unready | None:
+    """1.1.2 runs only when the need (1.1.1) has what it can't do without: a cost centre and
+    a lab (given, or found on earlier orders of these items), items that are bought, and a
+    price for each (a contract, the catalogue, or the requester's estimate)."""
+    want = result(c, "1.1.1.a", Need)
+    if want is None:
+        return None
+    doc = await doc_of(c)
+    items = {i.code: i for i in doc.items or []}
+    codes = [ln.item_code for ln in want.lines]
+    history = _history(doc, set(codes))
+    fill: list[str] = []
+    if not want.cost_centre_id and not history["cost_centre_id"]:
+        fill.append("a cost centre")
+    if doc.labs is not None and not want.lab_id and not history["lab_id"]:
+        fill.append("a lab")
+    for ln in want.lines:
+        item = items.get(ln.item_code)
+        if item is None:
+            fill.append(f"a catalogue item instead of {ln.item_code}")
+        elif not item.purchasable:
+            fill.append(f"an item that's bought instead of {item.name} ({item.code}: it's sold)")
+        elif (
+            _catalogue_rate(doc, item.code) is None
+            and not any(p.item_code == item.code and p.vendor_id for p in doc.item_prices or [])
+            and ln.estimated_unit_price is None
+        ):
+            fill.append(f"an estimated price for {item.code}")
+    if not fill:
+        return None
+    why = (" (no earlier order of " + ", ".join(codes) + " has them to suggest)"
+           if any(f in ("a cost centre", "a lab") for f in fill) else "")  # fmt: skip
+    return Unready(message="choose " + ", ".join(fill) + why + ".", fix_step="1.1.1")
+
+
 async def enrich(c: Ctx, step: StepSpec) -> Results:
     doc = await doc_of(c)
     want = need(c, "1.1.1.a", Need)
@@ -162,6 +197,9 @@ async def enrich(c: Ctx, step: StepSpec) -> Results:
         item = items.get(ln.item_code)
         if item is None:
             missing.append(f"line {ln.item_code}: not a catalogue item")
+            continue
+        if not item.purchasable:
+            missing.append(f"line {item.code}: {item.name} is sold, not bought")
             continue
         catalogue = _catalogue_rate(doc, item.code)
         contracts = [

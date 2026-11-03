@@ -50,7 +50,7 @@ STEPS = (
         L5Spec("1.1.2.a", "Suggests cost centre, lab, grant", Coding),
         L5Spec("1.1.2.b", "Checks catalogue and contract prices", PriceCheck),
         L5Spec("1.1.2.c", "Flags missing data before submit", MissingData),
-    ), after=("1.1.1",), handler=agents.enrich),
+    ), after=("1.1.1",), handler=agents.enrich, ready=agents.ready_to_enrich),
     StepSpec("1.2.1", "1.2.1", "Budget agent checks", AGENT, (
         L5Spec("1.2.1.a", "Remaining budget or grant balance", BudgetCheck),
         L5Spec("1.2.1.b", "Grant allowability rules", GrantCheck),

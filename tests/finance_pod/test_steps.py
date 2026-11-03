@@ -56,7 +56,7 @@ async def test_steps_go_in_order_by_the_right_people(
     assert "capacity" in r.json()["detail"]["message"]
     r = await act(req, case, "complete_step", step="1.1", results={"1.1.a": {"item": "x"}})
     assert r.status_code == 422
-    assert "quantity" in r.json()["detail"]["message"]
+    assert r.json()["detail"]["message"] == "Quantity: field required"  # as the form names it
 
     case = await _ok(
         req,

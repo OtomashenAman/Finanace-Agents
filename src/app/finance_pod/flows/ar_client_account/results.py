@@ -16,32 +16,72 @@ class _Result(BaseModel):
 
 
 class TradeReference(_Result):
-    company: str = Field(min_length=2, max_length=140, title="Company")
-    contact_email: EmailStr = Field(title="Contact email")
+    company: str = Field(
+        min_length=2, max_length=140, title="Company", examples=["Brilliant Gems LLC"]
+    )
+    contact_email: EmailStr = Field(title="Contact email", examples=["ap@brilliantgems.com"])
 
 
 class Application(_Result):
     """1.1.1.a Completes portal form."""
 
-    legal_name: str = Field(min_length=2, max_length=140, title="Legal name")
-    trading_name: str | None = Field(default=None, max_length=140, title="Trading name")
-    tax_id: str | None = Field(default=None, max_length=30, title="Tax ID (EIN, or VAT abroad)")
-    country: str = Field(min_length=2, max_length=60, title="Country")
-    address: str = Field(min_length=5, max_length=500, title="Address")
-    billing_email: EmailStr = Field(title="Where invoices go")
-    established_year: int | None = Field(default=None, ge=1800, le=2100, title="Established")
-    requested_limit: Decimal = Field(
-        ge=0, max_digits=14, decimal_places=2, title="Credit limit requested (0: pay on deposit)"
+    legal_name: str = Field(min_length=2, max_length=140, title="Legal name",
+                            description="As on the tax form and the registration papers.",
+                            examples=["Lumen Gem Traders LLC"])  # fmt: skip
+    trading_name: str | None = Field(
+        default=None,
+        max_length=140,
+        title="Trading name",
+        description="Only if it trades under another name.",
     )
-    requested_terms_days: int = Field(ge=0, le=120, title="Payment terms requested (days)")
-    trade_references: list[TradeReference] = Field(default=[], max_length=5)
+    tax_id: str | None = Field(default=None, max_length=30, title="Tax ID (EIN, or VAT abroad)",
+                               description="A US EIN looks like 12-3456789.",
+                               examples=["84-7654321"])  # fmt: skip
+    country: str = Field(min_length=2, max_length=60, title="Country",
+                         description="Sets the sales tax: the home country, or export.",
+                         examples=["United States"])  # fmt: skip
+    address: str = Field(
+        min_length=5,
+        max_length=500,
+        title="Address",
+        examples=["580 Fifth Avenue, New York, NY 10036"],
+    )
+    billing_email: EmailStr = Field(title="Where invoices go",
+                                    description="Invoices and statements go to this address.",
+                                    examples=["ap@lumengem.com"])  # fmt: skip
+    established_year: int | None = Field(default=None, ge=1800, le=2100, title="Established",
+                                         description="The year the company started.",
+                                         examples=[2015])  # fmt: skip
+    requested_limit: Decimal = Field(
+        ge=0, max_digits=14, decimal_places=2, title="Credit limit requested",
+        description="The most the client wants to owe at a time. 0 means it pays on deposit.",
+        examples=["20000"],
+    )  # fmt: skip
+    requested_terms_days: int = Field(
+        ge=0, le=120, title="Payment terms requested (days)",
+        description="Days to pay after the invoice, e.g. 30. 0 means due on receipt.",
+        examples=[30],
+    )  # fmt: skip
+    trade_references: list[TradeReference] = Field(
+        default=[], max_length=5, title="Trade references",
+        description="Companies that give the client credit today. Two are needed for credit "
+        "terms; none means it starts on deposit.",
+    )  # fmt: skip
 
 
 class DocumentsUploaded(_Result):
     """1.1.1.b Uploads documents."""
 
-    tax_form_id: uuid.UUID | None = Field(default=None, title="Tax form (W-9 / W-8)")
-    registration_ids: list[uuid.UUID] = Field(default=[], title="Registration / compliance")
+    tax_form_id: uuid.UUID | None = Field(
+        default=None, title="Tax form (W-9 / W-8)",
+        description="Upload it under Documents (kind: Tax form), then choose it here.",
+        json_schema_extra={"x-document": ["tax_form"]},
+    )  # fmt: skip
+    registration_ids: list[uuid.UUID] = Field(
+        default=[], title="Registration / compliance papers",
+        description="Upload them under Documents (kind: Compliance), then tick them here.",
+        json_schema_extra={"x-document": ["compliance"]},
+    )  # fmt: skip
 
 
 # --- 1.1.2 Onboarding agent -----------------------------------------------------------------
@@ -115,11 +155,28 @@ class CreditProposal(_Result):
 class CreditDecision(_Result):
     """1.2.2.a Approves terms and limit."""
 
-    decision: Literal["approve_credit", "deposit_only", "decline"] = Field(title="Decision")
-    credit_limit: Decimal | None = Field(default=None, gt=0, max_digits=14, decimal_places=2,
-                                         title="Credit limit")  # fmt: skip
-    terms_days: int | None = Field(default=None, ge=0, le=120, title="Payment terms (days)")
-    reason: str | None = Field(default=None, max_length=2000, title="Reason")
+    decision: Literal["approve_credit", "deposit_only", "decline"] = Field(
+        title="Decision",
+        description="See the credit agent's proposal above.",
+        json_schema_extra={"x-labels": {"approve_credit": "Approve credit",
+                                        "deposit_only": "Deposit only (no credit)",
+                                        "decline": "Decline the account"}},
+    )  # fmt: skip
+    credit_limit: Decimal | None = Field(
+        default=None, gt=0, max_digits=14, decimal_places=2, title="Credit limit",
+        description="Only when approving credit. Above the agent's proposal needs a reason.",
+        examples=["15000"],
+    )  # fmt: skip
+    terms_days: int | None = Field(
+        default=None, ge=0, le=120, title="Payment terms (days)",
+        description="Only when approving credit: 0, 30 or 45 (the ERP's payment terms).",
+        examples=[30],
+    )  # fmt: skip
+    reason: str | None = Field(
+        default=None, max_length=2000, title="Reason",
+        description="Needed to decline, or to give more than the agent proposed.",
+        examples=["Parent company guarantee"],
+    )  # fmt: skip
 
     @model_validator(mode="after")
     def _complete(self) -> Self:

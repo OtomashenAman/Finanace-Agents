@@ -152,8 +152,19 @@ class ImpactReviewed(_Result):
 class BudgetDecision(_Result):
     """1.2.2.b Approves, rejects or queries."""
 
-    decision: Literal["approve", "reject", "query"] = Field(title="Decision")
-    comment: str | None = Field(default=None, max_length=2000, title="Comment")
+    decision: Literal["approve", "reject", "query"] = Field(
+        title="Decision",
+        description="Approve it; reject it (the request is closed); or query it (it goes back "
+        "to the requester with your question).",
+        json_schema_extra={"x-labels": {"approve": "Approve", "reject": "Reject",
+                                        "query": "Query: send back with a question"}},
+    )  # fmt: skip
+    comment: str | None = Field(
+        default=None, max_length=2000, title="Comment",
+        description="Needed to reject or query, and to approve when the budget agent flagged "
+        "the request.",
+        examples=["Within the Q4 consumables plan"],
+    )  # fmt: skip
 
     @model_validator(mode="after")
     def _say_why(self) -> Self:
@@ -291,7 +302,9 @@ class PoApproval(_Result):
     """1.6.2.a Approves POs above limit."""
 
     approved: Literal[True] = Field(title="I approve this PO")
-    note: str | None = Field(default=None, max_length=2000, title="Note")
+    note: str | None = Field(default=None, max_length=2000, title="Note",
+                             description="Optional: anything the next person should know.",
+                             examples=["Within the grant's equipment budget"])  # fmt: skip
 
 
 class Acknowledgement(_Result):

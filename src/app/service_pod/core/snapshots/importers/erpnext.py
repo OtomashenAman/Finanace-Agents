@@ -168,7 +168,11 @@ async def _vendors(api: Api) -> list[Vendor]:
 
 
 async def _items(api: Api, company: str) -> list[Item]:
-    rows = await api.rows("Item", ["item_code", "item_name", "item_group", "is_stock_item"])
+    rows = await api.rows(
+        "Item",
+        ["item_code", "item_name", "item_group", "is_stock_item", "is_purchase_item",
+         "is_sales_item"],
+    )  # fmt: skip
     defaults = await api.rows(
         "Item",
         ["item_code", "`tabItem Default`.expense_account"],
@@ -181,6 +185,9 @@ async def _items(api: Api, company: str) -> list[Item]:
             name=r.get("item_name") or r["item_code"],
             group=r.get("item_group") or "All Item Groups",
             stock_item=bool(r.get("is_stock_item")),
+            # A site that doesn't say: bought, not sold (the Procure-to-Pay default)
+            purchasable=r.get("is_purchase_item") is None or bool(r["is_purchase_item"]),
+            sellable=bool(r.get("is_sales_item")),
             expense_account_id=expense.get(r["item_code"]) or None,
         )
         for r in rows

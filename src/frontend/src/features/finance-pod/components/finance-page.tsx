@@ -9,6 +9,8 @@ import { useFinanceDashboard } from "../hooks"
 const TABS = [
   { to: "/finance", label: "Dashboard" },
   { to: "/finance/cases", label: "Cases" },
+  { to: "/finance/queue", label: "My Queue" },
+  { to: "/finance/setup", label: "Setup" },
 ]
 
 function FinanceTabs() {
@@ -27,7 +29,7 @@ function FinanceTabs() {
           )}
         >
           {tab.label}
-          {tab.to === "/finance" && queue > 0 && (
+          {tab.to === "/finance/queue" && queue > 0 && (
             <span className="rounded-full bg-primary px-1.5 text-[10px] font-bold text-primary-foreground">{queue}</span>
           )}
         </Link>
@@ -36,12 +38,14 @@ function FinanceTabs() {
   )
 }
 
-/** A Finance POD page: the shared frame and the POD's own tabs. */
+/** A Finance POD page: the shared frame with the PODs' own look (`.pod-theme`) and tabs. */
 export function FinancePage({ title, subtitle, children }: { title: string; subtitle?: string; children: ReactNode }) {
   return (
-    <AppPage title={title} subtitle={subtitle}>
-      <FinanceTabs />
-      {children}
-    </AppPage>
+    <div className="pod-theme">
+      <AppPage title={title} subtitle={subtitle}>
+        <FinanceTabs />
+        {children}
+      </AppPage>
+    </div>
   )
 }

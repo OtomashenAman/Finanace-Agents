@@ -28,13 +28,22 @@ export function NeedForm({
 }) {
   const catalogue = useCaseCatalogue(c.id)
   const quotes = c.artifacts.filter((a) => a.kind === "quote")
-  const [purpose, setPurpose] = useState("")
-  const [neededBy, setNeededBy] = useState("")
-  const [costCentre, setCostCentre] = useState("")
-  const [lab, setLab] = useState("")
-  const [grant, setGrant] = useState("")
+  // Sent back: start from what was filled in, so only what's missing needs changing
+  const before = (c.steps.find((s) => s.key === "1.1.1")?.l5[0]?.previous ?? {}) as {
+    purpose?: string; needed_by?: string; cost_centre_id?: string | null; lab_id?: string | null
+    grant_id?: string | null; lines?: { item_code: string; quantity: string; estimated_unit_price?: string | null }[]
+  }
+  const [purpose, setPurpose] = useState(before.purpose ?? "")
+  const [neededBy, setNeededBy] = useState(before.needed_by ?? "")
+  const [costCentre, setCostCentre] = useState(before.cost_centre_id ?? "")
+  const [lab, setLab] = useState(before.lab_id ?? "")
+  const [grant, setGrant] = useState(before.grant_id ?? "")
   const [quote, setQuote] = useState("")
-  const [lines, setLines] = useState<Line[]>([{ item_code: "", quantity: "1", estimated_unit_price: "" }])
+  const [lines, setLines] = useState<Line[]>(
+    before.lines?.length
+      ? before.lines.map((l) => ({ item_code: l.item_code, quantity: String(l.quantity), estimated_unit_price: l.estimated_unit_price ?? "" }))
+      : [{ item_code: "", quantity: "1", estimated_unit_price: "" }],
+  )
   const setLine = (i: number, patch: Partial<Line>) => setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)))
   const data = catalogue.data
 

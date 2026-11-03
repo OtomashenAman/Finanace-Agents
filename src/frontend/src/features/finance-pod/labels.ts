@@ -1,4 +1,6 @@
-import type { CaseStatus, StepKind, StepStatus } from "./api"
+import { Bot, CircleCheck, Eye, FileCheck, Mail, Upload } from "lucide-react"
+
+import type { CaseStatus, QueueType, StepKind, StepStatus } from "./api"
 
 /** The requirement's colours: blue AI agent, gold person decides, grey system event, white
  *  manual task. */
@@ -50,3 +52,26 @@ export function formatMeasure(value: string | null, unit: string): string {
   const shown = Number.isFinite(n) ? n.toLocaleString(undefined, { maximumFractionDigits: 1 }) : value
   return unit === "%" ? `${shown}%` : unit === "count" ? shown : `${shown} ${unit}`
 }
+
+/** What kind of work each queue item is, in the order people act on them. */
+export const QUEUE_META: Record<QueueType, { group: string; chip: string; label: string; icon: typeof Bot }> = {
+  decide: { group: "Approve or decide", label: "Decide", chip: "bg-amber-100 text-amber-900", icon: CircleCheck },
+  review: { group: "Review tasks", label: "Review", chip: "bg-rose-100 text-rose-900", icon: Eye },
+  mail: { group: "Mail to send", label: "Send mail", chip: "bg-violet-100 text-violet-900", icon: Mail },
+  post: { group: "Post to ERPNext", label: "Post", chip: "bg-emerald-100 text-emerald-900", icon: Upload },
+  verify: { group: "Verify in ERPNext", label: "Verify", chip: "bg-teal-100 text-teal-900", icon: FileCheck },
+  run: { group: "Run the agent", label: "Run agent", chip: "bg-sky-100 text-sky-900", icon: Bot },
+}
+
+export const QUEUE_ORDER: QueueType[] = ["decide", "review", "mail", "post", "verify", "run"]
+
+/** One line per workflow for the dashboard cards (the full description is its tooltip). */
+export const WORKFLOW_SHORT: Record<string, string> = {
+  ap_purchase_request: "From a request to an issued PO",
+  ap_vendor_onboarding: "A new vendor, checked and activated by two people",
+  ap_invoice_match: "Each supplier invoice matched to its PO and receipt",
+  ap_month_close: "The month's accruals, reconciliation and sign-off",
+  ar_client_account: "A new client's account and credit terms",
+  ar_billing: "Each lab submission billed, checked and sent",
+}
+

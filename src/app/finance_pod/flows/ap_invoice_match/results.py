@@ -129,11 +129,22 @@ class VendorQuery(_Result):
 class BuyerDecision(_Result):
     """3.5.2.a Accept, credit or amend PO."""
 
-    decision: Literal["accept", "credit", "amend_po"] = Field(title="Decision")
-    note: str = Field(min_length=3, max_length=2000, title="Why")
+    decision: Literal["accept", "credit", "amend_po"] = Field(
+        title="Decision",
+        description="Accept the difference; ask the vendor for a credit note; or amend the PO "
+        "in ERPNext yourself (the agent never changes a PO).",
+        json_schema_extra={"x-labels": {"accept": "Accept the difference",
+                                        "credit": "Ask the vendor for a credit note",
+                                        "amend_po": "Amend the PO in ERPNext"}},
+    )  # fmt: skip
+    note: str = Field(min_length=3, max_length=2000, title="Why",
+                      description="What you agreed or found, for the record.",
+                      examples=["New list price from October, accepted"])  # fmt: skip
     expected_credit: Decimal | None = Field(
-        default=None, gt=0, max_digits=18, decimal_places=2, title="Credit expected (credit)"
-    )
+        default=None, gt=0, max_digits=18, decimal_places=2, title="Credit expected",
+        description="Only for a credit: the amount the vendor's credit note must cover.",
+        examples=["6500"],
+    )  # fmt: skip
 
     @model_validator(mode="after")
     def _credit_amount(self) -> Self:

@@ -174,6 +174,13 @@ async def test_a_snapshot_holds_the_receivables_data(
         found: list[dict[str, Any]] = (await admin.get(url)).json()["rows"]
         return found
 
+    items = {i["code"]: i for i in await rows("items")}
+    assert (items["GR-DIA"]["purchasable"], items["GR-DIA"]["sellable"]) == (False, True)
+    assert (items["LC-PASTE"]["purchasable"], items["LC-PASTE"]["sellable"]) == (True, False)
+    catalogue = await admin.get(
+        f"/api/v1/finance/sources/{snap['id']}/catalogue?workflow=ap_purchase_request"
+    )
+    assert "GR-DIA" not in {i["code"] for i in catalogue.json()["items"]}  # sold, not bought
     clients = {c["id"]: c for c in await rows("clients")}
     brilliant = clients["Brilliant Gems"]
     assert (brilliant["name"], brilliant["email"], brilliant["credit_limit"]) == (

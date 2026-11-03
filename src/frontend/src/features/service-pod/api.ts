@@ -121,6 +121,11 @@ export interface CaseSummary {
   status: CaseStatus
   /** The step an open case is on (workflows with steps), "done" when closed */
   stage: string | null
+  /** Workflows with steps: what happens next, who does it ("agent" or a capacity), and
+   *  whether the agent tried and couldn't finish */
+  next_title?: string | null
+  next_who?: string | null
+  next_failed?: boolean
   version: number
   entity: EntityRef
   owner: PersonRef

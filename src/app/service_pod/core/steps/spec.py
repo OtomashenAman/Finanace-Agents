@@ -63,6 +63,17 @@ class L5Spec:
     result: type[BaseModel] = StepResult
 
 
+@dataclass(frozen=True)
+class Unready:
+    """Why an agent step can't run yet, and which earlier step to fix (None: something else,
+    e.g. a document to upload). The agent doesn't run until it's fixed."""
+
+    message: str
+    fix_step: str | None = None
+
+
+# Whether an agent step has what it needs (None: it does)
+Ready = Callable[["Ctx"], Awaitable[Unready | None]]
 # Why a step doesn't apply to this case (None: it applies), e.g. "Below the quote threshold"
 Applies = Callable[["Ctx"], Awaitable[str | None]]
 # An agent step's work: returns each L5 code's result; raise to fail the step
@@ -92,6 +103,8 @@ class StepSpec:
     # Runs once the case is released (approved), e.g. sending the approved PO; such steps
     # aren't part of what the approval binds, and the case can't complete until they're done
     after_approval: bool = False
+    # An agent step's precondition: checked before it runs (and shown on the case)
+    ready: Ready | None = None
 
 
 @dataclass(frozen=True)

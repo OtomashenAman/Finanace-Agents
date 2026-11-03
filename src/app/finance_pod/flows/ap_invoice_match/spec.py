@@ -39,7 +39,7 @@ STEPS = (
     StepSpec("3.2.1", "3.2.1", "Create invoice in ERP", AGENT, (
         L5Spec("3.2.1.a", "From validated data", InvoiceRecord),
         L5Spec("3.2.1.b", "Attach source document", SourceDocument),
-    ), handler=agents.validate_invoice, run_by=AP),
+    ), handler=agents.validate_invoice, run_by=AP, ready=agents.ready_to_validate),
     StepSpec("3.2.2", "3.2.2", "Duplicate guard", AGENT, (
         L5Spec("3.2.2.a", "Fuzzy match on number, amount", DuplicateSearch),
         L5Spec("3.2.2.b", "Blocks and explains", DuplicateDecision),

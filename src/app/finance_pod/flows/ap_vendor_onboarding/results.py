@@ -72,13 +72,20 @@ class Validation(_Result):
 class CallBack(_Result):
     """1.5.2.a Calls back to confirm bank."""
 
-    phone_number: str = Field(min_length=6, max_length=40, title="Number called")
+    phone_number: str = Field(min_length=6, max_length=40, title="Number called",
+                              description="The number you dialled to reach the vendor.",
+                              examples=["+1 555 0144"])  # fmt: skip
     number_source: Literal[
         "vendor master before this request", "public directory", "earlier correspondence"
     ] = Field(title="Where the number came from (never the bank letter or the email)")
-    spoke_with: str = Field(min_length=2, max_length=140, title="Who confirmed")
-    called_at: datetime = Field(title="When")
-    account_last4: str = Field(pattern=r"^\d{4}$", title="Last 4 digits they confirmed")
+    spoke_with: str = Field(min_length=2, max_length=140, title="Who confirmed",
+                            description="The person at the vendor who confirmed the account.",
+                            examples=["Maya Chen, accounts lead"])  # fmt: skip
+    called_at: datetime = Field(title="When", description="When you made the call.")
+    account_last4: str = Field(pattern=r"^\d{4}$", title="Last 4 digits they confirmed",
+                               description="The last 4 digits of the account number, as the "
+                               "vendor read them to you on the call.",
+                               examples=["6789"])  # fmt: skip
     confirmed: Literal[True] = Field(title="The vendor confirmed the bank details")
 
 
@@ -86,7 +93,12 @@ class Activation(_Result):
     """1.5.2.b Second approver activates vendor."""
 
     approved: Literal[True] = Field(title="Activate this vendor")
-    note: str | None = Field(default=None, max_length=2000, title="Note")
+    note: str | None = Field(
+        default=None,
+        max_length=2000,
+        title="Note",
+        description="Optional: anything about this vendor to remember.",
+    )
 
 
 class ManualDetails(BaseModel):

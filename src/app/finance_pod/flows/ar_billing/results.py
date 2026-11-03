@@ -110,19 +110,31 @@ class FlagsReviewed(_Result):
     """3.3.1.a Reviews flagged invoices."""
 
     reviewed: Literal[True] = Field(title="I reviewed the flags")
-    note: str = Field(min_length=3, max_length=2000, title="What I found")
+    note: str = Field(min_length=3, max_length=2000, title="What I found",
+                      description="What the flags turned out to be, for the record.",
+                      examples=["The client asked for inscriptions at intake"])  # fmt: skip
 
 
 class Override(_Result):
-    item_code: str = Field(min_length=1, max_length=140, title="Item")
-    rate: Decimal = Field(ge=0, max_digits=14, decimal_places=2, title="Rate on this invoice")
-    reason: str = Field(min_length=3, max_length=500, title="Why")
+    item_code: str = Field(min_length=1, max_length=140, title="Item",
+                           description="The item's code as the invoice shows it.",
+                           examples=["SV-LASER"])  # fmt: skip
+    rate: Decimal = Field(
+        ge=0, max_digits=14, decimal_places=2, title="Rate on this invoice", examples=["30"]
+    )
+    reason: str = Field(
+        min_length=3, max_length=500, title="Why", examples=["Agreed with the client at intake"]
+    )
 
 
 class Overrides(_Result):
     """3.3.1.b Approves price overrides."""
 
-    overrides: list[Override] = Field(default=[], max_length=50, title="Price overrides")
+    overrides: list[Override] = Field(
+        default=[], max_length=50, title="Price overrides",
+        description="Only to change a rate on this invoice (the fee schedule stays as it is). "
+        "Leave empty to keep the agent's rates.",
+    )  # fmt: skip
 
     @model_validator(mode="after")
     def _once(self) -> Self:

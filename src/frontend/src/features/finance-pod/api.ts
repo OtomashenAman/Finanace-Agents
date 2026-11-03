@@ -66,7 +66,29 @@ export interface Measure {
   value: string | null
 }
 
+export type AiKind = "agent_step" | "posted" | "verified"
+
+export interface FinanceAiEvent {
+  at: string
+  kind: AiKind
+  summary: string
+  case_id: string | null
+  reference: string | null
+}
+
+export interface FinanceKpis {
+  open_ap: number
+  open_ar: number
+  erp_pending: number
+  overdue_receivables: string | null
+  overdue_clients: number
+  currency: string | null
+  last_snapshot_at: string | null
+  source_name: string | null
+}
+
 export interface WorkflowTile {
+  area: "AP" | "AR"
   key: string
   name: string
   prefix: string
@@ -77,18 +99,23 @@ export interface WorkflowTile {
   measures: Measure[]
 }
 
+export type QueueType = "decide" | "run" | "mail" | "post" | "verify" | "review"
+
 export interface QueueItem {
+  type: QueueType
   case_id: string
   reference: string
   workflow: string
   case_title: string
   step_key: string
   step_title: string
-  kind: StepKind
+  kind: StepKind | null
   waiting_since: string
 }
 
 export interface FinanceDashboard {
+  kpis: FinanceKpis | null
+  ai: { last_7_days: Record<AiKind, number>; recent: FinanceAiEvent[] } | null
   workflows: WorkflowTile[]
   my_queue: QueueItem[]
 }
@@ -107,6 +134,15 @@ export interface JsonSchema {
   const?: unknown
   $ref?: string
   $defs?: Record<string, JsonSchema>
+  items?: JsonSchema
+  examples?: unknown[]
+  minimum?: number
+  maximum?: number
+  maxItems?: number
+  /** Option labels for an enum, in words */
+  "x-labels"?: Record<string, string>
+  /** A field naming a document of the case: the document kinds it takes */
+  "x-document"?: string[]
 }
 
 export interface L5 {
@@ -118,6 +154,8 @@ export interface L5 {
   done_by: string | null
   done_at: string | null
   result_schema: JsonSchema
+  /** What was filled in before the step was sent back */
+  previous?: Record<string, unknown> | null
 }
 
 export interface Step {
@@ -129,6 +167,9 @@ export interface Step {
   after: string[]
   status: StepStatus
   blocked: string | null
+  /** An agent step that won't run until something is fixed (in an earlier step, or e.g. a
+   *  document to upload) */
+  needs?: { message: string; fix_step: string | null; fix_title: string | null } | null
   l5: L5[]
 }
 

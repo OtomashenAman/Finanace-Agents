@@ -1,13 +1,26 @@
 import type { ReactNode } from "react"
 
+import { useResultNames } from "./result-names"
+
 /** A step's recorded result, readable: lists of rows become small tables, nested objects
  *  definition lists, ids and amounts stay as recorded. */
 function label(key: string): string {
   return key.replace(/_id$/, "").replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase())
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** An id the case knows by name (its mail, documents, postings) shows that name; any other
+ *  id is shortened, with the full one on hover. */
+function Id({ value }: { value: string }) {
+  const names = useResultNames()
+  if (names[value]) return <span title={value}>{names[value]}</span>
+  return <span className="font-mono" title={value}>…{value.slice(-6)}</span>
+}
+
 function scalar(value: unknown): ReactNode {
   if (value === null || value === undefined || value === "") return <span className="text-muted-foreground">—</span>
+  if (typeof value === "string" && UUID.test(value)) return <Id value={value} />
   if (typeof value === "boolean") return value ? "Yes" : "No"
   if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}T/.test(value)) return new Date(value).toLocaleString()
   return String(value)
@@ -61,6 +74,13 @@ export function ResultView({ value }: { value: Record<string, unknown> }) {
             {Array.isArray(v) ? (
               v.every(isRow) ? (
                 <Table rows={v} />
+              ) : v.every((x) => typeof x === "string" && UUID.test(x)) ? (
+                v.map((x, i) => (
+                  <span key={String(x)}>
+                    {i > 0 && ", "}
+                    <Id value={String(x)} />
+                  </span>
+                ))
               ) : (
                 v.map(String).join(", ")
               )

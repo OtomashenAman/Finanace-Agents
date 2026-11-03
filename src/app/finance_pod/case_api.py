@@ -170,6 +170,7 @@ def _catalogue(doc: SnapshotDocument) -> Catalogue:
                                 if p.item_code == i.code and p.vendor_id},
             )
             for i in doc.items or []
+            if i.purchasable  # a purchase request asks for what's bought, not what's sold
         ],
         vendors=[CatalogueEntry(id=v.id, name=v.name, detail=v.status) for v in doc.vendors or []],
         cost_centres=[CatalogueEntry(id=x.id, name=x.name) for x in doc.cost_centres or []],

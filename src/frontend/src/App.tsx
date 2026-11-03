@@ -22,6 +22,8 @@ import { DataSourcesPage } from "@/features/data-sources/data-sources-page"
 import { FinanceCasePage } from "@/features/finance-pod/case-page"
 import { FinanceCasesPage } from "@/features/finance-pod/cases-page"
 import { FinanceDashboardPage } from "@/features/finance-pod/dashboard-page"
+import { FinanceQueuePage } from "@/features/finance-pod/queue-page"
+import { FinanceSetupPage } from "@/features/finance-pod/setup-page"
 import { VendorPortalPage } from "@/features/finance-pod/vendor-portal-page"
 import { ClientPortalPage } from "@/features/finance-pod/client-portal-page"
 import { AiMonitoringPage } from "@/features/monitoring/ai-monitoring-page"
@@ -71,6 +73,8 @@ const router = createBrowserRouter([
           { path: "/finance", element: <FinanceDashboardPage /> },
           { path: "/finance/cases", element: <FinanceCasesPage /> },
           { path: "/finance/cases/:caseId", element: <FinanceCasePage /> },
+          { path: "/finance/queue", element: <FinanceQueuePage /> },
+          { path: "/finance/setup", element: <FinanceSetupPage /> },
           {
             element: <RequireAdmin />,
             children: [

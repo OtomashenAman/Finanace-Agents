@@ -72,6 +72,7 @@ from src.app.service_pod.core.snapshots.contract import Collection
 from src.app.service_pod.core.snapshots.models import PodSnapshot
 from src.app.service_pod.core.steps import service as steps
 from src.app.service_pod.core.steps.models import PodCaseStep
+from src.app.service_pod.core.steps.spec import StepKind, StepStatus
 from src.app.service_pod.core.tasks import service as tasks
 from src.app.service_pod.core.tasks.models import PodPostingTask, TaskStatus
 from src.app.service_pod.core.workflows import RELEASED, WORKFLOWS, PodKey, WorkflowKey, keys_in
@@ -781,15 +782,37 @@ async def _summaries(session: AsyncSession, cases: list[PodCase]) -> list[CaseSu
         .group_by(PodReviewTask.case_id)
     )
     open_counts = dict(count_rows.all())
+    pending_rows = await session.execute(
+        select(PodPostingTask.case_id, func.count())
+        .where(
+            PodPostingTask.case_id.in_([c.id for c in cases]),
+            PodPostingTask.status.in_([TaskStatus.PROPOSED, TaskStatus.RECORDED_UNVERIFIED]),
+        )
+        .group_by(PodPostingTask.case_id)
+    )
+    postings = dict(pending_rows.all())
     stages: dict[uuid.UUID, str | None] = {}
+    nexts: dict[uuid.UUID, tuple[str | None, str | None, bool]] = {}
     for c in cases:
         stage = hooks_for(c.workflow).stage
+        nexts[c.id] = (None, None, False)
         if c.status in LOCKED_STATUSES:
             stages[c.id] = "done"
         elif stage is not None:
             stages[c.id] = await stage(session, c)
         elif steps.has_steps(c):  # the first step not settled yet
-            stages[c.id] = steps.current_step(c, await steps.load_steps(session, c))
+            rows = await steps.load_steps(session, c)
+            key = steps.current_step(c, rows)
+            stages[c.id] = key
+            spec = steps.plan_of(c).step(key) if key else None
+            if spec is not None:
+                who = "agent" if spec.kind == StepKind.AGENT else spec.capacity
+                failed = steps.status_of(rows, spec.key) == StepStatus.FAILED
+                nexts[c.id] = (spec.title, who, failed)
+            elif postings.get(c.id):
+                nexts[c.id] = ("Post or verify in ERPNext", None, False)
+            elif c.status == CaseStatus.APPROVED:
+                nexts[c.id] = ("Released: nothing left here", None, False)
         else:
             stages[c.id] = None
     return [
@@ -800,6 +823,9 @@ async def _summaries(session: AsyncSession, cases: list[PodCase]) -> list[CaseSu
             title=c.title,
             status=c.status,
             stage=stages[c.id],
+            next_title=nexts[c.id][0],
+            next_who=nexts[c.id][1],
+            next_failed=nexts[c.id][2],
             version=c.version,
             entity=entity_refs[c.entity_id],
             owner=PersonRef(id=c.owner_id, name=owners.get(c.owner_id, DELETED)),

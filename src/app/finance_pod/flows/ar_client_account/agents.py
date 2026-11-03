@@ -22,7 +22,7 @@ from src.app.common.text_extraction.base import ExtractionError
 from src.app.common.text_extraction.registry import extract_text
 from src.app.core.config import get_settings
 from src.app.finance_pod import sanctions
-from src.app.finance_pod.common import cents, doc_of, draft_once, is_sent, need, policy_of
+from src.app.finance_pod.common import cents, doc_of, draft_once, is_sent, need, policy_of, result
 from src.app.finance_pod.flows.ap_vendor_onboarding import reading
 from src.app.finance_pod.flows.ar_client_account.policy import ArcPolicy
 from src.app.finance_pod.flows.ar_client_account.results import (
@@ -45,7 +45,7 @@ from src.app.service_pod.core.messaging.models import Audience, PodArtifact
 from src.app.service_pod.core.snapshots import service as snapshots
 from src.app.service_pod.core.snapshots.contract import Client, SnapshotDocument
 from src.app.service_pod.core.snapshots.models import PodSnapshot
-from src.app.service_pod.core.steps.spec import StepFailedError, StepSpec
+from src.app.service_pod.core.steps.spec import StepFailedError, StepSpec, Unready
 from src.app.service_pod.core.tasks.models import PodPostingTask, TaskKind, TaskStatus
 
 if TYPE_CHECKING:
@@ -119,6 +119,33 @@ def _alike(a: str | None, b: str | None) -> bool:
 
 def _digits(value: str | None) -> str:
     return "".join(ch for ch in value or "" if ch.isalnum()).upper()
+
+
+async def ready_to_onboard(c: Ctx) -> Unready | None:
+    """An application entered in the app (on paper, by a credit controller) must be complete
+    before the agent reads it: what's missing is fixed in 1.1.1, not emailed to the client.
+    One the client sent through the portal is read as it is (gaps go back to the client)."""
+    rows = [r for r in c.children.steps if r.l5_code == "1.1.1.a"]
+    if not rows or rows[0].done_by is None:  # the client, through the portal
+        return None
+    app = result(c, "1.1.1.a", Application)
+    docs = result(c, "1.1.1.b", DocumentsUploaded)
+    if app is None or docs is None:
+        return None
+    policy = policy_of(c.case, ArcPolicy)
+    fill: list[str] = []
+    if docs.tax_form_id is None:
+        fill.append("choose the tax form (add it under Documents first)")
+    if not docs.registration_ids:
+        fill.append("tick the registration papers (add them under Documents first)")
+    if app.requested_limit > 0 and len(app.trade_references) < policy.references_for_credit:
+        fill.append(
+            f"add {policy.references_for_credit} trade references, or set the credit "
+            "requested to 0 to start on deposit"
+        )
+    if not fill:
+        return None
+    return Unready(message="; ".join(fill) + ".", fix_step="1.1.1")
 
 
 async def onboard(c: Ctx, step: StepSpec) -> Results:
