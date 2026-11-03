@@ -251,6 +251,7 @@ export const financeApi = {
   open: (body: { workflow: string; snapshot_id: string; title: string; selection: Record<string, unknown> }) =>
     apiRequest<CaseDetail>(`${base}/cases`, { method: "POST", json: body }),
   sources: (workflow: string) => apiRequest<Snapshot[]>(`${base}/sources?workflow=${encodeURIComponent(workflow)}`),
+  caseSources: (caseId: string) => apiRequest<Snapshot[]>(`${base}/cases/${caseId}/sources`),
   sourceCatalogue: (snapshotId: string, workflow: string) =>
     apiRequest<Catalogue>(`${base}/sources/${snapshotId}/catalogue?workflow=${encodeURIComponent(workflow)}`),
   caseCatalogue: (caseId: string) => apiRequest<Catalogue>(`${base}/cases/${caseId}/catalogue`),

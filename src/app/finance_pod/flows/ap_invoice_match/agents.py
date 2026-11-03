@@ -216,6 +216,15 @@ def match_lines(doc: SnapshotDocument, bill: Bill, policy: ApmPolicy) -> list[Li
 
 
 async def three_way_match(c: Ctx, step: StepSpec) -> Results:
+    # A blocked duplicate goes no further: matching it would route it to coding (AP3.R2)
+    from src.app.finance_pod.flows.ap_invoice_match.service import duplicate_rule
+
+    blocked = await duplicate_rule(c)
+    if blocked:
+        raise StepFailedError(
+            f"{blocked} Reject it (cancel the case), or resolve the review task with the "
+            "evidence that it's a different invoice, then run this step again."
+        )
     doc = await doc_of(c)
     policy = _policy(c)
     version = c.case.state.get("policy", {}).get("version", "")

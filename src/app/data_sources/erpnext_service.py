@@ -59,6 +59,10 @@ async def _check(api: erpnext.Api, company: str) -> str:
     """The API user, once the key works and the company exists (raises with the reason)."""
     try:
         user = await api.whoami()
+    except erpnext.ErpNextError as exc:
+        # Not reached, or the key refused: the company name isn't the problem yet
+        raise ErpNextConnectionError(str(exc)) from exc
+    try:
         await api.get("Company", company)
     except erpnext.ErpNextAuthError as exc:
         raise ErpNextConnectionError(str(exc)) from exc

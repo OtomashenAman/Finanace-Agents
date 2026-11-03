@@ -94,7 +94,14 @@ async def after_receipt(c: Ctx, step: StepSpec) -> str | None:
     if unknown:
         raise CaseActionError(f"Not lines of this invoice's PO: {', '.join(unknown)}.")
     if not any(ln.received_qty > 0 for ln in confirmed.lines):
-        raise CaseActionError("Nothing received: record the receipt when the goods arrive.")
+        # A short delivery billed in full: the receiver confirms nothing more came, and the
+        # buyer's credit or PO change (3.5.2) settles the difference. Nothing is posted.
+        if all(ln.condition in ("short", "damaged") for ln in confirmed.lines):
+            return "nothing more received (short delivery): the buyer's decision settles it"
+        raise CaseActionError(
+            "Nothing received: record the receipt when the goods arrive, or mark the lines "
+            "short if nothing more is coming."
+        )
     task = await tasks.add_task(
         c.session, c.case,
         TaskCreate(kind=TaskKind.CREATE_PURCHASE_RECEIPT,

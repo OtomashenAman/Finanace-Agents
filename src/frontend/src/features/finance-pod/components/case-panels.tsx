@@ -11,7 +11,7 @@ import { apiDownload, errorMessage } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 import { financeApi, type CaseDetail } from "../api"
-import { useCaseAction, useSendMessage, useSources, useTaskAction, useUpload } from "../hooks"
+import { useCaseAction, useCaseSources, useSendMessage, useTaskAction, useUpload } from "../hooks"
 
 const KINDS = ["invoice_copy", "quote", "compliance", "supporting", "other", "tax_form", "bank_letter", "vendor_statement"] as const
 
@@ -125,7 +125,7 @@ export function MessagesPanel({ c }: { c: CaseDetail }) {
 
 export function PostingsPanel({ c }: { c: CaseDetail }) {
   const act = useTaskAction()
-  const sources = useSources(c.workflow)
+  const sources = useCaseSources(c.id)
   const [snapshot, setSnapshot] = useState("")
   if (c.posting_tasks.length === 0) return null
   const fresh = (sources.data ?? []).filter((s) => s.id !== c.snapshot_id)
@@ -211,7 +211,7 @@ function JournalLines({ doc }: { doc: unknown }) {
 /** The workflow's own actions beside the steps (the guard says who may, and when). */
 export function ActionsPanel({ c }: { c: CaseDetail }) {
   const act = useCaseAction()
-  const sources = useSources(c.workflow)
+  const sources = useCaseSources(c.id)
   const [open, setOpen] = useState<string | null>(null)
   const [form, setForm] = useState<Record<string, string>>({})
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }))

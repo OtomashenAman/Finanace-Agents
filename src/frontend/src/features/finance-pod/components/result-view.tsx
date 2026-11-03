@@ -57,7 +57,7 @@ export function ResultView({ value }: { value: Record<string, unknown> }) {
       {entries.map(([key, v]) => (
         <div key={key} className={Array.isArray(v) && v.some(isRow) ? "space-y-1" : "flex flex-wrap gap-x-2"}>
           <dt className="font-medium text-muted-foreground">{label(key)}:</dt>
-          <dd className="min-w-0 text-foreground/90">
+          <dd className="min-w-0 text-foreground/90 [overflow-wrap:anywhere]">
             {Array.isArray(v) ? (
               v.every(isRow) ? (
                 <Table rows={v} />

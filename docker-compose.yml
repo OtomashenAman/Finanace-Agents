@@ -55,6 +55,9 @@ services:
       dockerfile: src/Dockerfile
       target: dev
     restart: unless-stopped
+    # host.docker.internal (the local ERPNext on :8090) also resolves on Linux
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file:
       - path: .env
         required: false
@@ -82,6 +85,9 @@ services:
       target: dev
     restart: unless-stopped
     command: ["watchfiles", "--filter", "python", "python -m src.app.cli.worker", "src/app"]
+    # host.docker.internal (the local ERPNext on :8090) also resolves on Linux
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file:
       - path: .env
         required: false

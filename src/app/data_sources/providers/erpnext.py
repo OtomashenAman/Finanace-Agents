@@ -93,7 +93,9 @@ class Api:
             try:
                 resp = await self.http.request(method, path, **kw)
             except httpx.HTTPError as exc:
-                raise ErpNextError(f"Can't reach ERPNext: {exc.__class__.__name__}") from exc
+                raise ErpNextError(
+                    f"Can't reach ERPNext at {self.http.base_url}: {exc.__class__.__name__}"
+                ) from exc
         if resp.status_code == 401:
             raise ErpNextAuthError("ERPNext refused the API key and secret.")
         if resp.status_code == 403:

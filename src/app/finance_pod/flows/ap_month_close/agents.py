@@ -225,9 +225,10 @@ def read_statement(text: str, doc: SnapshotDocument, document_id: uuid.UUID) -> 
         and b.outstanding != 0
     }  # fmt: skip
     entries: dict[str, Decimal] = {}
+    shown: dict[str, str] = {}  # normalised -> as the statement writes it
     closing = None
-    for raw in text.splitlines():
-        amount = _AMOUNT.search(raw.strip())
+    for raw in (line.strip() for line in text.splitlines()):
+        amount = _AMOUNT.search(raw)
         if amount is None:
             continue
         if _BALANCE.search(raw):
@@ -238,6 +239,7 @@ def read_statement(text: str, doc: SnapshotDocument, document_id: uuid.UUID) -> 
         ref = next((t for t in refs if _norm(t) in open_bills), refs[0] if refs else None)
         if ref is not None:
             entries[_norm(ref)] = _money(amount.group(1))
+            shown[_norm(ref)] = ref
     gaps: list[StatementGap] = []
     books_balance = None
     if vendor is not None:
@@ -245,7 +247,7 @@ def read_statement(text: str, doc: SnapshotDocument, document_id: uuid.UUID) -> 
         for ref, stated in entries.items():
             bill = open_bills.get(ref)
             if bill is None:
-                gaps.append(StatementGap(reference=ref, kind="not_in_books",
+                gaps.append(StatementGap(reference=shown[ref], kind="not_in_books",
                                          statement_amount=stated, books_amount=None))  # fmt: skip
             elif bill.outstanding != stated:
                 gaps.append(StatementGap(reference=bill.bill_number or bill.id,
@@ -312,7 +314,7 @@ def accrual_journal(c: Ctx, doc: SnapshotDocument, reverse: bool) -> dict[str, o
         rows.append({k: v for k, v in row.items() if v is not None})
     when = proposal.reversal_date if reverse else proposal.posting_date
     return {
-        "voucher_type": "Journal Entry", "company": doc.company_id,
+        "voucher_type": "Journal Entry", "company": doc.company_name,
         "posting_date": when.isoformat(),
         "user_remark": f"{'Reversal of the ' if reverse else ''}AP accrual {period}: received, "
                        f"not invoiced ({c.case.reference})",

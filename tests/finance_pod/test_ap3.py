@@ -170,6 +170,50 @@ async def test_a_price_variance_goes_to_the_buyer(
     assert measures["AP3.M1"] == "0.0"
 
 
+async def test_a_short_delivery_is_settled_by_a_credit(
+    world: World, db: AsyncSession, erp: FakeErpNext, person: PersonFn
+) -> None:
+    """Billed in full, part never comes: the receiver says so, the buyer asks for a credit."""
+    w = world
+    _, receiver = await person("rcv@example.com", Cap.RECEIVER)
+    snap = await take(w, db)
+    case = await to_classified(w, snap, "BILL-QTY")
+    case = await run(w["buyer"], case, "3.5.1")
+    case = await ok(
+        w["buyer"],
+        case,
+        "complete_step",
+        step="3.5.2",
+        results={"3.5.2.a": {"decision": "credit", "note": "Short", "expected_credit": "140"}},
+    )
+    case = await run(w["buyer"], case, "3.6.1")
+    line = {"order_line_id": "PO-QTY-l1", "item_code": "LC-GLOVES", "received_qty": "0"}
+    r = await act(
+        receiver,
+        case,
+        "complete_step",
+        step="3.6.2",
+        results={"3.6.2.a": {"received_on": utcnow().date().isoformat(), "lines": [line]}},
+    )
+    assert r.status_code == 409 and "mark the lines short" in r.json()["detail"]["message"]
+    case = await ok(
+        receiver,
+        case,
+        "complete_step",
+        step="3.6.2",
+        results={
+            "3.6.2.a": {
+                "received_on": utcnow().date().isoformat(),
+                "lines": [{**line, "condition": "short"}],
+            }
+        },
+    )
+    assert step(case, "3.6.2")["status"] == "done" and case["posting_tasks"] == []
+    assert erp.inserted == []
+    case = await run(w["buyer"], case, "3.5.3")
+    assert "Waiting for the vendor's credit note" in step(case, "3.5.3")["l5"][0]["note"]
+
+
 async def test_a_short_receipt_waits_for_the_receiver(
     world: World, db: AsyncSession, erp: FakeErpNext, person: PersonFn
 ) -> None:
@@ -279,6 +323,10 @@ async def test_a_duplicate_is_blocked_and_explained(world: World, db: AsyncSessi
     assert any("duplicate blocks this invoice (AP3.R2)" in b for b in case["blockers"])
     review = next(t for t in case["review_tasks"] if t["subject"] == "Possible duplicate")
     assert review["blocking"] is True
+    # It goes no further: matching would route it to coding
+    case = await run(w["analyst"], case, "3.4.1")
+    assert step(case, "3.4.1")["status"] == "failed"
+    assert step(case, "3.4.2")["status"] == "pending"
     tiles = (await w["analyst"].get("/api/v1/finance/dashboard")).json()["workflows"]
     stopped = next(
         m for t in tiles if t["key"] == APM for m in t["measures"] if m["id"] == "AP3.M3"
@@ -370,3 +418,16 @@ async def test_held_invoices_are_reviewed_weekly(world: World, db: AsyncSession)
     tiles = (await w["analyst"].get("/api/v1/finance/dashboard")).json()["workflows"]
     ageing = next(m for t in tiles if t["key"] == APM for m in t["measures"] if m["id"] == "AP3.M2")
     assert ageing["value"] is not None
+
+
+async def test_the_analyst_picks_an_incoming_invoice(world: World, db: AsyncSession) -> None:
+    """The New case form lists the ERPNext drafts a matching case can start from."""
+    w = world
+    snap = await take(w, db)
+    r = await w["analyst"].get(f"/api/v1/finance/sources/{snap['id']}/catalogue?workflow={APM}")
+    assert r.status_code == 200, r.text
+    listed = {b["id"] for b in r.json()["incoming_invoices"]}
+    assert "BILL-DUP" in listed and "BILL-POSTED" not in listed  # drafts only
+    await invoice_case(w, snap, "BILL-DUP")
+    r = await w["analyst"].get(f"/api/v1/finance/sources/{snap['id']}/catalogue?workflow={APM}")
+    assert "BILL-DUP" not in {b["id"] for b in r.json()["incoming_invoices"]}  # has a case now

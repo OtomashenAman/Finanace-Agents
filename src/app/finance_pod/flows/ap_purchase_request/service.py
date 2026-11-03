@@ -19,8 +19,10 @@ from src.app.finance_pod.common import need, policy_values, result, snapshot_of
 from src.app.finance_pod.flows.ap_purchase_request.policy import PrqPolicy
 from src.app.finance_pod.flows.ap_purchase_request.results import (
     AcknowledgePayload,
+    BudgetCheck,
     BudgetDecision,
     Comparison,
+    GrantCheck,
     QuoteUpload,
     RecordQuotePayload,
     Routing,
@@ -74,6 +76,28 @@ async def after_need(c: Ctx, step: StepSpec) -> str | None:
 
 async def after_budget_decision(c: Ctx, step: StepSpec) -> str | None:
     decision = need(c, "1.2.2.b", BudgetDecision)
+    if decision.decision == "approve":
+        # The budget agent's findings can't be waved through silently: a grant that can't
+        # take the charge must be queried or rejected; an over-budget approval says why
+        grant = result(c, "1.2.1.b", GrantCheck)
+        if grant is not None and grant.applies and not grant.allowed:
+            raise CaseActionError(
+                f"The grant can't take this charge ({'; '.join(grant.problems)}): query the "
+                "requester to recode it, or reject."
+            )
+        budget = result(c, "1.2.1.a", BudgetCheck)
+        if budget is not None and not budget.within_budget:
+            if not (decision.comment and decision.comment.strip()):
+                flagged = "; ".join(
+                    f"{ln.against.replace('_', ' ')} {ln.target_id} / {ln.account_id}: "
+                    + ("no budget set" if ln.budget is None else f"{ln.remaining_after} left")
+                    for ln in budget.lines
+                    if ln.over
+                )
+                raise CaseActionError(
+                    f"The budget agent flagged this request ({flagged}): say why you approve it."
+                )
+            return f"approved over budget: {decision.comment}"
     if decision.decision == "reject":
         c.case.status = CaseStatus.CANCELLED
         return f"rejected by the budget owner: {decision.comment}"

@@ -116,7 +116,7 @@ async def test_a_month_is_closed_from_accrual_to_posted_journal(
     assert (read["vendor_id"], read["closing_balance"], read["books_balance"]) == (
         LC, "815.00", "760.00",
     )  # fmt: skip
-    assert [(g["reference"], g["kind"]) for g in read["gaps"]] == [("LC5099", "not_in_books")]
+    assert [(g["reference"], g["kind"]) for g in read["gaps"]] == [("LC-5099", "not_in_books")]
     assert (check["missing"], check["gaps"]) == ([], 1)
 
     # 6.2: only the controller reviews and signs; sign-off releases the close
@@ -148,6 +148,7 @@ async def test_a_month_is_closed_from_accrual_to_posted_journal(
     r = await ctl.post(f"/api/v1/finance/tasks/{accrual['id']}/actions", json=post)
     assert r.status_code == 200, r.text
     journal = erp.inserted[-1]
+    assert journal["company"] == "GIA Demo Labs"  # the ERPNext company, not the snapshot key
     assert (journal["doctype"], journal["posting_date"]) == ("Journal Entry", "2026-10-31")
     assert journal["accounts"][1] == {
         "account": ACCRUED, "debit_in_account_currency": "0",

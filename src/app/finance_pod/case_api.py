@@ -10,6 +10,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Form, Response, UploadFile, status
 from pydantic import BaseModel
+from sqlalchemy import select
 
 from src.app.common.context import RequestContextDep
 from src.app.common.schemas import ErrorResponse
@@ -19,7 +20,7 @@ from src.app.core.errors import AppError
 from src.app.finance_pod.access import FinanceAccessDep
 from src.app.service_pod.core.access.service import PodAccess
 from src.app.service_pod.core.cases.access import load_case
-from src.app.service_pod.core.cases.models import PodCase
+from src.app.service_pod.core.cases.models import CaseStatus, PodCase
 from src.app.service_pod.core.messaging import service as messaging
 from src.app.service_pod.core.messaging.models import ArtifactKind, PodArtifact, PodMessage
 from src.app.service_pod.core.messaging.schemas import (
@@ -93,6 +94,23 @@ class Catalogue(BaseModel):
     labs: list[CatalogueEntry]
     grants: list[CatalogueEntry]  # detail: period and restriction
     purchase_requests: list[CatalogueEntry]  # the ERP's own, a request can start from
+    incoming_invoices: list[CatalogueEntry]  # ERPNext drafts a matching case can start from
+
+
+@router.get("/cases/{case_id}/sources", response_model=list[SnapshotSummary], responses=_ERRORS)
+async def case_sources(
+    case_id: uuid.UUID, session: SessionDep, access: FinanceAccessDep
+) -> list[SnapshotSummary]:
+    """Snapshots this case can be verified against or moved to: its entity's, supplying what
+    its workflow needs, newest first. For anyone working on the case (a buyer verifying a PO
+    may not be someone who opens requests)."""
+    case = await load_case(session, case_id, access=access)
+    spec = WORKFLOWS[case.workflow]
+    return [
+        snap
+        for snap in await snapshots.list_snapshots(session, case.entity_id)
+        if spec.required <= {Collection(c) for c in snap.coverage}
+    ]
 
 
 @router.get("/cases/{case_id}/catalogue", response_model=Catalogue, responses=_ERRORS)
@@ -110,7 +128,18 @@ async def source_catalogue(
     """The same, for a snapshot you may open a case on (to start from an ERP request)."""
     if snapshot_id not in {s.id for s in await sources(session, access, workflow)}:
         raise messaging.ArtifactNotFoundError("Snapshot not found.")
-    return _catalogue(snapshots.document(await snapshots.load_snapshot(session, snapshot_id)))
+    found = _catalogue(snapshots.document(await snapshots.load_snapshot(session, snapshot_id)))
+    if workflow == WorkflowKey.AP_INVOICE_MATCH:
+        # An invoice that already has a live matching case can't start another
+        taken = set(
+            await session.scalars(
+                select(PodCase.selection["bill_id"].astext).where(
+                    PodCase.workflow == workflow, PodCase.status != CaseStatus.CANCELLED
+                )
+            )
+        )
+        found.incoming_invoices = [b for b in found.incoming_invoices if b.id not in taken]
+    return found
 
 
 def _catalogue(doc: SnapshotDocument) -> Catalogue:

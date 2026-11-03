@@ -47,7 +47,7 @@ export function FinanceCasePage() {
 
   return (
     <FinancePage title={`${c.reference} · ${c.title}`} subtitle={`${workflow?.name ?? c.workflow} · ${c.entity.code} · opened by ${c.owner.name}`}>
-      <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
         <Card title="Steps" hint="The requirement's L4 tasks in order, each with its L5 steps." actions={<Legend />}>
           <div className="space-y-3">
             {c.steps.map((step) => (

@@ -73,6 +73,14 @@ export function useSources(workflow: string | null) {
   })
 }
 
+/** Snapshots a case can be verified against or moved to (anyone working on the case). */
+export function useCaseSources(caseId: string) {
+  return useQuery({
+    queryKey: [FINANCE_TAG, "case-sources", caseId],
+    queryFn: () => financeApi.caseSources(caseId),
+  })
+}
+
 export function useSourceCatalogue(snapshotId: string | null, workflow: string | null) {
   return useQuery({
     queryKey: [FINANCE_TAG, "source-catalogue", snapshotId, workflow],

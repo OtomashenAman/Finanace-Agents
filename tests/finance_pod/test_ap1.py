@@ -247,6 +247,10 @@ async def test_a_small_request_goes_from_need_to_po(
             },
         ],
     )
+    # The buyer isn't an opener of requests, but verifies the PO: they see the fresh snapshot
+    assert (await w["buyer"].get("/api/v1/finance/sources", params={"workflow": PRQ})).json() == []
+    listed = (await w["buyer"].get(f"/api/v1/finance/cases/{case['id']}/sources")).json()
+    assert fresh["id"] in [s["id"] for s in listed]
     task = case["posting_tasks"][0]
     r = await w["buyer"].post(
         f"/api/v1/finance/tasks/{task['id']}/actions",
@@ -360,13 +364,13 @@ async def test_quotes_are_required_above_the_threshold(world: World, db: AsyncSe
     case = await run(w["req"], case, "1.1.2")
     case = await run(w["req"], case, "1.2.1")
     assert step(case, "1.2.1")["l5"][2]["result"]["quotes_required"] is True
-    case = await ok(
-        w["bo"],
-        case,
-        "complete_step",
-        step="1.2.2",
-        results={"1.2.2.a": {"reviewed": True}, "1.2.2.b": {"decision": "approve"}},
-    )
+    assert step(case, "1.2.1")["l5"][0]["result"]["within_budget"] is False
+    approve = {"1.2.2.a": {"reviewed": True}, "1.2.2.b": {"decision": "approve"}}
+    r = await act(w["bo"], case, "complete_step", step="1.2.2", results=approve)
+    assert r.status_code == 409 and "say why" in r.json()["detail"]["message"]
+    assert "flagged this request" in r.json()["detail"]["message"]
+    approve["1.2.2.b"]["comment"] = "Board approved the instrument from reserves"
+    case = await ok(w["bo"], case, "complete_step", step="1.2.2", results=approve)
     case = await run(w["buyer"], case, "1.3.1.a")
     case = await run(w["buyer"], case, "1.3.1.b")
     assert step(case, "1.3.1.b")["status"] == "failed"  # drafted, not sent yet
@@ -412,6 +416,21 @@ async def test_quotes_are_required_above_the_threshold(world: World, db: AsyncSe
         },
     )
     assert r.status_code == 409 and "cheapest" in r.json()["detail"]["message"]
+
+
+async def test_an_ended_grant_cant_be_approved(world: World, db: AsyncSession) -> None:
+    w = world
+    snap = await take_snapshot(w, db)
+    case = await to_budget_owner(w, snap, [("LC-PASTE", "10")], grant_id=OLD_GRANT)
+    assert step(case, "1.2.1")["l5"][1]["result"]["allowed"] is False
+    r = await act(
+        w["bo"],
+        case,
+        "complete_step",
+        step="1.2.2",
+        results={"1.2.2.a": {"reviewed": True}, "1.2.2.b": {"decision": "approve"}},
+    )
+    assert r.status_code == 409 and "grant can't take this charge" in r.json()["detail"]["message"]
 
 
 @pytest.mark.requirement("AP1.G1")
@@ -681,7 +700,10 @@ async def test_mail_is_sent_only_by_the_purposes_capacity(world: World, db: Asyn
         prq,
         "complete_step",
         step="1.2.2",
-        results={"1.2.2.a": {"reviewed": True}, "1.2.2.b": {"decision": "approve"}},
+        results={
+            "1.2.2.a": {"reviewed": True},
+            "1.2.2.b": {"decision": "approve", "comment": "From reserves"},
+        },
     )
     prq = await run(w["buyer"], prq, "1.3.1.a")
     prq = await run(w["buyer"], prq, "1.3.1.b")
