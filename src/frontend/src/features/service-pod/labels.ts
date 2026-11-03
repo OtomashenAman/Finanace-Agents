@@ -136,6 +136,8 @@ export const CASE_PHASE: Record<CasePhase, [string, Tone]> = {
 /** How an imported reply was tied to our email */
 export const THREAD_EVIDENCE: Record<string, string> = {
   header: "matched to our email",
+  // weaker: the sender's mail app sent no reply headers ("Re: " + our subject, from our recipient)
+  subject: "matched by subject only: check it answers our email",
   manual: "linked by hand",
 }
 

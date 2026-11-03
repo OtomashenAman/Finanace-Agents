@@ -135,7 +135,9 @@ export function SourceCard({ source }: { source: DataSource }) {
         <ul className="mt-4 flex flex-wrap gap-2 text-xs">
           {counts.map(([type, n]) => (
             <li key={type} className="rounded bg-secondary px-2 py-1">
-              <span className="font-semibold">{n.toLocaleString()}</span> {RECORD_LABELS[type].toLowerCase()}
+              {/* A type this frontend doesn't know yet (newer backend) shows by its raw name */}
+              <span className="font-semibold">{n.toLocaleString()}</span>{" "}
+              {(RECORD_LABELS[type] ?? type.replace(/_/g, " ")).toLowerCase()}
             </li>
           ))}
         </ul>

@@ -33,7 +33,12 @@ from src.app.service_pod.core.cases.exceptions import CaseActionError, StaleVers
 from src.app.service_pod.core.cases.models import LOCKED_STATUSES, PodCase
 from src.app.service_pod.core.hooks import Composed, hooks_for
 from src.app.service_pod.core.messaging import providers
-from src.app.service_pod.core.messaging.inbound import ReplyInvalidError, normalize_id, parse_eml
+from src.app.service_pod.core.messaging.inbound import (
+    ReplyInvalidError,
+    answers_subject,
+    normalize_id,
+    parse_eml,
+)
 from src.app.service_pod.core.messaging.models import (
     ArtifactKind,
     ArtifactStatus,
@@ -564,11 +569,17 @@ async def import_reply(
     body: ReplyImport,
     ctx: RequestContext,
     llm: LLMProvider,
+    match_by_subject: bool = False,
 ) -> tuple[MessageOut, bool]:
     """(reply, created). Re-importing the same email returns the existing one. A workflow
     that reads replies gets it read in the background (see flows.extraction). actor_id None:
     read from the mailbox by the worker. A reply to a closed case is still kept (with
-    extraction_status "case_closed") but not read into it: the case doesn't change."""
+    extraction_status "case_closed") but not read into it: the case doesn't change.
+
+    match_by_subject (the mailbox reader only): an email with no In-Reply-To / References
+    may answer the one message of this case it was sent in reply to by subject ("Re: " + the
+    exact subject) from the address that message went to. Kept as thread evidence "subject",
+    weaker than "header", for the reviewer to see."""
     case = await load_case(session, case_id, lock=True)
     closed = case.status in LOCKED_STATUSES
     sent = list(
@@ -593,12 +604,25 @@ async def import_reply(
             ),
             None,
         )
+        evidence = "header"
+        if original is None and match_by_subject and not ids:
+            by_subject = [
+                m
+                for m in sent
+                if m.to_email.lower() == from_email and answers_subject(subject, m.subject)
+            ]
+            if len(by_subject) > 1:
+                raise ReplyInvalidError(
+                    f"The email's subject answers {len(by_subject)} messages of this case: "
+                    "import it by hand and pick the one it replies to."
+                )
+            original, evidence = (by_subject[0] if by_subject else None), "subject"
         if original is None:
             raise ReplyInvalidError(
                 "This email doesn't answer a message sent from this case (no matching "
                 "In-Reply-To / References header)."
             )
-        evidence, raw, message_id = "header", body.raw_eml, parsed.message_id
+        raw, message_id = body.raw_eml, parsed.message_id
     else:
         assert body.from_email and body.body  # noqa: S101 - schema validated
         original = next((m for m in sent if m.id == body.reply_to_message_id), None)

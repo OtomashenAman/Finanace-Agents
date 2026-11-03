@@ -181,7 +181,7 @@ export interface Message {
   error: string | null
   internet_message_id: string | null
   in_reply_to_id: string | null
-  thread_evidence: "header" | "manual" | null
+  thread_evidence: "header" | "subject" | "manual" | null
   received_at: string | null
   /** null: read from the mailbox by the worker */
   created_by: string | null

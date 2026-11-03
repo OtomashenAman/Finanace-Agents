@@ -30,6 +30,24 @@ def normalize_id(value: str) -> str:
     return value if value.startswith("<") else f"<{value}>"
 
 
+# Reply prefixes mail apps put before a subject: Re, and AW / SV / Antw / R in some languages,
+# possibly repeated and numbered ("RE[2]:")
+_REPLY_PREFIX = re.compile(r"^\s*(re|aw|sv|antw|r)(\[\d+\])?\s*:\s*", re.IGNORECASE)
+
+
+def answers_subject(reply_subject: str, sent_subject: str) -> bool:
+    """Whether `reply_subject` is a reply to `sent_subject`: at least one reply prefix, then
+    exactly that subject (case and spacing aside). For mail apps that send no In-Reply-To."""
+    rest, prefixed = reply_subject, False
+    while match := _REPLY_PREFIX.match(rest):
+        rest, prefixed = rest[match.end() :], True
+
+    def norm(text: str) -> str:
+        return " ".join(text.split()).casefold()
+
+    return prefixed and bool(norm(sent_subject)) and norm(rest) == norm(sent_subject)
+
+
 def parse_eml(raw: str) -> ParsedReply:
     msg = email.message_from_string(raw, policy=email.policy.default)
     if not isinstance(msg, EmailMessage) or msg["From"] is None:

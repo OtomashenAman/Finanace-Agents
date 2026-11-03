@@ -14,7 +14,10 @@ from src.app.core.config import get_settings
 GRAPH = "https://graph.microsoft.com/v1.0"
 LOGIN = "https://login.microsoftonline.com"
 
-# (tenant, client id) -> (token, monotonic expiry); a token lasts about an hour
+# (tenant, client id) -> (token, expiry as wall-clock epoch seconds); a token lasts about an hour.
+# Wall clock, not time.monotonic(): on Linux (WSL, Docker) the monotonic clock stops while the
+# machine sleeps, so after a sleep an expired token would still look fresh (Graph: 401 "Invalid
+# token lifetime")
 _tokens: dict[tuple[str, str], tuple[str, float]] = {}
 
 
@@ -69,7 +72,7 @@ class GraphMailbox:
     async def token(self) -> str:
         key = (self._tenant, self._client_id)
         cached = _tokens.get(key)
-        if cached and cached[1] > time.monotonic() + 60:
+        if cached and cached[1] > time.time() + 60:
             return cached[0]
         try:
             async with self._http(LOGIN) as client:
@@ -92,23 +95,17 @@ class GraphMailbox:
                 status=resp.status_code,
             )
         body = resp.json()
-        _tokens[key] = (body["access_token"], time.monotonic() + int(body.get("expires_in", 3599)))
+        _tokens[key] = (body["access_token"], time.time() + int(body.get("expires_in", 3599)))
         return str(body["access_token"])
 
     async def request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         """A Graph call on this mailbox (`path` after /users/<mailbox>)."""
-        headers = {"Authorization": f"Bearer {await self.token()}"}
-        try:
-            async with self._http(GRAPH) as client:
-                resp = await client.request(
-                    method, f"/users/{self.mailbox}{path}", headers=headers, **kwargs
-                )
-        except httpx.TimeoutException as exc:
-            raise GraphError("Microsoft Graph didn't answer in time.", uncertain=True) from exc
-        except httpx.HTTPError as exc:
-            raise GraphError(
-                f"Network error talking to Microsoft Graph: {exc}", uncertain=True
-            ) from exc
+        resp = await self._send(method, path, **kwargs)
+        if resp.status_code == 401:
+            # The cached token was rejected (expired or revoked): one retry with a fresh one.
+            # A 401 means the request wasn't carried out, so resending it is safe
+            _tokens.pop((self._tenant, self._client_id), None)
+            resp = await self._send(method, path, **kwargs)
         if resp.status_code >= 400:
             try:
                 detail = resp.json()["error"]["message"]
@@ -120,6 +117,20 @@ class GraphMailbox:
                 uncertain=resp.status_code >= 500,
             )
         return resp
+
+    async def _send(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        headers = {"Authorization": f"Bearer {await self.token()}"}
+        try:
+            async with self._http(GRAPH) as client:
+                return await client.request(
+                    method, f"/users/{self.mailbox}{path}", headers=headers, **kwargs
+                )
+        except httpx.TimeoutException as exc:
+            raise GraphError("Microsoft Graph didn't answer in time.", uncertain=True) from exc
+        except httpx.HTTPError as exc:
+            raise GraphError(
+                f"Network error talking to Microsoft Graph: {exc}", uncertain=True
+            ) from exc
 
     async def inbox_since(self, since: datetime, limit: int = 50) -> list[InboxItem]:
         """Inbox messages received after `since`, oldest first."""

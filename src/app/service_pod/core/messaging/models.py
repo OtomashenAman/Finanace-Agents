@@ -3,7 +3,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint
+from sqlalchemy import ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -92,7 +92,9 @@ class PodMessage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     in_reply_to_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("pod_messages.id", ondelete="RESTRICT")
     )
-    thread_evidence: Mapped[str | None] = mapped_column(String(20))  # "header" | "manual"
+    # "header" (In-Reply-To / References) | "subject" ("Re: " + our subject, from our
+    # recipient: mail apps without reply headers) | "manual"
+    thread_evidence: Mapped[str | None] = mapped_column(String(20))
     content_sha256: Mapped[str | None] = mapped_column(String(64))
     raw: Mapped[str | None] = mapped_column(Text)  # the reply exactly as imported
     received_at: Mapped[datetime | None]
@@ -156,3 +158,9 @@ class PodMailboxCursor(TimestampMixin, Base):
 
     mailbox: Mapped[str] = mapped_column(String(320), primary_key=True)
     received_after: Mapped[datetime]
+    # Mails received at exactly `received_after` already looked at. Graph returns receive
+    # times to the second but filters on finer ones, so "received after 19:14:47" still
+    # returns a mail of 19:14:47.4: these ids keep it from being read again every poll
+    seen_ids: Mapped[list[str]] = mapped_column(
+        JSONB, default=list, server_default=text("'[]'::jsonb")
+    )
