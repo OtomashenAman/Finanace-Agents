@@ -34,6 +34,7 @@ ERP_KINDS: dict[TaskKind, ErpTarget] = {
     TaskKind.CREATE_PURCHASE_ORDER: ErpTarget("Purchase Order", submit=True),
     TaskKind.CREATE_PURCHASE_RECEIPT: ErpTarget("Purchase Receipt", submit=True),
     TaskKind.CREATE_JOURNAL_ENTRY: ErpTarget("Journal Entry", submit=True),
+    TaskKind.CREATE_CUSTOMER: ErpTarget("Customer", submit=False),
 }
 
 
@@ -82,6 +83,8 @@ def present(task: PodPostingTask, doc: SnapshotDocument) -> bool:
     txn = task.external_txn_id
     if task.kind == TaskKind.CREATE_SUPPLIER:
         return any(v.id == txn for v in doc.vendors or [])
+    if task.kind == TaskKind.CREATE_CUSTOMER:
+        return any(c.id == txn for c in doc.clients or [])
     if task.kind == TaskKind.CREATE_PURCHASE_ORDER:
         return any(o.id == txn and o.doc_status == "Submitted" for o in doc.purchase_orders or [])
     if task.kind == TaskKind.CREATE_JOURNAL_ENTRY:

@@ -76,6 +76,7 @@ AR1 = Phase(
         MeasureReq("AR1.M1", "Account set-up time"),
         MeasureReq("AR1.M2", "Data errors"),
     ),
+    workflows=("ar_client_account",),
 )  # fmt: skip
 
 AR3 = Phase(

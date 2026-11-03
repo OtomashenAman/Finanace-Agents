@@ -333,7 +333,7 @@ export interface Artifact {
   status: "pending" | "approved" | "rejected"
   uploaded_by: string
   /** How it arrived: bank details only ever count from the vendor portal */
-  channel: "upload" | "vendor_portal" | "email"
+  channel: "upload" | "vendor_portal" | "client_portal" | "email"
   decided_by: string | null
   decided_at: string | null
   created_at: string

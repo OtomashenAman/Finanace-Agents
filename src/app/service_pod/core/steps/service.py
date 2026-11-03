@@ -428,6 +428,8 @@ def _who(people: dict[uuid.UUID, str], kind: StepKind, row: PodCaseStep | None) 
     if row is None or row.done_at is None:
         return None
     if row.done_by is None:
+        if kind in (StepKind.PERSON, StepKind.MANUAL) and row.status == StepStatus.DONE:
+            return "Through the portal"  # an outside party (e.g. a client applying)
         agent = kind == StepKind.AGENT and row.status != StepStatus.NOT_APPLICABLE
         return "Agent" if agent else "System"
     return people.get(row.done_by, DELETED)

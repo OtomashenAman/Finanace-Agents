@@ -300,3 +300,46 @@ export const portalApi = {
     )
   },
 }
+
+export interface ClientApplication {
+  legal_name: string
+  trading_name?: string | null
+  tax_id?: string | null
+  country: string
+  address: string
+  billing_email: string
+  established_year?: number | null
+  requested_limit: string
+  requested_terms_days: number
+  trade_references: { company: string; contact_email: string }[]
+}
+
+export interface ClientPortalView {
+  client_name: string
+  expires_at: string
+  required: string[]
+  uploaded: { kind: string; filename: string; uploaded_at: string }[]
+  application: ClientApplication | null
+  open: boolean
+}
+
+/** A client's public account application: the signed link is the only access (no session). */
+export const clientPortalApi = {
+  view: (token: string) =>
+    apiRequest<ClientPortalView>(`/client-portal/${encodeURIComponent(token)}`, { skipAuthRefresh: true }),
+  upload: ({ token, kind, file }: { token: string; kind: string; file: File }) => {
+    const form = new FormData()
+    form.append("file", file)
+    form.append("kind", kind)
+    return apiRequest<{ kind: string; filename: string; uploaded_at: string }>(
+      `/client-portal/${encodeURIComponent(token)}/documents`,
+      { method: "POST", form, skipAuthRefresh: true },
+    )
+  },
+  apply: ({ token, body }: { token: string; body: ClientApplication }) =>
+    apiRequest<ClientPortalView>(`/client-portal/${encodeURIComponent(token)}/application`, {
+      method: "POST",
+      json: body,
+      skipAuthRefresh: true,
+    }),
+}

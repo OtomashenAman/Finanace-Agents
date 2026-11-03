@@ -24,6 +24,7 @@ class TaskKind(StrEnum):
     CREATE_PURCHASE_ORDER = "create_purchase_order"
     CREATE_PURCHASE_RECEIPT = "create_purchase_receipt"  # a receiver confirmed the delivery
     CREATE_JOURNAL_ENTRY = "create_journal_entry"  # e.g. a month-end accrual and its reversal
+    CREATE_CUSTOMER = "create_customer"  # a client account with its approved credit terms
 
 
 class TaskStatus(StrEnum):

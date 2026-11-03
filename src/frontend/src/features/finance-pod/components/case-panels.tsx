@@ -48,7 +48,7 @@ export function DocumentsPanel({ c }: { c: CaseDetail }) {
               <span className="min-w-0 truncate">
                 <span className="font-medium">{a.filename}</span>{" "}
                 <span className="text-xs text-muted-foreground">
-                  {ARTIFACT_KIND[a.kind]} · {a.channel === "vendor_portal" ? "vendor portal" : a.uploaded_by}
+                  {ARTIFACT_KIND[a.kind]} · {a.channel === "vendor_portal" ? "vendor portal" : a.channel === "client_portal" ? "client portal" : a.uploaded_by}
                 </span>
               </span>
               <Button variant="ghost" size="icon" aria-label={`Download ${a.filename}`}
@@ -227,6 +227,7 @@ export function ActionsPanel({ c }: { c: CaseDetail }) {
     allowed("record_quote") && "record_quote",
     allowed("log_acknowledgement") && "log_acknowledgement",
     allowed("enter_vendor_details") && "enter_vendor_details",
+    allowed("invite_client") && "invite_client",
     allowed("refresh_source") && newer.length > 0 && "refresh_source",
     allowed("complete") && "complete",
   ].filter(Boolean) as string[]
@@ -235,6 +236,7 @@ export function ActionsPanel({ c }: { c: CaseDetail }) {
     record_quote: "Record a quote",
     log_acknowledgement: "Log the vendor's acknowledgement",
     enter_vendor_details: "Enter document details by hand",
+    invite_client: "Invite the client (portal link)",
     refresh_source: "Move to a fresh snapshot",
     complete: "Complete the case",
   }
@@ -242,8 +244,11 @@ export function ActionsPanel({ c }: { c: CaseDetail }) {
     <Card title="Actions">
       <div className="flex flex-wrap gap-2">
         {actions.map((a) =>
-          a === "complete" ? (
-            <Button key={a} size="sm" onClick={() => run("complete", {}, "Completed")}>{LABELS[a]}</Button>
+          a === "complete" || a === "invite_client" ? (
+            <Button key={a} size="sm" disabled={act.isPending}
+              onClick={() => run(a, {}, a === "complete" ? "Completed" : "Invitation drafted: review and send it under Mail")}>
+              {LABELS[a]}
+            </Button>
           ) : (
             <Button key={a} size="sm" variant={open === a ? "secondary" : "outline"} onClick={() => setOpen(open === a ? null : a)}>
               {LABELS[a]}

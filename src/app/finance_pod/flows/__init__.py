@@ -12,4 +12,5 @@ from src.app.finance_pod.flows import (  # noqa: F401
     ap_month_close,
     ap_purchase_request,
     ap_vendor_onboarding,
+    ar_client_account,
 )

@@ -242,7 +242,9 @@ def _vendor_contacts(snapshot: PodSnapshot) -> set[str]:
     }
 
 
-INVITE_PURPOSE = "vendor_invite"
+# The only mail that may go to a typed address (the party isn't in the source yet): a portal
+# invitation, or a client being told what's missing from their application
+INVITE_PURPOSES = frozenset({"vendor_invite", "client_invite", "client_gaps"})
 
 
 async def _check_recipient(
@@ -252,8 +254,8 @@ async def _check_recipient(
     if audience == Audience.INVITE:
         # A new vendor isn't in the source yet: the invitation (a portal link, no figures)
         # is the only mail that may go to a typed address
-        if purpose != INVITE_PURPOSE:
-            raise MessageRefusedError("Only a vendor portal invitation goes to a typed address.")
+        if purpose not in INVITE_PURPOSES:
+            raise MessageRefusedError("Only a portal invitation goes to a typed address.")
         return
     if audience == Audience.VENDOR:
         snapshot = await session.get(PodSnapshot, case.snapshot_id)

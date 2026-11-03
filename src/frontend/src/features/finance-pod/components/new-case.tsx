@@ -32,7 +32,8 @@ export function NewCase() {
   const sources = useSources(chosen)
   const [snapshotId, setSnapshotId] = useState("")
   const snapshot = snapshotId || sources.data?.[0]?.id || ""
-  const catalogue = useSourceCatalogue(chosen === "ap_vendor_onboarding" ? null : snapshot || null, chosen)
+  const party = chosen === "ap_vendor_onboarding" || chosen === "ar_client_account"
+  const catalogue = useSourceCatalogue(party ? null : snapshot || null, chosen)
   const intake = useIntake()
   const [bill, setBill] = useState("")
   const [title, setTitle] = useState("")
@@ -49,7 +50,9 @@ export function NewCase() {
     const selection =
       chosen === "ap_vendor_onboarding"
         ? { vendor_name: vendorName, contact_email: vendorEmail }
-        : chosen === "ap_invoice_match"
+        : chosen === "ar_client_account"
+          ? { client_name: vendorName, contact_email: vendorEmail }
+          : chosen === "ap_invoice_match"
           ? { bill_id: bill }
           : chosen === "ap_month_close"
             ? { period }
@@ -64,7 +67,9 @@ export function NewCase() {
           title ||
           (chosen === "ap_vendor_onboarding"
             ? `Onboard ${vendorName}`
-            : chosen === "ap_invoice_match"
+            : chosen === "ar_client_account"
+              ? `Open an account for ${vendorName}`
+              : chosen === "ap_invoice_match"
               ? `Invoice ${catalogue.data?.incoming_invoices.find((b) => b.id === bill)?.name ?? bill}`
               : chosen === "ap_month_close"
                 ? `AP close ${period}`
@@ -153,9 +158,10 @@ export function NewCase() {
               <span className="block text-xs text-muted-foreground">The source data must be taken after the month ends.</span>
             </label>
           )}
-          {chosen === "ap_vendor_onboarding" && (
+          {party && (
             <div className="grid gap-2 sm:grid-cols-2">
-              <Input placeholder="Vendor's legal name" value={vendorName} onChange={(e) => setVendorName(e.target.value)} required />
+              <Input placeholder={chosen === "ar_client_account" ? "Client's name" : "Vendor's legal name"} value={vendorName}
+                onChange={(e) => setVendorName(e.target.value)} required />
               <Input placeholder="Their contact email" type="email" value={vendorEmail} onChange={(e) => setVendorEmail(e.target.value)} required />
             </div>
           )}

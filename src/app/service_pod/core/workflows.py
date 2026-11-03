@@ -32,6 +32,8 @@ class WorkflowKey(StrEnum):
     AP_VENDOR_ONBOARDING = "ap_vendor_onboarding"
     AP_INVOICE_MATCH = "ap_invoice_match"
     AP_MONTH_CLOSE = "ap_month_close"
+    # Finance POD: Order-to-Cash
+    AR_CLIENT_ACCOUNT = "ar_client_account"
 
 
 @dataclass(frozen=True)

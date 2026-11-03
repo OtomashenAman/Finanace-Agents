@@ -26,7 +26,9 @@ class Audience(StrEnum):
     CUSTOMER = "customer"  # only the verified contact from the snapshot
     INTERNAL = "internal"  # only the configured internal recipients
     VENDOR = "vendor"  # only a vendor's verified contact from the snapshot (Finance POD)
-    INVITE = "invite"  # a typed address, only for a new vendor's portal invitation (no figures)
+    # A typed address: only a new vendor's or client's portal invitation, or the gaps in what
+    # the client sent (no figures of the company's)
+    INVITE = "invite"
 
 
 class MessageStatus(StrEnum):
@@ -125,6 +127,7 @@ class ArtifactChannel(StrEnum):
 
     UPLOAD = "upload"  # a signed-in person uploaded it
     VENDOR_PORTAL = "vendor_portal"  # the vendor, through their signed portal link
+    CLIENT_PORTAL = "client_portal"  # a client applying for an account, through their link
     EMAIL = "email"  # an attachment of an imported reply
 
 

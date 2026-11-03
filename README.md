@@ -231,6 +231,28 @@ folder gets an `input_schema`, `run_model` and `analyze()` (see `agents/ap_invoi
     completes once a fresh snapshot verifies them. Past the close day (5th of next month, a demo
     value) an unsigned close gets a finding.
   - Measures: days to close, reconciling items, audit findings.
+- Finance POD AR-1 (Client Account & Credit Set-Up, `finance_pod/flows/ar_client_account`),
+  GIA pages 15-16. A credit controller or billing analyst opens the case with the client's name
+  and email and invites them (Actions → Invite the client; a person sends the drafted mail).
+  - 1.1.1: the client applies through a signed portal link (`/client/<token>`, no account):
+    the form (legal name, tax ID, address, billing email, credit and terms requested, trade
+    references) and their tax form and registration papers. The submission completes 1.1.1
+    ("Through the portal"); a credit controller can complete it for a paper application.
+  - 1.1.2: the onboarding agent reads the tax form against the application, screens the names
+    against the OFAC SDN list (a hit is a blocking review task) and, when something is missing,
+    drafts an email to the client with a new link; the client fixes it and resubmits.
+  - 1.2.1: the credit agent scores the risk (documents, references, age, country, screening,
+    and the payment history when the books already know the client) and proposes a limit for
+    the band, or a deposit (AR1.R2: on request, too few references, or high risk). 1.2.2: the
+    credit controller approves credit (a limit above the proposal needs a reason; terms must
+    be an ERP payment terms template), deposit only, or declines.
+  - The decision releases the case: the customer is posted to ERPNext with exactly the
+    approved terms (AR1.G1) and verified by a fresh snapshot. 1.3.1 checks the ERP matches
+    what was approved (the lab system isn't connected: said so); 1.3.2 reviews the limit, and
+    a daily job again on the newest snapshot (a review task when it's nearly used or an item
+    is long overdue: AR1.R3).
+  - Measures: account set-up time, data errors (applications sent back with gaps). Policy
+    `ArcPolicy` (risk bands, limits, terms, review triggers): demo values until GIA's.
   - Every email is drafted by an agent and sent by a person holding the purpose's capacity.
     Postings are handled by the task kind's capacity. Thresholds are versioned policies
     (`PrqPolicy` / `VndPolicy`), **demo values until GIA's**; each case records the version it
