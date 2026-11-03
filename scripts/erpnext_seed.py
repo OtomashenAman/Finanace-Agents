@@ -19,9 +19,15 @@ so this builds what the AP agents need, every figure fictional and every email @
 - AP-6: goods received and not invoiced (in Stock Received But Not Billed), a service
   received and not invoiced (to accrue), a rebate journalled to a supplier's account (the AP
   subledger and ledger differ), posted invoices and a payment.
+- AR (Order-to-Cash): lab services with selling prices, a client's own price and a trade
+  discount; domestic and export (zero-rated) sales tax; clients with credit limits and terms
+  (a key account, one deposit-only, one on hold, one without a contact); lab submissions as
+  sales orders (custom "Report issued on" and "Fee estimate"; one with an added service, one
+  still in the lab); posted invoices across the ageing buckets, a late payment and a partial
+  one. GIA's lab system isn't connected: the sales order stands in for it.
 
-Masters are get-or-create, so reruns are safe; transactions are created once (a Note named
-"finance-acc-demo-seed" marks it). Talks to ERPNext's REST API only.
+Masters are get-or-create, so reruns are safe; transactions are created once (Notes named
+"finance-acc-demo-seed" and "finance-acc-ar-seed" mark them). Talks to ERPNext's REST API only.
 """
 
 import argparse
@@ -30,6 +36,7 @@ import os
 import sys
 import time
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -45,12 +52,16 @@ API_USER = "finance-acc@example.com"
 API_ROLES = (
     "Purchase Manager", "Purchase User", "Purchase Master Manager", "Accounts Manager",
     "Accounts User", "Stock Manager", "Stock User", "Item Manager", "Projects Manager",
-    "Projects User", "HR User",
+    "Projects User", "HR User", "Sales Manager", "Sales User", "Sales Master Manager",
 )  # fmt: skip
 
 
 class ErpError(RuntimeError):
     pass
+
+
+def _path(doctype: str, name: str) -> str:
+    return f"/api/resource/{doctype}/{quote(name, safe='')}"
 
 
 class Erp:
@@ -84,7 +95,7 @@ class Erp:
         return rows[0]["name"] if rows else None
 
     def get(self, doctype: str, name: str) -> dict[str, Any]:
-        doc: dict[str, Any] = self._check(self.http.get(f"/api/resource/{doctype}/{name}"))["data"]
+        doc: dict[str, Any] = self._check(self.http.get(_path(doctype, name)))["data"]
         return doc
 
     def insert(self, doc: dict[str, Any]) -> dict[str, Any]:
@@ -100,12 +111,12 @@ class Erp:
 
     def submit(self, doctype: str, name: str) -> dict[str, Any]:
         out: dict[str, Any] = self._check(
-            self.http.put(f"/api/resource/{doctype}/{name}", json={"docstatus": 1})
+            self.http.put(_path(doctype, name), json={"docstatus": 1})
         )["data"]
         return out
 
     def update(self, doctype: str, name: str, values: dict[str, Any]) -> None:
-        self._check(self.http.put(f"/api/resource/{doctype}/{name}", json=values))
+        self._check(self.http.put(_path(doctype, name), json=values))
 
 
 # --- setup and masters ---------------------------------------------------------------------
@@ -663,6 +674,279 @@ def transactions(erp: Erp, grants: dict[str, str]) -> None:
                     "content": "Demo transactions created by scripts/erpnext_seed.py"})  # fmt: skip
 
 
+# --- Order-to-Cash (AR): clients, lab submissions, invoices, payments -----------------------
+# The lab system isn't connected: a Sales Order stands in for a lab submission, its custom
+# "Report issued on" date for the lab's report-issued event, its "Fee estimate" for the fee
+# the client saw when submitting.
+
+AR_MARKER = "finance-acc-ar-seed"
+INCOME = acct("Service")
+TAX_DOMESTIC = "US ST 6.25% - GIAD"
+
+# code, name, standard selling rate (an added service may be added in the lab)
+SERVICES = (
+    ("GR-DIA", "Diamond Grading Report", 150.00),
+    ("GR-DOS", "Diamond Dossier", 90.00),
+    ("ID-COL", "Colored Stone Identification Report", 120.00),
+    ("ID-PEARL", "Pearl Identification Report", 110.00),
+    ("SV-LASER", "Laser inscription (added service)", 40.00),
+    ("SV-RUSH", "Rush turnaround (added service)", 75.00),
+    ("SV-RECHECK", "Report re-check", 60.00),
+)
+
+# name, territory, tax category, terms (days), credit limit (None: deposit only), email,
+# flags (key account, frozen = on hold)
+CLIENTS = (
+    ("Brilliant Gems LLC", "United States", "Domestic", 30, 50000,
+     "ap@brilliantgems.example.com", {}),
+    ("Rivera Fine Jewelry", "United States", "Domestic", 30, 15000,
+     "accounts@riverafj.example.com", {}),
+    ("Antwerp Diamond House", "Rest Of The World", "Export", 45, 30000,
+     "finance@antwerpdh.example.com", {}),
+    ("Sapphire & Co Jewelers", "United States", "Domestic", 30, 40000,
+     "payables@sapphireco.example.com", {"key_account": 1}),
+    ("Pearl Street Traders", "United States", "Domestic", 0, None,
+     "office@pearlstreet.example.com", {"deposit_only": 1}),
+    ("Crown Estate Jewels", "United States", "Domestic", 30, 10000,
+     "billing@crownestate.example.com", {}),  # put on hold once billed
+    ("Northstar Retail", "United States", "Domestic", 30, 5000, None, {}),  # no contact yet
+)  # fmt: skip
+
+
+def terms_template(erp: Erp, days: int) -> str:
+    name = "Due on receipt" if days == 0 else f"Net {days}"
+    if not erp.find("Payment Terms Template", {"name": name}):
+        erp.insert(
+            {"doctype": "Payment Terms Template", "template_name": name,
+             "terms": [{"invoice_portion": 100, "credit_days": days,
+                        "due_date_based_on": "Day(s) after invoice date",
+                        "description": name}]}
+        )  # fmt: skip
+    return name
+
+
+def receivables_masters(erp: Erp) -> None:
+    print("AR masters: lab services, prices, tax categories, terms, clients...")
+    custom_field(erp, "Customer", "deposit_only", "Deposit only (no credit)", "Check",
+                 "customer_group")  # fmt: skip
+    custom_field(erp, "Customer", "key_account", "Key account", "Check", "deposit_only")
+    custom_field(erp, "Sales Order", "report_issued_on", "Report issued on", "Date",
+                 "delivery_date")  # fmt: skip
+    custom_field(erp, "Sales Order", "fee_estimate", "Fee estimate", "Currency",
+                 "report_issued_on")  # fmt: skip
+    custom_field(erp, "Sales Order Item", "added_service", "Added in the lab", "Check",
+                 "item_name")  # fmt: skip
+    for dt in ("Sales Order", "Sales Invoice"):
+        custom_field(erp, dt, "seed_ref", "Demo seed reference", "Data", "naming_series")
+    for dt in ("Customer", "Sales Invoice", "Payment Entry"):
+        custom_field(erp, dt, "finance_acc_ref", "Finance ACC reference", "Data", "naming_series")
+
+    erp.ensure({"doctype": "Item Group", "item_group_name": "Lab Services",
+                "parent_item_group": "All Item Groups"}, {"name": "Lab Services"})  # fmt: skip
+    for code, name, rate in SERVICES:
+        erp.ensure(
+            {"doctype": "Item", "item_code": code, "item_name": name, "item_group": "Lab Services",
+             "stock_uom": "Nos", "is_stock_item": 0, "is_purchase_item": 0, "is_sales_item": 1,
+             "include_item_in_manufacturing": 0,
+             "item_defaults": [{"company": COMPANY, "income_account": INCOME}]},
+            {"name": code},
+        )  # fmt: skip
+        erp.ensure(
+            {"doctype": "Item Price", "item_code": code, "price_list": "Standard Selling",
+             "price_list_rate": rate, "uom": "Nos"},
+            {"item_code": code, "price_list": "Standard Selling", "customer": ["is", "not set"]},
+        )  # fmt: skip
+
+    for category in ("Domestic", "Export"):
+        erp.ensure({"doctype": "Tax Category", "title": category}, {"name": category})
+    erp.update("Sales Taxes and Charges Template", TAX_DOMESTIC, {"tax_category": "Domestic"})
+    erp.ensure(
+        {"doctype": "Sales Taxes and Charges Template", "title": "Export 0%", "company": COMPANY,
+         "tax_category": "Export",
+         "taxes": [{"charge_type": "On Net Total", "account_head": acct("ST 6%"), "rate": 0,
+                    "description": "Export of services: zero-rated"}]},
+        {"title": "Export 0%"},
+    )  # fmt: skip
+
+    for name, territory, category, days, limit, email, flags in CLIENTS:
+        erp.ensure(
+            {"doctype": "Customer", "customer_name": name, "customer_type": "Company",
+             "customer_group": "Commercial", "territory": territory, "tax_category": category,
+             "payment_terms": terms_template(erp, days), "default_currency": "USD",
+             "credit_limits": [{"company": COMPANY, "credit_limit": limit}] if limit else [],
+             **flags},
+            {"name": name},
+        )  # fmt: skip
+        if email:
+            erp.ensure(
+                {"doctype": "Contact", "first_name": "Accounts", "last_name": name,
+                 "email_ids": [{"email_id": email, "is_primary": 1}],
+                 "links": [{"link_doctype": "Customer", "link_name": name}],
+                 "is_primary_contact": 1},
+                {"email_id": email},
+            )  # fmt: skip
+    # A trade discount (contract price) and a client's own price
+    erp.ensure(
+        {"doctype": "Pricing Rule", "title": "Brilliant Gems trade discount", "company": COMPANY,
+         "apply_on": "Item Group", "item_groups": [{"item_group": "Lab Services"}],
+         "selling": 1, "applicable_for": "Customer", "customer": "Brilliant Gems LLC",
+         "rate_or_discount": "Discount Percentage", "discount_percentage": 10,
+         "valid_from": "2026-01-01"},
+        {"title": "Brilliant Gems trade discount"},
+    )  # fmt: skip
+    erp.ensure(
+        {"doctype": "Item Price", "item_code": "GR-DIA", "price_list": "Standard Selling",
+         "price_list_rate": 135, "uom": "Nos", "customer": "Sapphire & Co Jewelers"},
+        {"item_code": "GR-DIA", "price_list": "Standard Selling",
+         "customer": "Sapphire & Co Jewelers"},
+    )  # fmt: skip
+
+
+SalesLine = tuple[str, float, float, bool]  # item, qty, rate, added in the lab
+
+
+def _sales_lines(lines: list[SalesLine], date: str) -> list[dict[str, Any]]:
+    return [
+        {"item_code": code, "qty": qty, "rate": rate, "delivery_date": date, "uom": "Nos",
+         "conversion_factor": 1, "income_account": INCOME, "added_service": int(added)}
+        for code, qty, rate, added in lines
+    ]  # fmt: skip
+
+
+def submission(erp: Erp, ref: str, client: str, date: str, lines: list[SalesLine],
+               estimate: float, issued: str | None) -> str:  # fmt: skip
+    """A lab submission (Sales Order): what the client handed in, the fee estimate they saw,
+    and the date the lab issued the report (None: still in the lab)."""
+    if found := seeded(erp, "Sales Order", ref):
+        return found
+    doc = erp.insert(
+        {"doctype": "Sales Order", "customer": client, "company": COMPANY,
+         "transaction_date": date, "delivery_date": date, "ignore_pricing_rule": 1,
+         "items": _sales_lines(lines, date), "fee_estimate": estimate,
+         "report_issued_on": issued, "seed_ref": ref}
+    )  # fmt: skip
+    erp.submit("Sales Order", doc["name"])
+    return str(doc["name"])
+
+
+def sales_invoice(erp: Erp, ref: str, client: str, date: str,
+                  lines: list[SalesLine]) -> str:  # fmt: skip
+    """A posted invoice of an earlier submission; its due date follows the client's terms."""
+    if found := seeded(erp, "Sales Invoice", ref):
+        return found
+    category = next(c[2] for c in CLIENTS if c[0] == client)
+    template = TAX_DOMESTIC if category == "Domestic" else "Export 0% - GIAD"
+    taxes = erp.get("Sales Taxes and Charges Template", template)["taxes"]
+    doc = erp.insert(
+        {"doctype": "Sales Invoice", "customer": client, "company": COMPANY,
+         "posting_date": date, "set_posting_time": 1, "ignore_pricing_rule": 1,
+         "taxes_and_charges": template,
+         "taxes": [{k: t[k] for k in ("charge_type", "account_head", "rate", "description")}
+                   for t in taxes],
+         "items": _sales_lines(lines, date), "seed_ref": ref}
+    )  # fmt: skip
+    erp.submit("Sales Invoice", doc["name"])
+    return str(doc["name"])
+
+
+def receive_payment(erp: Erp, ref: str, si: str, date: str, amount: float | None = None) -> None:
+    if seeded(erp, "Payment Entry", ref):
+        return
+    pe = erp.call(
+        "erpnext.accounts.doctype.payment_entry.payment_entry.get_payment_entry",
+        dt="Sales Invoice", dn=si,
+    )  # fmt: skip
+    if amount is not None:
+        pe["paid_amount"] = pe["received_amount"] = amount
+        pe["references"][0]["allocated_amount"] = amount
+    pe.update({"posting_date": date, "reference_no": f"WIRE-{si[-5:]}", "reference_date": date,
+               "seed_ref": ref})  # fmt: skip
+    name = erp.insert(pe)["name"]
+    erp.submit("Payment Entry", name)
+
+
+def receivables(erp: Erp) -> None:
+    receivables_masters(erp)
+    if erp.find("Note", {"title": AR_MARKER}):
+        print("AR transactions already seeded (Note finance-acc-ar-seed): skipped.")
+        return
+    print("AR transactions: submissions, invoices across the ageing buckets, payments...")
+    # AR-3: submissions whose report is issued and not billed yet
+    submission(
+        erp,
+        "SO-BRILLIANT",
+        "Brilliant Gems LLC",
+        "2026-10-26",
+        [("GR-DIA", 10, 150, False)],
+        1500,
+        "2026-10-30",
+    )  # clean; 10% trade discount
+    submission(
+        erp,
+        "SO-RIVERA",
+        "Rivera Fine Jewelry",
+        "2026-10-24",
+        [("ID-COL", 5, 120, False), ("SV-LASER", 5, 40, True)],
+        600,
+        "2026-10-31",
+    )  # an added service: over the estimate
+    submission(
+        erp,
+        "SO-ANTWERP",
+        "Antwerp Diamond House",
+        "2026-10-27",
+        [("GR-DOS", 3, 90, False)],
+        270,
+        "2026-11-01",
+    )  # export: zero-rated
+    submission(
+        erp,
+        "SO-SAPPHIRE",
+        "Sapphire & Co Jewelers",
+        "2026-10-29",
+        [("GR-DIA", 4, 135, False), ("SV-RUSH", 4, 75, True)],
+        540,
+        "2026-11-02",
+    )  # the client's own price, and a rush added
+    submission(
+        erp,
+        "SO-INLAB",
+        "Sapphire & Co Jewelers",
+        "2026-11-01",
+        [("ID-PEARL", 6, 110, False)],
+        660,
+        None,
+    )  # still in the lab: not billable
+
+    # AR-5: history and open items (as of early November 2026)
+    paid = sales_invoice(erp, "SI-BRILLIANT-SEP", "Brilliant Gems LLC", "2026-09-20",
+                         [("GR-DIA", 10, 135, False)])  # fmt: skip
+    receive_payment(erp, "PE-BRILLIANT-SEP", paid, "2026-10-15")  # on time
+    sales_invoice(erp, "SI-BRILLIANT-OCT", "Brilliant Gems LLC", "2026-10-20",
+                  [("GR-DIA", 8, 135, False)])  # current, not due  # fmt: skip
+    partly = sales_invoice(erp, "SI-RIVERA-SEP", "Rivera Fine Jewelry", "2026-09-10",
+                           [("ID-COL", 15, 120, False)])  # 1-30 days overdue  # fmt: skip
+    receive_payment(erp, "PE-RIVERA-PART", partly, "2026-10-20", 800)
+    sales_invoice(erp, "SI-RIVERA-AUG", "Rivera Fine Jewelry", "2026-08-15",
+                  [("ID-COL", 10, 120, False)])  # 31-60 days overdue  # fmt: skip
+    late = sales_invoice(erp, "SI-ANTWERP-MAY", "Antwerp Diamond House", "2026-05-10",
+                         [("GR-DOS", 20, 90, False)])  # fmt: skip
+    receive_payment(erp, "PE-ANTWERP-LATE", late, "2026-07-30")  # paid 36 days late
+    sales_invoice(erp, "SI-ANTWERP-JUL", "Antwerp Diamond House", "2026-07-05",
+                  [("GR-DOS", 40, 90, False)])  # 61-90 days overdue  # fmt: skip
+    sales_invoice(erp, "SI-SAPPHIRE-JUN", "Sapphire & Co Jewelers", "2026-06-10",
+                  [("GR-DIA", 80, 135, False)])  # 90+ days, key account  # fmt: skip
+    sales_invoice(erp, "SI-SAPPHIRE-SEP", "Sapphire & Co Jewelers", "2026-09-01",
+                  [("GR-DIA", 40, 135, False)])  # 31-60  # fmt: skip
+    erp.update("Customer", "Crown Estate Jewels", {"is_frozen": 0})  # a rerun after a failure
+    sales_invoice(erp, "SI-CROWN-MAY", "Crown Estate Jewels", "2026-05-01",
+                  [("ID-COL", 30, 120, False)])  # 90+, account on hold  # fmt: skip
+    # ERPNext won't invoice a frozen client: Crown goes on hold after its old invoice
+    erp.update("Customer", "Crown Estate Jewels", {"is_frozen": 1})
+    erp.insert({"doctype": "Note", "title": AR_MARKER, "public": 0,
+                "content": "AR demo transactions created by scripts/erpnext_seed.py"})  # fmt: skip
+
+
 # --- the app's API user --------------------------------------------------------------------
 
 
@@ -696,6 +980,7 @@ def main() -> None:
         erp.login()
         setup_company(erp)
         transactions(erp, masters(erp))
+        receivables(erp)
         api_user(erp, args.new_keys)
     except (ErpError, httpx.HTTPError) as exc:
         sys.exit(f"ERPNext seed failed: {exc}")

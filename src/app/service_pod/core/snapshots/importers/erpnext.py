@@ -1,4 +1,5 @@
-"""ERPNext -> SnapshotDocument: the Procure-to-Pay collections, read live over the REST API.
+"""ERPNext -> SnapshotDocument: the Procure-to-Pay and Order-to-Cash collections, read live
+over the REST API.
 
 Nothing is written. Masters come whole; purchase documents (requests, quotations, orders,
 receipts, supplier invoices) from the last READ_DAYS, cancelled ones left out. A link to a
@@ -7,6 +8,12 @@ the snapshot only cites what it contains.
 
 ERPNext's lab is the "Lab" accounting dimension (field `lab`), a grant is a Project (with
 the custom grant fields when the site has them), a department is a cost centre.
+
+Order-to-Cash: a client is a Customer (credit limit, payment terms, frozen = on hold, and the
+custom "deposit only" / "key account" flags when the site has them); GIA's lab system isn't
+connected, so a lab submission is a Sales Order (its custom "report issued on" date and "fee
+estimate" when present). Sales invoices, customer payments, selling prices, pricing rules and
+sales tax templates come as they are.
 """
 
 import hashlib
@@ -24,11 +31,14 @@ from src.app.data_sources.providers.erpnext import Api
 from src.app.service_pod.core.snapshots.contract import (
     Account,
     AccountClass,
+    Allocation,
     Basis,
     Bill,
     BillLine,
     Budget,
     BudgetActual,
+    Client,
+    ClientPayment,
     CostCentre,
     Grant,
     Item,
@@ -38,6 +48,7 @@ from src.app.service_pod.core.snapshots.contract import (
     LedgerBalance,
     LedgerEntry,
     OrderLine,
+    PriceRule,
     Provenance,
     PurchaseOrder,
     PurchaseReceipt,
@@ -45,8 +56,14 @@ from src.app.service_pod.core.snapshots.contract import (
     QuotationLine,
     ReceiptLine,
     RequestLine,
+    SalesInvoice,
+    SalesInvoiceLine,
+    SellingPrice,
     SnapshotDocument,
+    Submission,
+    SubmissionLine,
     SupplierQuotation,
+    TaxRule,
     Vendor,
     VendorContract,
 )
@@ -426,6 +443,203 @@ def _bills(docs: list[dict[str, Any]]) -> list[Bill]:
     ]
 
 
+# --- Order-to-Cash ---------------------------------------------------------------------------
+
+
+async def _clients(api: Api, company: str) -> list[Client]:
+    rows = await api.rows("Customer", ["*"])
+    limits = {
+        r["name"]: r.get("credit_limit")
+        for r in await api.rows(
+            "Customer",
+            ["name", "`tabCustomer Credit Limit`.credit_limit"],
+            [["Customer Credit Limit", "company", "=", company]],
+        )
+    }
+    days = {
+        r["name"]: r.get("credit_days")
+        for r in await api.rows(
+            "Payment Terms Template", ["name", "`tabPayment Terms Template Detail`.credit_days"]
+        )
+    }
+    contacts = await api.rows(
+        "Contact",
+        ["email_id", "is_primary_contact", "`tabDynamic Link`.link_name"],
+        [["Dynamic Link", "link_doctype", "=", "Customer"]],
+        order_by="is_primary_contact desc",
+    )
+    email: dict[str, str] = {}
+    for c in contacts:
+        address = _email(c.get("email_id"))
+        if address and c.get("link_name") and c["link_name"] not in email:
+            email[c["link_name"]] = address
+    out = []
+    for r in rows:
+        terms = r.get("payment_terms") or None
+        limit = limits.get(r["name"])
+        out.append(
+            Client(
+                id=r["name"], name=r.get("customer_name") or r["name"],
+                group=r.get("customer_group") or None, email=email.get(r["name"]),
+                tax_id=r.get("tax_id") or None, territory=r.get("territory") or None,
+                tax_category=r.get("tax_category") or None,
+                currency=r.get("default_currency") or None,
+                credit_limit=money(limit) if limit else None, payment_terms=terms,
+                terms_days=int(str(days[terms])) if terms and days.get(terms) is not None
+                else None,
+                deposit_only=bool(r.get("deposit_only")), key_account=bool(r.get("key_account")),
+                status="Disabled" if r.get("disabled") else "On hold" if r.get("is_frozen")
+                else "Active",
+                since=_date(r.get("creation")),
+            )
+        )  # fmt: skip
+    return out
+
+
+def _submissions(docs: list[dict[str, Any]]) -> list[Submission]:
+    return [
+        Submission(
+            id=d["name"], client_id=d["customer"], date=_date(d["transaction_date"]),
+            status=d.get("status") or DOC_STATUS[d["docstatus"]],
+            doc_status=DOC_STATUS[d["docstatus"]], total=money(d.get("grand_total")),
+            fee_estimate=money(d["fee_estimate"]) if d.get("fee_estimate") else None,
+            report_issued_on=_date(d.get("report_issued_on")),
+            lines=[
+                SubmissionLine(
+                    id=i["name"], item_code=i["item_code"], qty=qty(i["qty"]),
+                    rate=Decimal(str(i["rate"])), amount=money(i.get("amount")),
+                    added=bool(i.get("added_service")), billed_amount=money(i.get("billed_amt")),
+                )
+                for i in d.get("items", [])
+            ],
+        )
+        for d in docs
+    ]  # fmt: skip
+
+
+def _sales_invoices(docs: list[dict[str, Any]], currency: str) -> list[SalesInvoice]:
+    return [
+        SalesInvoice(
+            id=d["name"], client_id=d["customer"], posting_date=_date(d["posting_date"]),
+            due_date=_date(d.get("due_date")), status=d.get("status") or "Draft",
+            doc_status=DOC_STATUS[d["docstatus"]], currency=d.get("currency") or currency,
+            net_total=money(d.get("net_total")),
+            tax_total=money(d.get("total_taxes_and_charges")),
+            total=money(d.get("grand_total")), outstanding=money(d.get("outstanding_amount")),
+            return_against=(d.get("return_against") or None) if d.get("is_return") else None,
+            reference=d.get("finance_acc_ref") or None,
+            lines=[
+                SalesInvoiceLine(
+                    item_code=i["item_code"], qty=qty(i["qty"]), rate=Decimal(str(i["rate"])),
+                    amount=money(i.get("amount")), submission_id=i.get("sales_order") or None,
+                    submission_line_id=i.get("so_detail") or None,
+                )
+                for i in d.get("items", [])
+            ],
+        )
+        for d in docs
+    ]  # fmt: skip
+
+
+def _client_payments(docs: list[dict[str, Any]], invoices: set[str]) -> list[ClientPayment]:
+    """Receipts from clients; an allocation to an invoice outside the window is left out."""
+    return [
+        ClientPayment(
+            id=d["name"], client_id=d["party"], date=_date(d["posting_date"]),
+            amount=money(d.get("received_amount") or d.get("paid_amount")),
+            reference=d.get("reference_no") or None,
+            allocations=[
+                Allocation(invoice_id=r["reference_name"], amount=money(r["allocated_amount"]))
+                for r in d.get("references", [])
+                if r.get("reference_doctype") == "Sales Invoice"
+                and r.get("reference_name") in invoices and money(r.get("allocated_amount")) > 0
+            ],
+        )
+        for d in docs
+        if d.get("party") and money(d.get("received_amount") or d.get("paid_amount")) > 0
+    ]  # fmt: skip
+
+
+async def _selling_prices(api: Api, price_list: str | None) -> list[SellingPrice]:
+    filters: list[list[Any]] = [["selling", "=", 1]]
+    if price_list:
+        filters.append(["price_list", "=", price_list])
+    rows = await api.rows(
+        "Item Price", ["item_code", "customer", "price_list_rate", "currency"], filters
+    )
+    seen: set[tuple[str, str | None]] = set()
+    out = []
+    for r in rows:
+        key = (r["item_code"], r.get("customer") or None)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(
+            SellingPrice(item_code=r["item_code"], client_id=r.get("customer") or None,
+                         rate=Decimal(str(r["price_list_rate"])),
+                         currency=r.get("currency") or "USD")
+        )  # fmt: skip
+    return out
+
+
+async def _price_rules(api: Api, company: str) -> list[PriceRule]:
+    names = [
+        r["name"]
+        for r in await api.rows(
+            "Pricing Rule", ["name"], [["selling", "=", 1], ["disable", "=", 0]]
+        )
+    ]
+    out = []
+    for d in await api.get_many("Pricing Rule", names):
+        if d.get("company") not in (None, "", company):
+            continue
+        targets: list[tuple[str | None, str | None]] = (
+            [(i.get("item_code"), None) for i in d.get("items", [])]
+            if d.get("apply_on") == "Item Code"
+            else [(None, g.get("item_group")) for g in d.get("item_groups", [])]
+            if d.get("apply_on") == "Item Group"
+            else []
+        )
+        discount = d.get("rate_or_discount") == "Discount Percentage"
+        for n, (code, group) in enumerate(targets):
+            out.append(
+                PriceRule(
+                    id=f"{d['name']}#{n + 1}" if len(targets) > 1 else d["name"],
+                    item_code=code, item_group=group,
+                    client_id=d.get("customer") if d.get("applicable_for") == "Customer" else None,
+                    client_group=d.get("customer_group")
+                    if d.get("applicable_for") == "Customer Group" else None,
+                    discount_pct=Decimal(str(d.get("discount_percentage") or 0))
+                    if discount else None,
+                    rate=Decimal(str(d["rate"])) if not discount and d.get("rate") else None,
+                    valid_from=_date(d.get("valid_from")), valid_upto=_date(d.get("valid_upto")),
+                )
+            )  # fmt: skip
+    return out
+
+
+async def _tax_rules(api: Api, company: str) -> list[TaxRule]:
+    names = [
+        r["name"]
+        for r in await api.rows(
+            "Sales Taxes and Charges Template", ["name"],
+            [["company", "=", company], ["disabled", "=", 0]],
+        )
+    ]  # fmt: skip
+    out = []
+    for d in await api.get_many("Sales Taxes and Charges Template", names):
+        rows = [t for t in d.get("taxes", []) if t.get("charge_type") == "On Net Total"]
+        out.append(
+            TaxRule(
+                id=d["name"], tax_category=d.get("tax_category") or None,
+                rate_pct=sum((Decimal(str(t.get("rate") or 0)) for t in rows), Decimal(0)),
+                account_id=rows[0].get("account_head") if rows else None,
+                default=bool(d.get("is_default")),
+            )
+        )  # fmt: skip
+    return out
+
+
 def _ledger_kind(account: dict[str, Any]) -> str | None:
     if account.get("account_type") == "Payable" and account.get("root_type") == "Liability":
         return "payable"
@@ -497,6 +711,7 @@ def _drop_outside_links(docs: dict[str, list[dict[str, Any]]]) -> None:
         ("Purchase Receipt", "purchase_order", "purchase_order_item", "Purchase Order"),
         ("Purchase Invoice", "purchase_order", "po_detail", "Purchase Order"),
         ("Purchase Invoice", "purchase_receipt", "pr_detail", "Purchase Receipt"),
+        ("Sales Invoice", "sales_order", "so_detail", "Sales Order"),
     )
     for dt, doc_field, line_field, target in links:
         for d in docs.get(dt, []):
@@ -514,6 +729,7 @@ async def from_erpnext(
     data doesn't hold together, with the first problems named)."""
     info = await api.get("Company", company)
     buying = await api.get("Buying Settings", "Buying Settings")
+    selling = await api.get("Selling Settings", "Selling Settings")
     accounts = await api.rows(
         "Account",
         ["name", "account_name", "account_number", "root_type", "account_type"],
@@ -529,6 +745,11 @@ async def from_erpnext(
         "Purchase Order": await _docs(api, "Purchase Order", company, since, "transaction_date"),
         "Purchase Receipt": await _docs(api, "Purchase Receipt", company, since, "posting_date"),
         "Purchase Invoice": await _docs(api, "Purchase Invoice", company, since, "posting_date"),
+        "Sales Order": await _docs(api, "Sales Order", company, since, "transaction_date"),
+        "Sales Invoice": await _docs(api, "Sales Invoice", company, since, "posting_date"),
+        "Payment Entry": await _docs(api, "Payment Entry", company, since, "posting_date",
+                                     [["party_type", "=", "Customer"],
+                                      ["payment_type", "=", "Receive"], ["docstatus", "=", 1]]),
     }  # fmt: skip
     _drop_outside_links(docs)
     budgets, actuals = await _budgets(api, company)
@@ -536,13 +757,15 @@ async def from_erpnext(
         api, company, accounts, as_of, since
     )
     host = urlsplit(api.creds.base_url).hostname or "erpnext"
+    currency = info.get("default_currency") or "USD"
+    sales_invoices = _sales_invoices(docs["Sales Invoice"], currency)
     try:
         doc = SnapshotDocument(
             provenance=Provenance.SYNTHETIC_DEMO if demo else Provenance.ERP_READONLY_EXPORT,
             company_id=f"{host}:{company}"[:100],
             company_name=company,
             entity=entity_code,
-            currency=info.get("default_currency") or "USD",
+            currency=currency,
             basis=Basis.ACCRUAL,
             as_of=as_of,
             source_reference=f"ERPNext {api.creds.base_url} company {company!r}, "
@@ -596,6 +819,13 @@ async def from_erpnext(
             ledger_balances=ledger_balances,
             ledger_entries=ledger_entries,
             journal_entries=journal_entries,
+            clients=await _clients(api, company),
+            submissions=_submissions(docs["Sales Order"]),
+            sales_invoices=sales_invoices,
+            client_payments=_client_payments(docs["Payment Entry"], {i.id for i in sales_invoices}),
+            selling_prices=await _selling_prices(api, selling.get("selling_price_list")),
+            price_rules=await _price_rules(api, company),
+            tax_rules=await _tax_rules(api, company),
         )
     except ValidationError as exc:
         raise SnapshotInvalidError(

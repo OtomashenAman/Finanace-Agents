@@ -25,6 +25,115 @@ def _docs() -> dict[str, dict[str, dict[str, Any]]]:
     return {
         "Company": {COMPANY: {"name": COMPANY, "default_currency": "USD"}},
         "Buying Settings": {"Buying Settings": {"buying_price_list": "Standard Buying"}},
+        "Selling Settings": {"Selling Settings": {"selling_price_list": "Standard Selling"}},
+        # Order-to-Cash: a lab submission (sales order), its invoice, a payment, a rule, a tax
+        "Sales Order": {
+            "SO-1": {
+                "name": "SO-1",
+                "company": COMPANY,
+                "docstatus": 1,
+                "customer": "Brilliant Gems",
+                "transaction_date": "2026-10-26",
+                "status": "To Deliver and Bill",
+                "grand_total": 340,
+                "fee_estimate": 300,
+                "report_issued_on": "2026-10-30",
+                "items": [
+                    {
+                        "name": "soi-1",
+                        "item_code": "GR-DIA",
+                        "qty": 2,
+                        "rate": 150,
+                        "amount": 300,
+                        "billed_amt": 0,
+                        "added_service": 0,
+                    },
+                    {
+                        "name": "soi-2",
+                        "item_code": "SV-LASER",
+                        "qty": 1,
+                        "rate": 40,
+                        "amount": 40,
+                        "billed_amt": 0,
+                        "added_service": 1,
+                    },
+                ],
+            },
+        },
+        "Sales Invoice": {
+            "SI-1": {
+                "name": "SI-1",
+                "company": COMPANY,
+                "docstatus": 1,
+                "customer": "Brilliant Gems",
+                "posting_date": "2026-09-20",
+                "due_date": "2026-10-20",
+                "status": "Partly Paid",
+                "currency": "USD",
+                "net_total": 300,
+                "total_taxes_and_charges": 18.75,
+                "grand_total": 318.75,
+                "outstanding_amount": 118.75,
+                "is_return": 0,
+                "items": [
+                    {
+                        "item_code": "GR-DIA",
+                        "qty": 2,
+                        "rate": 150,
+                        "amount": 300,
+                        "sales_order": "SO-OLD",
+                        "so_detail": "soi-old",
+                    }
+                ],
+            },
+        },
+        "Payment Entry": {
+            "PE-1": {
+                "name": "PE-1",
+                "company": COMPANY,
+                "docstatus": 1,
+                "party_type": "Customer",
+                "payment_type": "Receive",
+                "party": "Brilliant Gems",
+                "posting_date": "2026-10-15",
+                "received_amount": 200,
+                "reference_no": "W-1",
+                "references": [
+                    {
+                        "reference_doctype": "Sales Invoice",
+                        "reference_name": "SI-1",
+                        "allocated_amount": 200,
+                    }
+                ],
+            },
+        },
+        "Pricing Rule": {
+            "PRLE-1": {
+                "name": "PRLE-1",
+                "selling": 1,
+                "disable": 0,
+                "company": COMPANY,
+                "apply_on": "Item Group",
+                "item_groups": [{"item_group": "Lab Services"}],
+                "applicable_for": "Customer",
+                "customer": "Brilliant Gems",
+                "rate_or_discount": "Discount Percentage",
+                "discount_percentage": 10,
+                "valid_from": "2026-01-01",
+            },
+        },
+        "Sales Taxes and Charges Template": {
+            "US ST 6.25% - GIAD": {
+                "name": "US ST 6.25% - GIAD",
+                "company": COMPANY,
+                "disabled": 0,
+                "tax_category": "Domestic",
+                "is_default": 1,
+                "taxes": [
+                    {"charge_type": "On Net Total", "account_head": "ST - GIAD", "rate": 6.25}
+                ],
+            },
+        },
         "Material Request": {
             "MR-1": {
                 "name": "MR-1",
@@ -147,9 +256,20 @@ ROWS: dict[str, list[dict[str, Any]]] = {
         {"name": "Shadow Trading LLC", "supplier_name": "Shadow Trading LLC",
          "supplier_group": "General", "tax_id": None, "disabled": 1, "on_hold": 0},
     ],
+    "Customer": [
+        {"name": "Brilliant Gems", "customer_name": "Brilliant Gems LLC",
+         "customer_group": "Commercial", "territory": "United States", "tax_category": "Domestic",
+         "default_currency": "USD", "payment_terms": "Net 30", "credit_limit": 50000,
+         "is_frozen": 0, "disabled": 0, "key_account": 1, "creation": "2025-02-01 10:00:00"},
+        {"name": "Crown Estate", "customer_name": "Crown Estate Jewels", "customer_group": None,
+         "payment_terms": None, "credit_limit": None, "is_frozen": 1, "disabled": 0},
+    ],
+    "Payment Terms Template": [{"name": "Net 30", "credit_days": 30}],
     "Contact": [
         {"email_id": "orders@labchem.example.com", "is_primary_contact": 1,
          "link_name": "LabChem Supply Co"},
+        {"email_id": "ap@brilliantgems.example.com", "is_primary_contact": 1,
+         "link_name": "Brilliant Gems"},
         {"email_id": "not-an-email", "is_primary_contact": 1, "link_name": "Shadow Trading LLC"},
     ],
     "Bank Account": [],
@@ -158,14 +278,21 @@ ROWS: dict[str, list[dict[str, Any]]] = {
          "is_stock_item": 1, "expense_account": "Lab Consumables - GIAD"},
         {"item_code": "LC-GLOVES", "item_name": "Gloves", "item_group": "Lab Consumables",
          "is_stock_item": 1, "expense_account": "Lab Consumables - GIAD"},
+        {"item_code": "GR-DIA", "item_name": "Diamond Grading Report",
+         "item_group": "Lab Services", "is_stock_item": 0},
+        {"item_code": "SV-LASER", "item_name": "Laser inscription",
+         "item_group": "Lab Services", "is_stock_item": 0},
     ],
     "Item Price": [
         {"item_code": "LC-PASTE", "supplier": None, "price_list_rate": 42, "currency": "USD",
          "buying": 1, "price_list": "Standard Buying"},
         {"item_code": "LC-PASTE", "supplier": "LabChem Supply Co", "price_list_rate": 38,
          "currency": "USD", "buying": 1, "price_list": "Standard Buying"},
-        {"item_code": "LC-PASTE", "supplier": None, "price_list_rate": 55, "currency": "USD",
-         "buying": 0, "price_list": "Standard Selling"},  # a selling price: not read
+        {"item_code": "GR-DIA", "supplier": None, "customer": None, "price_list_rate": 150,
+         "currency": "USD", "buying": 0, "selling": 1, "price_list": "Standard Selling"},
+        {"item_code": "GR-DIA", "supplier": None, "customer": "Brilliant Gems",
+         "price_list_rate": 135, "currency": "USD", "buying": 0, "selling": 1,
+         "price_list": "Standard Selling"},  # a client's own price
     ],
     "Contract": [
         {"name": "CT-1", "party_name": "LabChem Supply Co", "start_date": "2026-01-01",
@@ -270,7 +397,9 @@ class FakeErpNext:
         if request.method == "POST":
             body = json.loads(request.content)
             name = (
-                body.get("supplier_name") or f"{doctype[:3].upper()}-NEW-{len(self.inserted) + 1}"
+                body.get("supplier_name")
+                or body.get("customer_name")
+                or f"{doctype[:3].upper()}-NEW-{len(self.inserted) + 1}"
             )
             doc = {**body, "name": name, "docstatus": 0, "company": body.get("company", COMPANY)}
             self.docs.setdefault(doctype, {})[name] = doc

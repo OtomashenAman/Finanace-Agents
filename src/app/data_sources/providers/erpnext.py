@@ -11,7 +11,7 @@ import json
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 import httpx
 
@@ -29,6 +29,11 @@ class ErpNextError(Exception):
 
 class ErpNextAuthError(ErpNextError):
     pass
+
+
+def _doc_path(doctype: str, name: str) -> str:
+    """A document's URL: its name quoted whole (names may hold "%", "&" or "/")."""
+    return f"/api/resource/{doctype}/{quote(name, safe='')}"
 
 
 @dataclass(frozen=True)
@@ -135,7 +140,7 @@ class Api:
             start += PAGE
 
     async def get(self, doctype: str, name: str) -> dict[str, Any]:
-        doc: dict[str, Any] = (await self._send("GET", f"/api/resource/{doctype}/{name}"))["data"]
+        doc: dict[str, Any] = (await self._send("GET", _doc_path(doctype, name)))["data"]
         return doc
 
     async def get_many(self, doctype: str, names: Iterable[str]) -> list[dict[str, Any]]:
@@ -156,7 +161,7 @@ class Api:
 
     async def submit(self, doctype: str, name: str) -> dict[str, Any]:
         out: dict[str, Any] = (
-            await self._send("PUT", f"/api/resource/{doctype}/{name}", json={"docstatus": 1})
+            await self._send("PUT", _doc_path(doctype, name), json={"docstatus": 1})
         )["data"]
         return out
 

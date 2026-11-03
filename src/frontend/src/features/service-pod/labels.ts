@@ -208,6 +208,13 @@ export const COLLECTION_LABEL: Record<Collection, string> = {
   ledger_balances: "Ledger balances",
   ledger_entries: "Payables ledger entries",
   journal_entries: "Journal entries",
+  clients: "Clients",
+  submissions: "Lab submissions",
+  sales_invoices: "Sales invoices",
+  client_payments: "Client payments",
+  selling_prices: "Selling prices",
+  price_rules: "Pricing rules",
+  tax_rules: "Sales tax rules",
 }
 
 export function formatDateTime(value: string | null): string {

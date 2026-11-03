@@ -260,6 +260,13 @@ contract prices, purchase requests and three quotations, and POs / receipts / su
 covering a clean match, a price variance, a short delivery billed in full, a service with no
 receipt, a duplicate bill, a non-PO invoice and goods received but not invoiced. Reruns are safe.
 "Maintain same rate" is off in Buying Settings so differing invoices can arrive as drafts.
+For AR it adds lab services (selling prices, a client's own price, a trade discount), domestic
+and export sales tax, seven clients (credit limits and terms; a key account, one deposit-only,
+one on hold, one without a contact), lab submissions as sales orders (GIA's lab system isn't
+connected: custom "Report issued on" and "Fee estimate" fields stand in for it) and posted
+invoices across the ageing buckets with a late and a partial payment. Snapshots read them as
+clients, submissions, sales invoices, client payments, selling prices, pricing rules and sales
+tax rules.
 `erpnext-down` stops it; `erpnext-reset` deletes its data. It needs about 600 MB of Docker memory.
 
 Connect it under Data Sources → Connect ERPNext (address, company, the API key and secret the

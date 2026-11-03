@@ -39,7 +39,7 @@ def test_every_built_phase_covers_its_requirement(phase: Phase) -> None:
 
 
 def test_the_transcription_is_well_formed() -> None:
-    seen: set[str] = set()
+    seen: set[tuple[str, str]] = set()  # the slides number AP and AR each from 1.1
     for phase in PHASES:
         ids = [i.id for i in phase.items] + [m.id for m in phase.measures]
         assert len(ids) == len(set(ids)), phase.id
@@ -49,8 +49,9 @@ def test_the_transcription_is_well_formed() -> None:
             for code, text in task.steps:
                 assert code.startswith(task.code + "."), code
                 assert text.strip() == text and text, code
-                assert code not in seen, code
-                seen.add(code)
+                assert (phase.process, code) not in seen, code
+                seen.add((phase.process, code))
+    assert {p.id for p in PHASES} >= {"AP1", "AP3", "AP6", "AR1", "AR3", "AR5"}
 
 
 DEMO_PHASE = Phase(

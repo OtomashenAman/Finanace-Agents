@@ -127,11 +127,12 @@ async def test_a_snapshot_holds_the_purchasing_data(
     assert snap["is_demo"] is True  # a sandbox connection
     assert snap["source_type"] == "erpnext"
     assert snap["row_counts"] == {
-        "accounts": 2, "vendors": 2, "items": 2, "item_prices": 2, "vendor_contracts": 1,
+        "accounts": 2, "vendors": 2, "items": 4, "item_prices": 2, "vendor_contracts": 1,
         "cost_centres": 1, "labs": 1, "grants": 1, "budgets": 1, "budget_actuals": 1,
         "purchase_requests": 1, "supplier_quotations": 1, "purchase_orders": 1,
         "purchase_receipts": 1, "bills": 1, "ledger_balances": 1, "ledger_entries": 0,
-        "journal_entries": 0,
+        "journal_entries": 0, "clients": 2, "submissions": 1, "sales_invoices": 1,
+        "client_payments": 1, "selling_prices": 2, "price_rules": 1, "tax_rules": 1,
     }  # fmt: skip
 
     rows = (await admin.get(f"/api/v1/pod/snapshots/{snap['id']}/rows?collection=vendors")).json()
@@ -162,6 +163,50 @@ async def test_a_snapshot_holds_the_purchasing_data(
     assert (again.status_code, again.json()["created"]) == (200, False)
 
 
+async def test_a_snapshot_holds_the_receivables_data(
+    admin: AsyncClient, erp: FakeErpNext, entity: LegalEntity
+) -> None:
+    source = (await _connect(admin)).json()
+    snap = (await _snapshot(admin, source, entity)).json()["snapshot"]
+
+    async def rows(collection: str) -> list[dict[str, Any]]:
+        url = f"/api/v1/pod/snapshots/{snap['id']}/rows?collection={collection}"
+        found: list[dict[str, Any]] = (await admin.get(url)).json()["rows"]
+        return found
+
+    clients = {c["id"]: c for c in await rows("clients")}
+    brilliant = clients["Brilliant Gems"]
+    assert (brilliant["name"], brilliant["email"], brilliant["credit_limit"]) == (
+        "Brilliant Gems LLC", "ap@brilliantgems.example.com", "50000",
+    )  # fmt: skip
+    assert (brilliant["terms_days"], brilliant["key_account"], brilliant["status"]) == (
+        30, True, "Active",
+    )  # fmt: skip
+    crown = clients["Crown Estate"]
+    assert (crown["status"], crown["credit_limit"], crown["email"]) == ("On hold", None, None)
+
+    (submission,) = await rows("submissions")
+    assert (submission["report_issued_on"], submission["fee_estimate"]) == ("2026-10-30", "300")
+    assert [ln["added"] for ln in submission["lines"]] == [False, True]
+    (invoice,) = await rows("sales_invoices")
+    assert (invoice["outstanding"], invoice["tax_total"], invoice["due_date"]) == (
+        "118.75", "18.75", "2026-10-20",
+    )  # fmt: skip
+    assert invoice["lines"][0]["submission_id"] is None  # its order is older than the window
+    (payment,) = await rows("client_payments")
+    assert payment["allocations"] == [{"invoice_id": "SI-1", "amount": "200"}]
+    prices = {(p["item_code"], p["client_id"]): p["rate"] for p in await rows("selling_prices")}
+    assert prices == {("GR-DIA", None): "150", ("GR-DIA", "Brilliant Gems"): "135"}
+    (rule,) = await rows("price_rules")
+    assert (rule["item_group"], rule["client_id"], rule["discount_pct"]) == (
+        "Lab Services", "Brilliant Gems", "10",
+    )  # fmt: skip
+    (tax,) = await rows("tax_rules")
+    assert (tax["id"], tax["tax_category"], tax["rate_pct"]) == (
+        "US ST 6.25% - GIAD", "Domestic", "6.25",
+    )  # fmt: skip
+
+
 async def test_only_your_own_connection_can_be_read(
     admin: AsyncClient, erp: FakeErpNext, entity: LegalEntity, make_user: Any,
     signed_in_client: Any,
@@ -187,6 +232,27 @@ def test_the_contract_refuses_dangling_links() -> None:
         SnapshotDocument.model_validate(
             {**base, "vendors": [{"id": "V-9", "name": "V", "status": "Active"}],
              "purchase_orders": [{**order, "lines": [{**order["lines"][0], "item_code": "B"}]}]}
+        )  # fmt: skip
+
+
+def test_the_contract_refuses_dangling_receivables_links() -> None:
+    base = {"provenance": "SYNTHETIC_DEMO", "company_id": "x", "company_name": "x",
+            "entity": "US01", "currency": "USD", "basis": "Accrual", "as_of": "2026-11-03",
+            "source_reference": "t", "items": [{"code": "A", "name": "A", "group": "G",
+                                                 "stock_item": False}],
+            "clients": [{"id": "C-1", "name": "C", "status": "Active"}]}  # fmt: skip
+    invoice = {"id": "SI-1", "client_id": "C-9", "posting_date": "2026-10-01",
+               "status": "Unpaid", "doc_status": "Submitted", "currency": "USD",
+               "net_total": "10", "total": "10", "outstanding": "10",
+               "lines": [{"item_code": "A", "qty": "1", "rate": "10", "amount": "10"}]}  # fmt: skip
+    with pytest.raises(ValidationError, match="unknown client C-9"):
+        SnapshotDocument.model_validate({**base, "sales_invoices": [invoice]})
+    payment = {"id": "PE-1", "client_id": "C-1", "date": "2026-10-02", "amount": "5",
+               "allocations": [{"invoice_id": "SI-9", "amount": "5"}]}  # fmt: skip
+    with pytest.raises(ValidationError, match="unknown SI-9"):
+        SnapshotDocument.model_validate(
+            {**base, "sales_invoices": [{**invoice, "client_id": "C-1"}],
+             "client_payments": [payment]}
         )  # fmt: skip
 
 

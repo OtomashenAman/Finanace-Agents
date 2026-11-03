@@ -51,6 +51,14 @@ class Collection(StrEnum):
     LEDGER_BALANCES = "ledger_balances"
     LEDGER_ENTRIES = "ledger_entries"
     JOURNAL_ENTRIES = "journal_entries"
+    # Order-to-Cash (Finance POD): clients, lab submissions, sales invoices, receipts
+    CLIENTS = "clients"
+    SUBMISSIONS = "submissions"
+    SALES_INVOICES = "sales_invoices"
+    CLIENT_PAYMENTS = "client_payments"
+    SELLING_PRICES = "selling_prices"
+    PRICE_RULES = "price_rules"
+    TAX_RULES = "tax_rules"
 
 
 # Added for the Finance POD: left out of a snapshot's stored payload when absent, so the
@@ -63,6 +71,9 @@ AP_COLLECTIONS = frozenset(
         Collection.PURCHASE_REQUESTS, Collection.SUPPLIER_QUOTATIONS,
         Collection.PURCHASE_ORDERS, Collection.PURCHASE_RECEIPTS, Collection.BILLS,
         Collection.LEDGER_BALANCES, Collection.LEDGER_ENTRIES, Collection.JOURNAL_ENTRIES,
+        Collection.CLIENTS, Collection.SUBMISSIONS, Collection.SALES_INVOICES,
+        Collection.CLIENT_PAYMENTS, Collection.SELLING_PRICES, Collection.PRICE_RULES,
+        Collection.TAX_RULES,
     }
 )  # fmt: skip
 
@@ -461,6 +472,124 @@ class JournalEntry(_Row):
     reference: Id | None = None  # the app's reference on what it posted
 
 
+# --- Order-to-Cash -----------------------------------------------------------------------
+# GIA's lab system isn't connected: a lab submission is read from the ERP's sales order (its
+# "report issued on" date is the lab's report-issued event, its "fee estimate" what the
+# client saw when submitting). Services are items like any other.
+
+Currency = Annotated[str, Field(pattern=r"^[A-Z]{3}$")]
+
+
+class Client(_Row):
+    id: Id
+    name: Name
+    group: Name | None = None
+    email: EmailStr | None = None  # the verified contact (client mail goes only here)
+    tax_id: Annotated[str, Field(max_length=50)] | None = None
+    territory: Name | None = None
+    tax_category: Name | None = None
+    currency: Currency | None = None
+    credit_limit: Money | None = None  # None: no credit set
+    payment_terms: Name | None = None
+    terms_days: Annotated[int, Field(ge=0)] | None = None
+    deposit_only: bool = False
+    key_account: bool = False
+    status: Literal["Active", "On hold", "Disabled"]
+    since: date | None = None
+
+
+class SubmissionLine(_Row):
+    id: Id
+    item_code: Id
+    qty: Qty
+    rate: Rate
+    amount: Money
+    added: bool = False  # added in the lab, after the client submitted
+    billed_amount: Money = Decimal(0)
+
+
+class Submission(_Row):
+    """A lab submission: what the client handed in, and when the report was issued."""
+
+    id: Id
+    client_id: Id
+    date: date
+    status: Name
+    doc_status: DocStatus
+    total: Money
+    fee_estimate: Money | None = None
+    report_issued_on: Day | None = None  # None: still in the lab
+    lines: list[SubmissionLine]
+
+
+class SalesInvoiceLine(_Row):
+    item_code: Id
+    qty: SignedQty
+    rate: Rate
+    amount: Money
+    submission_id: Id | None = None
+    submission_line_id: Id | None = None
+
+
+class SalesInvoice(_Row):
+    id: Id
+    client_id: Id
+    posting_date: date
+    due_date: date | None = None
+    status: Name
+    doc_status: DocStatus
+    currency: Currency
+    net_total: Money
+    tax_total: Money = Decimal(0)
+    total: Money
+    outstanding: Money
+    lines: list[SalesInvoiceLine]
+    return_against: Id | None = None  # a credit note reduces this invoice
+    reference: Id | None = None  # the app's reference on what it posted
+
+
+class ClientPayment(_Row):
+    id: Id
+    client_id: Id
+    date: date
+    amount: Annotated[Money, Field(gt=0)]
+    reference: Id | None = None
+    allocations: list[Allocation] = []  # invoice_id: a sales invoice
+
+
+class SellingPrice(_Row):
+    """The standard selling price (client_id None) or a client's own price."""
+
+    item_code: Id
+    client_id: Id | None = None
+    rate: Rate
+    currency: Currency
+
+
+class PriceRule(_Row):
+    """A discount or contract price: on an item or an item group, for a client or group."""
+
+    id: Id
+    item_code: Id | None = None
+    item_group: Name | None = None
+    client_id: Id | None = None
+    client_group: Name | None = None
+    discount_pct: Annotated[Decimal, Field(ge=0, le=100)] | None = None
+    rate: Rate | None = None
+    valid_from: date | None = None
+    valid_upto: Day | None = None
+
+
+class TaxRule(_Row):
+    """A sales tax template: which tax category it applies to, and its rate."""
+
+    id: Id
+    tax_category: Name | None = None
+    rate_pct: Annotated[Decimal, Field(ge=0, le=100)]
+    account_id: Id | None = None
+    default: bool = False
+
+
 def _unique(rows: Sequence[_Row] | None, key: str, what: str) -> set[str]:
     seen: set[str] = set()
     for row in rows or []:
@@ -514,6 +643,13 @@ class SnapshotDocument(BaseModel):
     ledger_balances: list[LedgerBalance] | None = None
     ledger_entries: list[LedgerEntry] | None = None
     journal_entries: list[JournalEntry] | None = None
+    clients: list[Client] | None = None
+    submissions: list[Submission] | None = None
+    sales_invoices: list[SalesInvoice] | None = None
+    client_payments: list[ClientPayment] | None = None
+    selling_prices: list[SellingPrice] | None = None
+    price_rules: list[PriceRule] | None = None
+    tax_rules: list[TaxRule] | None = None
 
     @property
     def coverage(self) -> list[Collection]:
@@ -579,6 +715,7 @@ class SnapshotDocument(BaseModel):
                 if cited is None or cited.gl_line_id != gl_line.id:
                     raise ValueError(f"GL line {gl_line.id}: transaction {txn_id} doesn't cite it")
         self._check_procurement()
+        self._check_receivables()
         return self
 
     def _check_procurement(self) -> None:
@@ -675,3 +812,50 @@ class SnapshotDocument(BaseModel):
                 else (masters["grant_id"], given["grant_id"])
             )
             linked(f"budget {budget.id}", budget.target_id, known, present)
+
+    def _check_receivables(self) -> None:
+        """Every reference between the Order-to-Cash collections points at a row the
+        snapshot has (checked when the referenced collection is supplied)."""
+        clients = _unique(self.clients, "id", "clients")
+        items = {i.code for i in self.items or []}
+        submissions = _unique(self.submissions, "id", "submissions")
+        invoices = _unique(self.sales_invoices, "id", "sales_invoices")
+        _unique(self.client_payments, "id", "client_payments")
+        _unique(self.price_rules, "id", "price_rules")
+        _unique(self.tax_rules, "id", "tax_rules")
+
+        def client(what: str, client_id: str | None) -> None:
+            if client_id is not None and self.clients is not None and client_id not in clients:
+                raise ValueError(f"{what}: unknown client {client_id}")
+
+        def item(what: str, code: str | None) -> None:
+            if code is not None and self.items is not None and code not in items:
+                raise ValueError(f"{what}: unknown item {code}")
+
+        lines: set[str] = set()
+        for sub in self.submissions or []:
+            client(f"submission {sub.id}", sub.client_id)
+            for sl in sub.lines:
+                lines.add(sl.id)
+                item(f"submission {sub.id}", sl.item_code)
+        for inv in self.sales_invoices or []:
+            client(f"sales invoice {inv.id}", inv.client_id)
+            for il in inv.lines:
+                item(f"sales invoice {inv.id}", il.item_code)
+                present = self.submissions is not None
+                if il.submission_id is not None and present and il.submission_id not in submissions:
+                    raise ValueError(f"sales invoice {inv.id}: unknown {il.submission_id}")
+                if (il.submission_line_id is not None and present
+                        and il.submission_line_id not in lines):  # fmt: skip
+                    raise ValueError(f"sales invoice {inv.id}: unknown {il.submission_line_id}")
+        for pay in self.client_payments or []:
+            client(f"client payment {pay.id}", pay.client_id)
+            for alloc in pay.allocations:
+                if self.sales_invoices is not None and alloc.invoice_id not in invoices:
+                    raise ValueError(f"client payment {pay.id}: unknown {alloc.invoice_id}")
+        for price in self.selling_prices or []:
+            item(f"selling price of {price.item_code}", price.item_code)
+            client(f"selling price of {price.item_code}", price.client_id)
+        for rule in self.price_rules or []:
+            item(f"price rule {rule.id}", rule.item_code)
+            client(f"price rule {rule.id}", rule.client_id)

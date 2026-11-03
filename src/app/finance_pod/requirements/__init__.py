@@ -2,6 +2,7 @@
 a phase whose `workflows` is filled in is held to it by the coverage test."""
 
 from src.app.finance_pod.requirements.ap import PHASES as AP_PHASES
+from src.app.finance_pod.requirements.ar import PHASES as AR_PHASES
 from src.app.finance_pod.requirements.model import Phase
 
-PHASES: tuple[Phase, ...] = AP_PHASES
+PHASES: tuple[Phase, ...] = AP_PHASES + AR_PHASES
