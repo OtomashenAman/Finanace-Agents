@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils"
 import { financeApi, type CaseDetail } from "../api"
 import { useCaseAction, useSendMessage, useSources, useTaskAction, useUpload } from "../hooks"
 
-const KINDS = ["invoice_copy", "quote", "compliance", "supporting", "other", "tax_form", "bank_letter"] as const
+const KINDS = ["invoice_copy", "quote", "compliance", "supporting", "other", "tax_form", "bank_letter", "vendor_statement"] as const
 
 function fail(error: unknown, fallback: string) {
   toast.error(errorMessage(error, fallback))
@@ -22,7 +22,13 @@ function fail(error: unknown, fallback: string) {
 export function DocumentsPanel({ c }: { c: CaseDetail }) {
   const upload = useUpload()
   const [kind, setKind] = useState<string>(
-    c.workflow === "ap_vendor_onboarding" ? "compliance" : c.workflow === "ap_invoice_match" ? "invoice_copy" : "quote",
+    c.workflow === "ap_vendor_onboarding"
+      ? "compliance"
+      : c.workflow === "ap_invoice_match"
+        ? "invoice_copy"
+        : c.workflow === "ap_month_close"
+          ? "vendor_statement"
+          : "quote",
   )
   const [file, setFile] = useState<File | null>(null)
   const submit = (e: FormEvent) => {
@@ -133,6 +139,7 @@ export function PostingsPanel({ c }: { c: CaseDetail }) {
               <span className="rounded-full bg-muted px-2 py-0.5 text-xs">{t.status.replace("_", " ")}</span>
             </div>
             {t.external_txn_id && <p className="text-xs text-muted-foreground">ERPNext: {t.external_txn_id}</p>}
+            {t.kind === "create_journal_entry" && <JournalLines doc={t.instructions.doc} />}
             <div className="mt-2 flex flex-wrap gap-2">
               {t.allowed_actions.post === null && (
                 <Button size="sm" disabled={act.isPending}
@@ -166,6 +173,38 @@ export function PostingsPanel({ c }: { c: CaseDetail }) {
         ))}
       </ul>
     </Card>
+  )
+}
+
+interface JournalRow {
+  account: string
+  debit_in_account_currency: string
+  credit_in_account_currency: string
+  cost_center?: string
+}
+
+/** The journal a close proposes, as it will be posted: date, then each account's side. */
+function JournalLines({ doc }: { doc: unknown }) {
+  const journal = doc as { posting_date?: string; accounts?: JournalRow[] } | undefined
+  if (!journal?.accounts) return null
+  return (
+    <div className="mt-2 overflow-x-auto">
+      <p className="text-xs text-muted-foreground">Posting date {journal.posting_date}</p>
+      <table className="mt-1 w-full text-xs">
+        <thead className="text-left text-muted-foreground">
+          <tr><th className="font-normal">Account</th><th className="text-right font-normal">Debit</th><th className="text-right font-normal">Credit</th></tr>
+        </thead>
+        <tbody>
+          {journal.accounts.map((r, i) => (
+            <tr key={i} className="tabular-nums">
+              <td>{r.account}{r.cost_center ? ` · ${r.cost_center}` : ""}</td>
+              <td className="text-right">{Number(r.debit_in_account_currency) ? r.debit_in_account_currency : ""}</td>
+              <td className="text-right">{Number(r.credit_in_account_currency) ? r.credit_in_account_currency : ""}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }
 

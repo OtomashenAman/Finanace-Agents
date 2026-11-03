@@ -116,6 +116,8 @@ class ArtifactKind(StrEnum):
     TAX_FORM = "tax_form"  # W-9 / W-8
     BANK_LETTER = "bank_letter"
     COMPLIANCE = "compliance"  # insurance or compliance papers
+    VENDOR_STATEMENT = "vendor_statement"
+    EVIDENCE = "evidence"  # a filed evidence pack (e.g. a month-end close)
 
 
 class ArtifactChannel(StrEnum):

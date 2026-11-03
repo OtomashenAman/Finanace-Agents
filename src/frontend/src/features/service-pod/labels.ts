@@ -174,6 +174,8 @@ export const ARTIFACT_KIND: Record<ArtifactKind, string> = {
   tax_form: "Tax form (W-9 / W-8)",
   bank_letter: "Bank letter",
   compliance: "Insurance / compliance",
+  vendor_statement: "Vendor statement",
+  evidence: "Evidence pack",
 }
 
 export const COLLECTION_LABEL: Record<Collection, string> = {
@@ -203,6 +205,9 @@ export const COLLECTION_LABEL: Record<Collection, string> = {
   purchase_orders: "Purchase orders",
   purchase_receipts: "Purchase receipts",
   bills: "Supplier invoices",
+  ledger_balances: "Ledger balances",
+  ledger_entries: "Payables ledger entries",
+  journal_entries: "Journal entries",
 }
 
 export function formatDateTime(value: string | null): string {

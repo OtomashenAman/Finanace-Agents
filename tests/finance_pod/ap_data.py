@@ -374,3 +374,69 @@ def ap3_payload(**changes: Any) -> dict[str, Any]:
         "bills": AP3_BILLS,
     }
     return ap_payload(**(base | changes))
+
+
+# --- AP-6: October 2026 closed on a snapshot of 3 November ---------------------------------
+SERVICE = "SVC-MAINT"
+ACCRUED = "Accrued Expenses - GIAD"
+CREDITORS = "Creditors - GIAD"
+SRBNB = "Stock Received But Not Billed - GIAD"
+AP6_ORDERS = [
+    _po("PO-BILLED", LC, "LC-PASTE", "20", "38"),  # received and billed (760 owed)
+    _po("PO-STOCK", LC, "LC-GLOVES", "50", "12"),  # received, not billed: in SRBNB (600)
+    _po("PO-SVC", GT, SERVICE, "1", "900"),  # a service done, not billed: to accrue
+]
+AP6_RECEIPTS = [
+    _receipt("PR-BILLED", "PO-BILLED", LC, "LC-PASTE", "20", "38"),
+    _receipt("PR-STOCK", "PO-STOCK", LC, "LC-GLOVES", "50", "12"),
+    _receipt("PR-SVC", "PO-SVC", GT, SERVICE, "1", "900"),
+]
+AP6_BILLS = [
+    _bill("BILL-BILLED", "LC-5001", LC, "LC-PASTE", "20", "38", "PO-BILLED", status="Unpaid"),
+    _bill("BILL-GT", "GT-777", GT, "LC-GLOVES", "3", "14", status="Unpaid"),  # 42, no PO
+]
+# The ledger: both invoices (802), less a 100 rebate journalled to LabChem's account
+AP6_LEDGER = {
+    "ledger_balances": [
+        {"account_id": CREDITORS, "kind": "payable", "as_of": "2026-11-03", "balance": "702"},
+        {"account_id": SRBNB, "kind": "received_not_billed", "as_of": "2026-11-03",
+         "balance": "600"},
+        {"account_id": ACCRUED, "kind": "accrued", "as_of": "2026-11-03", "balance": "0"},
+    ],
+    "ledger_entries": [
+        {"id": "GLE-1", "account_id": CREDITORS, "kind": "payable", "posting_date": "2026-10-10",
+         "amount": "760", "voucher_type": "Purchase Invoice", "voucher_id": "BILL-BILLED",
+         "party": LC},
+        {"id": "GLE-2", "account_id": CREDITORS, "kind": "payable", "posting_date": "2026-10-10",
+         "amount": "42", "voucher_type": "Purchase Invoice", "voucher_id": "BILL-GT",
+         "party": GT},
+        {"id": "GLE-3", "account_id": CREDITORS, "kind": "payable", "posting_date": "2026-10-20",
+         "amount": "-100", "voucher_type": "Journal Entry", "voucher_id": "JE-REBATE",
+         "party": LC},
+    ],
+    "journal_entries": [],
+}  # fmt: skip
+STATEMENT = (
+    "LabChem Supply Co\n"
+    "Statement of account, October 2026\n"
+    "Date        Reference   Amount\n"
+    "2026-10-10  LC-5001     760.00\n"
+    "2026-10-28  LC-5099      55.00\n"
+    "Closing balance         815.00\n"
+)
+
+
+def ap6_payload(**changes: Any) -> dict[str, Any]:
+    items = [
+        *AP_SNAPSHOT["items"],
+        {"code": SERVICE, "name": "Instrument maintenance", "group": "Services",
+         "stock_item": False, "expense_account_id": "Lab Equipment - GIAD"},
+    ]  # fmt: skip
+    base: dict[str, Any] = {
+        "items": items,
+        "purchase_orders": AP6_ORDERS,
+        "purchase_receipts": AP6_RECEIPTS,
+        "bills": AP6_BILLS,
+        **AP6_LEDGER,
+    }
+    return ap_payload(**(base | changes))

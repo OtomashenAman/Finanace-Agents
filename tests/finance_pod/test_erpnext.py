@@ -130,7 +130,8 @@ async def test_a_snapshot_holds_the_purchasing_data(
         "accounts": 2, "vendors": 2, "items": 2, "item_prices": 2, "vendor_contracts": 1,
         "cost_centres": 1, "labs": 1, "grants": 1, "budgets": 1, "budget_actuals": 1,
         "purchase_requests": 1, "supplier_quotations": 1, "purchase_orders": 1,
-        "purchase_receipts": 1, "bills": 1,
+        "purchase_receipts": 1, "bills": 1, "ledger_balances": 1, "ledger_entries": 0,
+        "journal_entries": 0,
     }  # fmt: skip
 
     rows = (await admin.get(f"/api/v1/pod/snapshots/{snap['id']}/rows?collection=vendors")).json()

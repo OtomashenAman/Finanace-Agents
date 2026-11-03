@@ -210,6 +210,27 @@ folder gets an `input_schema`, `run_model` and `analyze()` (see `agents/ap_invoi
     before the re-match.
   - A daily job raises a review task on any held invoice untouched for 7 days.
   - Measures: first-pass match rate, exception ageing, duplicates stopped.
+- Finance POD AP-6 (AP Month-End Close, `finance_pod/flows/ap_month_close`), GIA pages 13-14.
+  One case per entity and month (`selection {"period": "YYYY-MM"}`), opened on a snapshot taken
+  after the month ends. The snapshot carries the AP control-account balances (Creditors, Stock
+  Received But Not Billed, Accrued Expenses), the payables GL entries and the journal entries.
+  - 6.1.1: the close agent lists PO lines received and not billed by month end. Stock items are
+    already in SRBNB. Services and non-stock items get a proposed accrual (Dr their expense
+    coding, Cr Accrued Expenses, at month end) and its reversal on the 1st.
+  - 6.1.2: open supplier invoices vs the Creditors balance, and unbilled stock vs SRBNB. Postings
+    to the supplier account that aren't invoices or payments (e.g. a rebate journal) explain the
+    difference. It also lists invoices still held in matching. A daily job reruns it on the
+    newest snapshot and raises a finding when the result moves before sign-off.
+  - 6.1.3: vendor statements uploaded to the case (kind "Vendor statement") are read: vendor,
+    lines, closing balance. Gaps are not in the books, not on the statement, or a different
+    amount. Key vendors (open balance ≥ 500, a demo value) without a statement are listed.
+  - 6.2: the controller reviews, then signs off. The signer can't be the person who opened the
+    case. An unexplained difference needs a review comment. Sign-off files an evidence pack
+    (zip of step results, review tasks, the case's audit trail and a SHA-256 manifest) and
+    proposes the accrual and reversal journals. Only the controller posts them; the close
+    completes once a fresh snapshot verifies them. Past the close day (5th of next month, a demo
+    value) an unsigned close gets a finding.
+  - Measures: days to close, reconciling items, audit findings.
   - Every email is drafted by an agent and sent by a person holding the purpose's capacity.
     Postings are handled by the task kind's capacity. Thresholds are versioned policies
     (`PrqPolicy` / `VndPolicy`), **demo values until GIA's**; each case records the version it

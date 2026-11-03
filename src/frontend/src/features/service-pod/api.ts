@@ -29,6 +29,9 @@ export type Collection =
   | "purchase_orders"
   | "purchase_receipts"
   | "bills"
+  | "ledger_balances"
+  | "ledger_entries"
+  | "journal_entries"
 export type CaseStatus = "draft" | "approved" | "completed" | "cancelled"
 export type MessageStatus = "draft" | "sending" | "sent" | "send_failed" | "send_unknown" | "received"
 export type TaskStatus = "proposed" | "recorded_unverified" | "verified" | "cancelled"
@@ -43,6 +46,8 @@ export type ArtifactKind =
   | "tax_form"
   | "bank_letter"
   | "compliance"
+  | "vendor_statement"
+  | "evidence"
 
 export interface EntityRef {
   id: string
@@ -334,7 +339,7 @@ export interface PostingTask {
   case_id: string
   case_reference: string
   workflow: WorkflowKey
-  kind: "receive_payment" | "journal_entry" | "create_supplier" | "create_purchase_order"
+  kind: "receive_payment" | "journal_entry" | "create_supplier" | "create_purchase_order" | "create_purchase_receipt" | "create_journal_entry"
   reference: string
   status: TaskStatus
   version: number

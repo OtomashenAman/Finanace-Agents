@@ -11,6 +11,13 @@ import { errorMessage } from "@/lib/api"
 
 import { useFinanceMe, useFinanceWorkflows, useIntake, useOpenCase, useSourceCatalogue, useSources } from "../hooks"
 
+function lastMonth(): string {
+  const d = new Date()
+  d.setDate(1)
+  d.setMonth(d.getMonth() - 1)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
+}
+
 /** Open a case on the newest snapshot that supplies what the workflow needs: a purchase
  *  request (new, or one already raised in ERPNext) or a vendor onboarding. */
 export function NewCase() {
@@ -32,6 +39,7 @@ export function NewCase() {
   const [erpRequest, setErpRequest] = useState("")
   const [vendorName, setVendorName] = useState("")
   const [vendorEmail, setVendorEmail] = useState("")
+  const [period, setPeriod] = useState(lastMonth)
   const [showing, setShowing] = useState(false)
   if (choices.length === 0) return null
 
@@ -43,7 +51,9 @@ export function NewCase() {
         ? { vendor_name: vendorName, contact_email: vendorEmail }
         : chosen === "ap_invoice_match"
           ? { bill_id: bill }
-          : erpRequest
+          : chosen === "ap_month_close"
+            ? { period }
+            : erpRequest
             ? { erp_request_id: erpRequest }
             : {}
     open.mutate(
@@ -56,7 +66,9 @@ export function NewCase() {
             ? `Onboard ${vendorName}`
             : chosen === "ap_invoice_match"
               ? `Invoice ${catalogue.data?.incoming_invoices.find((b) => b.id === bill)?.name ?? bill}`
-              : "Purchase request"),
+              : chosen === "ap_month_close"
+                ? `AP close ${period}`
+                : "Purchase request"),
         selection,
       },
       {
@@ -81,7 +93,7 @@ export function NewCase() {
       }
     >
       {!showing ? (
-        <p className="text-sm text-muted-foreground">Raise a purchase request, or onboard a vendor.</p>
+        <p className="text-sm text-muted-foreground">Raise a purchase request, onboard a vendor, match an invoice or close a month.</p>
       ) : (
         <form onSubmit={submit} className="space-y-3">
           <div className="grid gap-2 sm:grid-cols-2">
@@ -133,6 +145,13 @@ export function NewCase() {
                 Or open a case for every new invoice
               </Button>
             </div>
+          )}
+          {chosen === "ap_month_close" && (
+            <label className="block space-y-1 text-sm">
+              <span className="font-medium">Month to close</span>
+              <Input type="month" value={period} onChange={(e) => setPeriod(e.target.value)} required className="max-w-48" />
+              <span className="block text-xs text-muted-foreground">The source data must be taken after the month ends.</span>
+            </label>
           )}
           {chosen === "ap_vendor_onboarding" && (
             <div className="grid gap-2 sm:grid-cols-2">

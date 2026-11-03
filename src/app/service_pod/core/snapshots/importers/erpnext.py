@@ -33,7 +33,10 @@ from src.app.service_pod.core.snapshots.contract import (
     Grant,
     Item,
     ItemPrice,
+    JournalEntry,
     Lab,
+    LedgerBalance,
+    LedgerEntry,
     OrderLine,
     Provenance,
     PurchaseOrder,
@@ -423,6 +426,64 @@ def _bills(docs: list[dict[str, Any]]) -> list[Bill]:
     ]
 
 
+def _ledger_kind(account: dict[str, Any]) -> str | None:
+    if account.get("account_type") == "Payable" and account.get("root_type") == "Liability":
+        return "payable"
+    if account.get("account_type") == "Stock Received But Not Billed":
+        return "received_not_billed"
+    if str(account.get("account_name", "")).lower().startswith("accrued"):
+        return "accrued"
+    return None
+
+
+async def _ledgers(
+    api: Api, company: str, accounts: list[dict[str, Any]], as_of: date, since: date
+) -> tuple[list[LedgerBalance], list[LedgerEntry], list[JournalEntry]]:
+    """The AP control accounts (payable, received-not-billed, accrued): their balances at
+    as_of, their postings since `since`, and the journal entries of the window."""
+    kinds = {a["name"]: k for a in accounts if (k := _ledger_kind(a))}
+    entries = (
+        await api.rows(
+            "GL Entry",
+            ["name", "account", "posting_date", "debit", "credit", "voucher_type", "voucher_no",
+             "party"],
+            [["company", "=", company], ["is_cancelled", "=", 0],
+             ["account", "in", sorted(kinds)], ["posting_date", "<=", as_of.isoformat()]],
+        )
+        if kinds
+        else []
+    )  # fmt: skip
+    balances = {name: Decimal(0) for name in kinds}
+    window: list[LedgerEntry] = []
+    for e in entries:
+        amount = money(e.get("credit")) - money(e.get("debit"))
+        balances[e["account"]] += amount
+        posted = _date(e["posting_date"])
+        if posted and posted >= since:
+            window.append(
+                LedgerEntry(id=e["name"], account_id=e["account"], kind=kinds[e["account"]],
+                            posting_date=posted, amount=amount,
+                            voucher_type=e.get("voucher_type") or "",
+                            voucher_id=e.get("voucher_no") or "", party=e.get("party") or None)
+            )  # fmt: skip
+    journals = await api.rows(
+        "Journal Entry",
+        ["name", "posting_date", "docstatus", "total_debit", "user_remark", "finance_acc_ref"],
+        [["company", "=", company], ["docstatus", "<", 2],
+         ["posting_date", ">=", since.isoformat()]],
+    )  # fmt: skip
+    return (
+        [LedgerBalance(account_id=n, kind=kinds[n], as_of=as_of, balance=b)
+         for n, b in balances.items()],
+        window,
+        [JournalEntry(id=j["name"], posting_date=_date(j["posting_date"]),
+                      doc_status=DOC_STATUS[j["docstatus"]], total=money(j.get("total_debit")),
+                      remark=_text(j.get("user_remark")),
+                      reference=j.get("finance_acc_ref") or None)
+         for j in journals],
+    )  # fmt: skip
+
+
 def _drop_outside_links(docs: dict[str, list[dict[str, Any]]]) -> None:
     """Links to documents this snapshot doesn't hold (older than the window) are removed."""
     names = {dt: {d["name"] for d in rows} for dt, rows in docs.items()}
@@ -471,6 +532,9 @@ async def from_erpnext(
     }  # fmt: skip
     _drop_outside_links(docs)
     budgets, actuals = await _budgets(api, company)
+    ledger_balances, ledger_entries, journal_entries = await _ledgers(
+        api, company, accounts, as_of, since
+    )
     host = urlsplit(api.creds.base_url).hostname or "erpnext"
     try:
         doc = SnapshotDocument(
@@ -529,6 +593,9 @@ async def from_erpnext(
             purchase_orders=_orders(docs["Purchase Order"]),
             purchase_receipts=_receipts(docs["Purchase Receipt"]),
             bills=_bills(docs["Purchase Invoice"]),
+            ledger_balances=ledger_balances,
+            ledger_entries=ledger_entries,
+            journal_entries=journal_entries,
         )
     except ValidationError as exc:
         raise SnapshotInvalidError(

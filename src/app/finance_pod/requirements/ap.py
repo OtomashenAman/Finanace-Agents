@@ -181,6 +181,7 @@ AP6 = Phase(
     process="Procure-to-Pay (Accounts Payable)",
     title="Month-End Close",
     pages="13-14",
+    workflows=("ap_month_close",),
     activities=(
         L3("6.1", "Prepare close", "Close agent", "ERP", (
             L4("6.1.1", "Accruals", AGENT, (

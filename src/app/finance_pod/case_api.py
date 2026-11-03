@@ -44,7 +44,8 @@ _ERRORS: dict[int | str, dict[str, Any]] = {
 FINANCE_DOCUMENTS = (
     ArtifactKind.INVOICE_COPY,
     ArtifactKind.QUOTE, ArtifactKind.TAX_FORM, ArtifactKind.BANK_LETTER,
-    ArtifactKind.COMPLIANCE, ArtifactKind.SUPPORTING, ArtifactKind.OTHER,
+    ArtifactKind.COMPLIANCE, ArtifactKind.VENDOR_STATEMENT, ArtifactKind.SUPPORTING,
+    ArtifactKind.OTHER,
 )  # fmt: skip
 
 

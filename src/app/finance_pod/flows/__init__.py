@@ -9,6 +9,7 @@ it here and name it in the phase's `workflows` in requirements/.
 
 from src.app.finance_pod.flows import (  # noqa: F401
     ap_invoice_match,
+    ap_month_close,
     ap_purchase_request,
     ap_vendor_onboarding,
 )

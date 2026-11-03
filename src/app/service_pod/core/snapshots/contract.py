@@ -48,6 +48,9 @@ class Collection(StrEnum):
     PURCHASE_ORDERS = "purchase_orders"
     PURCHASE_RECEIPTS = "purchase_receipts"
     BILLS = "bills"
+    LEDGER_BALANCES = "ledger_balances"
+    LEDGER_ENTRIES = "ledger_entries"
+    JOURNAL_ENTRIES = "journal_entries"
 
 
 # Added for the Finance POD: left out of a snapshot's stored payload when absent, so the
@@ -59,6 +62,7 @@ AP_COLLECTIONS = frozenset(
         Collection.GRANTS, Collection.BUDGETS, Collection.BUDGET_ACTUALS,
         Collection.PURCHASE_REQUESTS, Collection.SUPPLIER_QUOTATIONS,
         Collection.PURCHASE_ORDERS, Collection.PURCHASE_RECEIPTS, Collection.BILLS,
+        Collection.LEDGER_BALANCES, Collection.LEDGER_ENTRIES, Collection.JOURNAL_ENTRIES,
     }
 )  # fmt: skip
 
@@ -423,6 +427,40 @@ class Bill(_Row):
     return_against: Id | None = None
 
 
+LedgerKind = Literal["payable", "received_not_billed", "accrued"]
+
+
+class LedgerBalance(_Row):
+    """A control account's balance at the snapshot's date (credit minus debit: what's owed)."""
+
+    account_id: Id
+    kind: LedgerKind
+    as_of: date
+    balance: Money
+
+
+class LedgerEntry(_Row):
+    """One posting to a control account in the snapshot's window."""
+
+    id: Id
+    account_id: Id
+    kind: LedgerKind
+    posting_date: date
+    amount: Money  # credit minus debit
+    voucher_type: Name
+    voucher_id: Id
+    party: Name | None = None
+
+
+class JournalEntry(_Row):
+    id: Id
+    posting_date: date
+    doc_status: DocStatus
+    total: Money
+    remark: Text | None = None
+    reference: Id | None = None  # the app's reference on what it posted
+
+
 def _unique(rows: Sequence[_Row] | None, key: str, what: str) -> set[str]:
     seen: set[str] = set()
     for row in rows or []:
@@ -473,6 +511,9 @@ class SnapshotDocument(BaseModel):
     purchase_orders: list[PurchaseOrder] | None = None
     purchase_receipts: list[PurchaseReceipt] | None = None
     bills: list[Bill] | None = None
+    ledger_balances: list[LedgerBalance] | None = None
+    ledger_entries: list[LedgerEntry] | None = None
+    journal_entries: list[JournalEntry] | None = None
 
     @property
     def coverage(self) -> list[Collection]:

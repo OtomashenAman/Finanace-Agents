@@ -16,7 +16,9 @@ so this builds what the AP agents need, every figure fictional and every email @
 - AP-3: purchase orders and receipts, and incoming supplier invoices (drafts) that match
   cleanly, carry a price variance, bill more than was received, have no receipt, duplicate a
   posted one, or have no PO at all.
-- AP-6: goods received and not invoiced (accruals), posted invoices and a payment.
+- AP-6: goods received and not invoiced (in Stock Received But Not Billed), a service
+  received and not invoiced (to accrue), a rebate journalled to a supplier's account (the AP
+  subledger and ledger differ), posted invoices and a payment.
 
 Masters are get-or-create, so reruns are safe; transactions are created once (a Note named
 "finance-acc-demo-seed" marks it). Talks to ERPNext's REST API only.
@@ -258,7 +260,7 @@ def masters(erp: Erp) -> dict[str, str]:
     )
     # Which seed step made a transaction, so a rerun after a failure doesn't repeat it
     for dt in ("Material Request", "Supplier Quotation", "Purchase Order", "Purchase Receipt",
-               "Purchase Invoice", "Payment Entry", "Note"):  # fmt: skip
+               "Purchase Invoice", "Payment Entry", "Journal Entry", "Note"):  # fmt: skip
         custom_field(erp, dt, "seed_ref", "Demo seed reference", "Data", "naming_series")
     # Our reference on what the app posts, so a retried post finds the first one
     for dt in ("Supplier", "Purchase Order", "Purchase Receipt", "Purchase Invoice",
@@ -517,7 +519,7 @@ def pay(erp: Erp, ref: str, pi: str, date: str) -> None:
 
 
 def transactions(erp: Erp, grants: dict[str, str]) -> None:
-    if erp.find("Note", {"title": MARKER}) and seeded(erp, "Purchase Invoice", "PI-BAGS"):
+    if erp.find("Note", {"title": MARKER}) and seeded(erp, "Journal Entry", "JE-REBATE"):
         print("Transactions already seeded (Note finance-acc-demo-seed): skipped.")
         return
     print("Transactions: purchase requests, quotations, POs, receipts, invoices, payment...")
@@ -616,6 +618,28 @@ def transactions(erp: Erp, grants: dict[str, str]) -> None:
     )  # fmt: skip
     pr_bags = receive(erp, "PR-BAGS", po_bags, "2026-10-19")
     invoice(erp, "PI-BAGS", ("Purchase Receipt", pr_bags), "LC-INV-4611", "2026-10-21")  # clean
+
+    # AP-6: a service delivered and confirmed, not billed yet (no GL until billed: an accrual)
+    po_maint = order(
+        erp, "PO-MAINT", "CalibrateRight Services", "2026-10-20",
+        [line("SV-MAINT", 1, 1800, "Facilities", "Antwerp Lab", None, "2026-10-28")],
+    )  # fmt: skip
+    receive(erp, "PR-MAINT", po_maint, "2026-10-28")
+    # ...and a rebate journalled straight to the supplier's account: the AP subledger (bills)
+    # and the Creditors ledger now differ by it
+    if not seeded(erp, "Journal Entry", "JE-REBATE"):
+        je = erp.insert(
+            {"doctype": "Journal Entry", "voucher_type": "Journal Entry", "company": COMPANY,
+             "posting_date": "2026-10-30", "seed_ref": "JE-REBATE",
+             "user_remark": "Volume rebate agreed with LabChem by phone",
+             "accounts": [
+                 {"account": acct("Creditors"), "party_type": "Supplier",
+                  "party": "LabChem Supply Co", "debit_in_account_currency": 100},
+                 {"account": acct("Miscellaneous Expenses"), "cost_center": cc("Facilities"),
+                  "credit_in_account_currency": 100},
+             ]}
+        )  # fmt: skip
+        erp.submit("Journal Entry", je["name"])
 
     order(  # open: nothing received or billed yet
         erp, "PO-PAPER", "Summit Office Supplies", "2026-10-25",

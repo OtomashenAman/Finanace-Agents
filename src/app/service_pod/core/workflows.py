@@ -31,6 +31,7 @@ class WorkflowKey(StrEnum):
     AP_PURCHASE_REQUEST = "ap_purchase_request"
     AP_VENDOR_ONBOARDING = "ap_vendor_onboarding"
     AP_INVOICE_MATCH = "ap_invoice_match"
+    AP_MONTH_CLOSE = "ap_month_close"
 
 
 @dataclass(frozen=True)

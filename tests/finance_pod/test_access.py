@@ -119,6 +119,7 @@ async def test_the_two_pods_never_serve_each_others_cases(
         "ap_purchase_request",
         "ap_vendor_onboarding",
         "ap_invoice_match",
+        "ap_month_close",
     ]
     service_workflows = [w["key"] for w in (await admin.get("/api/v1/pod/workflows")).json()]
     assert not set(service_workflows) & set(finance_workflows)
