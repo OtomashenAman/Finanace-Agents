@@ -133,6 +133,7 @@ AR3 = Phase(
         MeasureReq("AR3.M1", "Billing accuracy"),
         MeasureReq("AR3.M2", "Days to invoice"),
     ),
+    workflows=("ar_billing",),
 )  # fmt: skip
 
 AR5 = Phase(

@@ -34,6 +34,7 @@ class WorkflowKey(StrEnum):
     AP_MONTH_CLOSE = "ap_month_close"
     # Finance POD: Order-to-Cash
     AR_CLIENT_ACCOUNT = "ar_client_account"
+    AR_BILLING = "ar_billing"
 
 
 @dataclass(frozen=True)

@@ -95,6 +95,8 @@ class Catalogue(BaseModel):
     grants: list[CatalogueEntry]  # detail: period and restriction
     purchase_requests: list[CatalogueEntry]  # the ERP's own, a request can start from
     incoming_invoices: list[CatalogueEntry]  # ERPNext drafts a matching case can start from
+    # Lab submissions whose report is issued and aren't billed (a billing case starts from one)
+    billable_submissions: list[CatalogueEntry] = []
 
 
 @router.get("/cases/{case_id}/sources", response_model=list[SnapshotSummary], responses=_ERRORS)
@@ -139,6 +141,19 @@ async def source_catalogue(
             )
         )
         found.incoming_invoices = [b for b in found.incoming_invoices if b.id not in taken]
+    if workflow == WorkflowKey.AR_BILLING:
+        from src.app.finance_pod.flows.ar_billing.service import live_cases, to_bill
+
+        doc = snapshots.document(await snapshots.load_snapshot(session, snapshot_id))
+        names = {c.id: c.name for c in doc.clients or []}
+        found.billable_submissions = [
+            CatalogueEntry(
+                id=s.id,
+                name=names.get(s.client_id, s.client_id),
+                detail=f"report issued {s.report_issued_on}, {doc.currency} {s.total:,.2f}",
+            )
+            for s in to_bill(doc, await live_cases(session))
+        ]
     return found
 
 

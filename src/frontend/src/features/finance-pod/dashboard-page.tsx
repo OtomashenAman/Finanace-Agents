@@ -8,6 +8,7 @@ import { formatMeasure, KIND_META } from "./labels"
 import { ErpSnapshots } from "./components/erp-snapshots"
 import { NewCase } from "./components/new-case"
 import { SanctionsCard } from "./components/sanctions-card"
+import { StatementsCard } from "./components/statements-card"
 import { FinancePage } from "./components/finance-page"
 import { cn } from "@/lib/utils"
 
@@ -129,6 +130,7 @@ export function FinanceDashboardPage() {
           </Card>
 
           {me?.is_admin && <ErpSnapshots />}
+          {(me?.is_admin || me?.capacities.some((c) => c.capacity === "billing_analyst")) && <StatementsCard />}
           {me?.is_admin && <SanctionsCard />}
 
           <MyAccess />

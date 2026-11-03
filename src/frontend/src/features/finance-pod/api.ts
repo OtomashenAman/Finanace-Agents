@@ -211,6 +211,7 @@ export interface Catalogue {
   grants: CatalogueEntry[]
   purchase_requests: CatalogueEntry[]
   incoming_invoices: CatalogueEntry[]
+  billable_submissions: CatalogueEntry[]
 }
 
 export interface SanctionsStatus {
@@ -277,6 +278,15 @@ export const financeApi = {
       method: "POST",
       json: { snapshot_id: snapshotId },
     }),
+  billingIntake: (snapshotId: string) =>
+    apiRequest<{ opened: string[]; already: number }>(`${base}/arb/intake`, {
+      method: "POST",
+      json: { snapshot_id: snapshotId },
+    }),
+  draftStatements: (month: string) =>
+    apiRequest<StatementRun>(`${base}/arb/statements`, { method: "POST", json: { month } }),
+  sendStatements: (month: string) =>
+    apiRequest<StatementRun>(`${base}/arb/statements/send`, { method: "POST", json: { month } }),
   sanctions: () => apiRequest<SanctionsStatus>(`${base}/sanctions`),
   refreshSanctions: () => apiRequest<SanctionsStatus>(`${base}/sanctions/refresh`, { method: "POST" }),
   catalog: () => apiRequest<CapacityInfo[]>(`${base}/capacities/catalog`),
@@ -299,6 +309,12 @@ export const portalApi = {
       { method: "POST", form, skipAuthRefresh: true },
     )
   },
+}
+
+export interface StatementRun {
+  drafted: string[]
+  sent: string[]
+  skipped: string[]
 }
 
 export interface ClientApplication {

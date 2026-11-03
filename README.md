@@ -253,6 +253,26 @@ folder gets an `input_schema`, `run_model` and `analyze()` (see `agents/ap_invoi
     is long overdue: AR1.R3).
   - Measures: account set-up time, data errors (applications sent back with gaps). Policy
     `ArcPolicy` (risk bands, limits, terms, review triggers): demo values until GIA's.
+- Finance POD AR-3 (Billing & Invoicing, `finance_pod/flows/ar_billing`), GIA pages 19-20.
+  One case per lab submission whose report is issued (GIA's lab system isn't connected: the
+  ERPNext sales order's "Report issued on" date is the event). A billing analyst picks one in
+  New, or takes in every billable submission at once (AR3.R1; one still in the lab isn't).
+  - 3.1: the services actually performed (lines added in the lab included, billed ones left
+    out) and the client's terms. 3.2.1: each line priced by the client's own price, else the
+    fee schedule with the most specific pricing rule (contract rate or discount); tax by the
+    client's tax category (domestic, export). 3.2.2: the invoice against the fee estimate
+    (above it, or below it without a discount to explain it, is flagged) and unusual items
+    (added in the lab, no published fee, large quantities, a client on hold or without email).
+  - 3.3.1: a billing analyst reviews what's flagged and may override a rate on this invoice
+    only (AR3.G1: the schedule never changes); nothing flagged, nothing to review.
+  - The release posts the sales invoice to ERPNext (linked to the submission's lines, at the
+    final rates, with the tax template) and a fresh snapshot verifies it; 3.5.1.a drafts its
+    email for a person to send. 3.5.1.b: the month's statements (each client's open items as
+    the newest books hold them) are drafted and sent in one batch from the Finance POD
+    dashboard (Monthly statements, billing analysts); the case completes once its invoice is
+    on a sent statement.
+  - Measures: billing accuracy (invoices without a price override), days to invoice (report
+    issued to invoice in the ERP). Policy `ArbPolicy`: demo values until GIA's.
   - Every email is drafted by an agent and sent by a person holding the purpose's capacity.
     Postings are handled by the task kind's capacity. Thresholds are versioned policies
     (`PrqPolicy` / `VndPolicy`), **demo values until GIA's**; each case records the version it

@@ -9,7 +9,7 @@ import { Card } from "@/features/service-pod/components/bits"
 import { selectClass } from "@/features/service-pod/ui"
 import { errorMessage } from "@/lib/api"
 
-import { useFinanceMe, useFinanceWorkflows, useIntake, useOpenCase, useSourceCatalogue, useSources } from "../hooks"
+import { useBillingIntake, useFinanceMe, useFinanceWorkflows, useIntake, useOpenCase, useSourceCatalogue, useSources } from "../hooks"
 
 function lastMonth(): string {
   const d = new Date()
@@ -35,6 +35,8 @@ export function NewCase() {
   const party = chosen === "ap_vendor_onboarding" || chosen === "ar_client_account"
   const catalogue = useSourceCatalogue(party ? null : snapshot || null, chosen)
   const intake = useIntake()
+  const billingIntake = useBillingIntake()
+  const [submission, setSubmission] = useState("")
   const [bill, setBill] = useState("")
   const [title, setTitle] = useState("")
   const [erpRequest, setErpRequest] = useState("")
@@ -52,6 +54,8 @@ export function NewCase() {
         ? { vendor_name: vendorName, contact_email: vendorEmail }
         : chosen === "ar_client_account"
           ? { client_name: vendorName, contact_email: vendorEmail }
+          : chosen === "ar_billing"
+            ? { submission_id: submission }
           : chosen === "ap_invoice_match"
           ? { bill_id: bill }
           : chosen === "ap_month_close"
@@ -69,6 +73,8 @@ export function NewCase() {
             ? `Onboard ${vendorName}`
             : chosen === "ar_client_account"
               ? `Open an account for ${vendorName}`
+              : chosen === "ar_billing"
+                ? `Bill ${catalogue.data?.billable_submissions.find((b) => b.id === submission)?.name ?? ""} · ${submission}`
               : chosen === "ap_invoice_match"
               ? `Invoice ${catalogue.data?.incoming_invoices.find((b) => b.id === bill)?.name ?? bill}`
               : chosen === "ap_month_close"
@@ -148,6 +154,25 @@ export function NewCase() {
                   onError: (error) => toast.error(errorMessage(error, "Couldn't take the invoices in")),
                 })}>
                 Or open a case for every new invoice
+              </Button>
+            </div>
+          )}
+          {chosen === "ar_billing" && (
+            <div className="space-y-2">
+              <select aria-label="Lab submission" className={selectClass} value={submission} onChange={(e) => setSubmission(e.target.value)} required>
+                <option value="">A submission whose report is issued…</option>
+                {catalogue.data?.billable_submissions.map((b) => (
+                  <option key={b.id} value={b.id}>{b.id} · {b.name} · {b.detail}</option>
+                ))}
+              </select>
+              <Button type="button" size="sm" variant="outline" disabled={!snapshot || billingIntake.isPending}
+                onClick={() => billingIntake.mutate(snapshot, {
+                  onSuccess: (r) => toast.success(
+                    r.opened.length ? `Opened ${r.opened.join(", ")}` : "Every billable submission already has a case",
+                  ),
+                  onError: (error) => toast.error(errorMessage(error, "Couldn't take the submissions in")),
+                })}>
+                Or open a case for every billable submission
               </Button>
             </div>
           )}

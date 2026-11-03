@@ -122,3 +122,15 @@ export function useRefreshSanctions() {
 export function useIntake() {
   return useMutation({ mutationFn: financeApi.intake, meta: { invalidates } })
 }
+
+export function useBillingIntake() {
+  return useMutation({ mutationFn: financeApi.billingIntake, meta: { invalidates } })
+}
+
+export function useDraftStatements() {
+  return useMutation({ mutationFn: financeApi.draftStatements, meta: { invalidates } })
+}
+
+export function useSendStatements() {
+  return useMutation({ mutationFn: financeApi.sendStatements, meta: { invalidates } })
+}

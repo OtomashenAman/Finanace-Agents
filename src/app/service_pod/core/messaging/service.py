@@ -224,12 +224,13 @@ def _require_open(case: PodCase) -> None:
 
 
 def _source_contacts(snapshot: PodSnapshot, case: PodCase) -> set[str]:
-    """The case customer's email as the source states it."""
+    """The case customer's email as the source states it (an ERP's clients count too)."""
     selected = case.selection.get("customer_id")
+    doc = snapshots.document(snapshot)
+    people = [(c.id, c.email) for c in doc.customers or []]
+    people += [(c.id, c.email) for c in doc.clients or []]
     return {
-        c.email.lower()
-        for c in snapshots.document(snapshot).customers or []
-        if c.email and (selected is None or c.id == selected)
+        email.lower() for cid, email in people if email and (selected is None or cid == selected)
     }
 
 
