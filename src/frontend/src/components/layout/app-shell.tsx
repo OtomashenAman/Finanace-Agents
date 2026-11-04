@@ -7,8 +7,10 @@ import {
   LayoutDashboard,
   LayoutGrid,
   ListTodo,
+  Workflow,
   Menu,
   Settings,
+  ShoppingCart,
   X,
   type LucideIcon,
 } from "lucide-react"
@@ -28,6 +30,8 @@ interface NavItem {
 const NAV: NavItem[] = [
   { label: "Overview", icon: LayoutDashboard, to: "/overview" },
   { label: "Agent Catalog", icon: LayoutGrid, to: "/catalog" },
+  { label: "Service POD", icon: Workflow, to: "/pod", adminOnly: true },
+  { label: "Finance POD", icon: ShoppingCart, to: "/finance-pod", adminOnly: true },
   { label: "My Worklist", icon: ListTodo, to: "/worklist" },
   { label: "Approvals", icon: CircleCheck, to: "/approvals" },
   { label: "Audit Trail", icon: History, to: "/audit" },
@@ -38,8 +42,18 @@ const NAV: NavItem[] = [
 function Brand() {
   return (
     <div>
-      <p className="text-xl font-bold tracking-wide text-brand-navy-muted">◈ FINANCE AI</p>
-      <p className="mt-3 text-[15px] text-brand-ice">Command Center</p>
+      <div className="flex items-center gap-2">
+        <span className="text-xl font-extrabold tracking-wider text-sky-400">◈</span>
+        <span className="text-lg font-bold tracking-wider text-white">FINANCE AI</span>
+      </div>
+      <p className="mt-0.5 text-xs font-medium tracking-wide text-brand-ice/80">Autonomous Command Center</p>
+      <div className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-950/40 px-2.5 py-0.5 text-[11px] font-medium text-emerald-300">
+        <span className="relative flex size-2">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+          <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
+        </span>
+        5 Workflows Active
+      </div>
     </div>
   )
 }
@@ -49,9 +63,9 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
   const items = NAV.filter((item) => !item.adminOnly || isAdmin(user))
   const worklist = useWorklist()
   const todo = worklist.data?.action.length ?? 0
-  const base = "flex items-center gap-3 rounded-lg px-4 py-3 text-[15px] transition-colors"
+  const base = "relative flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150"
   return (
-    <nav aria-label="Main" className="space-y-1.5">
+    <nav aria-label="Main" className="space-y-0.5">
       {items.map(({ label, icon: Icon, to }) =>
         to ? (
           <NavLink
@@ -62,8 +76,8 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
               cn(
                 base,
                 isActive
-                  ? "bg-white/10 font-semibold text-white"
-                  : "text-brand-ice/80 hover:bg-white/5 hover:text-white",
+                  ? "bg-white/12 font-semibold text-white shadow-2xs before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-1 before:rounded-r-full before:bg-sky-400"
+                  : "text-brand-ice/75 hover:bg-white/6 hover:text-white hover:translate-x-0.5",
               )
             }
           >
@@ -71,7 +85,7 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
             {label}
             {to === "/worklist" && todo > 0 && (
               <span
-                className="ml-auto rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-brand-navy"
+                className="ml-auto rounded-full bg-white px-2 py-0.2 text-[11px] font-semibold text-brand-navy"
                 aria-label={`${todo} item${todo === 1 ? "" : "s"} need you`}
               >
                 {todo}
@@ -94,6 +108,36 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
   )
 }
 
+function UserDock() {
+  const { data: user } = useCurrentUser()
+  const name = user?.full_name ?? "Finance Admin"
+  const initials = name
+    .split(" ")
+    .map((w) => w[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase()
+
+  return (
+    <div className="mt-auto border-t border-white/10 pt-2.5">
+      <div className="flex items-center gap-2.5 rounded-lg bg-white/5 p-2 text-xs">
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-gradient-to-tr from-sky-500 to-indigo-600 font-bold text-white shadow-2xs">
+          {initials || "FA"}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-semibold text-white">{name}</p>
+          <p className="truncate text-[11px] text-brand-ice/70">
+            {user?.role === "finance_admin" ? "Finance Admin" : "User"} · Demo
+          </p>
+        </div>
+      </div>
+      <p className="mt-1.5 text-center text-[10px] tracking-wider text-brand-ice/50 uppercase">
+        Read-Only QuickBooks Safe
+      </p>
+    </div>
+  )
+}
+
 const FOOTER = "DEMO TENANT | v1.0"
 
 /** Signed-in layout: sidebar + routed page. Pages render their own header via <AppPage>. */
@@ -103,14 +147,14 @@ export function AppShell() {
   return (
     <div className="min-h-svh bg-brand-page md:pl-[234px]">
       {/* Desktop sidebar */}
-      <aside className="fixed inset-y-0 left-0 hidden w-[234px] flex-col bg-brand-navy px-3.5 pt-9 pb-6 md:flex">
-        <div className="px-4">
+      <aside className="fixed inset-y-0 left-0 hidden w-[234px] flex-col bg-brand-navy px-3 pt-5 pb-3 md:flex">
+        <div className="px-2">
           <Brand />
         </div>
-        <div className="mt-10 flex-1 overflow-y-auto">
+        <div className="mt-4 flex-1 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <Nav />
         </div>
-        <p className="px-4 text-[11px] tracking-wide text-brand-ice/60">{FOOTER}</p>
+        <UserDock />
       </aside>
 
       {/* Mobile top bar + slide-down menu */}

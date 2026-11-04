@@ -19,7 +19,7 @@ from tests.agent_catalog.test_runs_api import assign
 from tests.conftest import ClientFactory, FakeLLM, MakeUser
 from tests.data_sources.test_api import SOURCES
 
-SAMPLE = Path("docs/sample-uploads/all-agents.xlsx")
+SAMPLE = Path("tests/fixtures/all-agents.xlsx")  # copy of docs/sample-uploads/all-agents.xlsx
 SAMPLE_XLSX = SAMPLE.read_bytes()
 
 

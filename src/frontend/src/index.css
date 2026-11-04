@@ -95,12 +95,49 @@
   --color-brand-navy-faint: var(--brand-navy-faint);
   --color-brand-ice: var(--brand-ice);
   --color-brand-page: var(--brand-page);
+  --color-ai: var(--ai);
+  --color-ai-soft: var(--ai-soft);
+  --color-ai-border: var(--ai-border);
+  --color-ai-foreground: var(--ai-foreground);
   --color-viz-ok: var(--viz-ok);
   --color-viz-failed: var(--viz-failed);
 
   --radius-sm: calc(var(--radius) - 2px);
   --radius-md: var(--radius);
   --radius-lg: calc(var(--radius) + 2px);
+}
+
+/* AI accent: the same everywhere it appears (only AI-produced things wear it) */
+:root {
+  --ai: #6d4ae8;
+  --ai-soft: #f4f1ff;
+  --ai-border: #dcd2fc;
+  --ai-foreground: #4b2fb8;
+}
+
+/* Service POD: a finance-AI look scoped to /pod (the agents and the rest keep theirs) */
+.pod-theme {
+  --background: #f3f6fb;
+  --card: #ffffff;
+  --border: #e2e8f2;
+  --muted: #f1f4f9;
+  --secondary: #eef2f8;
+  --muted-foreground: #5d6b80;
+  --brand-navy: #0f2142;
+  min-height: 100vh;
+  background:
+    radial-gradient(1200px 380px at 85% -120px, rgb(109 74 232 / 0.07), transparent 70%),
+    linear-gradient(180deg, #edf2fa 0, var(--background) 360px);
+  /* figures line up in every table and tile */
+  font-variant-numeric: tabular-nums;
+}
+.pod-theme > header {
+  background: rgb(255 255 255 / 0.82);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border);
+}
+.pod-theme > p {
+  background: transparent;
 }
 
 @layer base {

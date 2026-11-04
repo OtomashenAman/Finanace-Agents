@@ -15,6 +15,12 @@ wheels/
 # Tooling caches (pytest, ruff, mypy, coverage) - all configured in pyproject.toml
 .cache/
 
+# Client requirement documents (kept locally, not in the repo)
+/*.pdf
+
+# Documentation and sample uploads stay local (tests use their own fixtures)
+/docs/
+
 # Local data
 uploads/
 logs/
@@ -26,3 +32,6 @@ logs/
 !.vscode/settings.json
 .idea/
 .DS_Store
+
+# Vercel CLI (vercel link / vercel dev)
+.vercel

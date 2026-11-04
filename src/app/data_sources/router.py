@@ -240,10 +240,15 @@ async def rename_source(
     responses=_ERRORS,
 )
 async def delete_source(
-    source_id: uuid.UUID, session: SessionDep, user: CurrentUser, ctx: RequestContextDep
+    source_id: uuid.UUID,
+    session: SessionDep,
+    user: CurrentUser,
+    ctx: RequestContextDep,
+    with_dependents: bool = False,
 ) -> Response:
-    """Disconnect (revokes QuickBooks access) or remove an upload. Runs keep their snapshot."""
-    await service.delete_source(session, user, source_id, ctx)
+    """Disconnect (revokes QuickBooks access) or remove an upload. Runs keep their snapshot;
+    with_dependents=true also deletes the Service POD snapshots and cases made from it."""
+    await service.delete_source(session, user, source_id, ctx, with_dependents=with_dependents)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

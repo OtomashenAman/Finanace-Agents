@@ -8,11 +8,17 @@ from src.app.auth.router import router as auth_router
 from src.app.data_sources.router import admin_router as data_sources_admin_router
 from src.app.data_sources.router import router as data_sources_router
 from src.app.entities.router import router as entities_router
+from src.app.finance_pod.clients.router import portal_router as client_portal_router
+from src.app.finance_pod.invoices.router import receipt_portal_router
+from src.app.finance_pod.onboarding.router import portal_router as vendor_portal_router
+from src.app.finance_pod.payments.router import help_router as vendor_help_router
+from src.app.finance_pod.router import router as finance_pod_router
 from src.app.governance.router import router as governance_router
 from src.app.jobs.router import router as jobs_router
 from src.app.monitoring.router import router as monitoring_router
 from src.app.overview.router import router as overview_router
 from src.app.search.router import router as search_router
+from src.app.service_pod.router import router as service_pod_router
 from src.app.users.router import router as users_router
 from src.app.worklist.router import router as worklist_router
 
@@ -33,3 +39,9 @@ api_router.include_router(entities_router)
 api_router.include_router(governance_router)
 api_router.include_router(worklist_router)
 api_router.include_router(search_router)
+api_router.include_router(service_pod_router)
+api_router.include_router(finance_pod_router)
+api_router.include_router(vendor_portal_router)
+api_router.include_router(receipt_portal_router)
+api_router.include_router(vendor_help_router)
+api_router.include_router(client_portal_router)

@@ -9,6 +9,8 @@ import { errorMessage } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 import type { DataSource, RecordType } from "../api"
+import { useSourceDependents } from "@/features/service-pod/hooks"
+
 import { useAuthorizeQuickBooks, useDeleteSource, useRenameSource, useSyncSource } from "../hooks"
 import { RECORD_LABELS, STATUS } from "../labels"
 import { QuickBooksAppForm } from "./quickbooks-app-form"
@@ -72,6 +74,10 @@ export function SourceCard({ source }: { source: DataSource }) {
   const [renaming, setRenaming] = useState(false)
   const [editingApp, setEditingApp] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  // What the Service POD made from this source (deleted with it unless unticked)
+  const [withDependents, setWithDependents] = useState(true)
+  const dependents = useSourceDependents(confirmingDelete ? source.id : null)
+  const podCount = dependents.data ? dependents.data.snapshots.length : 0
 
   const isQuickBooks = source.kind === "quickbooks"
   const needsAuth = source.status === "needs_reauth" || source.status === "pending_auth"
@@ -88,7 +94,7 @@ export function SourceCard({ source }: { source: DataSource }) {
     authorize.mutate(source.id, { onError: (error) => toast.error(errorMessage(error, "Couldn't start authorization")) })
 
   const onDelete = () =>
-    remove.mutate(source.id, {
+    remove.mutate({ id: source.id, withDependents }, {
       onSuccess: () => toast.success(isQuickBooks ? `${source.name} disconnected` : `${source.name} removed`),
       onError: (error) => toast.error(errorMessage(error, "Couldn't remove the data source")),
       onSettled: () => setConfirmingDelete(false),
@@ -129,7 +135,9 @@ export function SourceCard({ source }: { source: DataSource }) {
         <ul className="mt-4 flex flex-wrap gap-2 text-xs">
           {counts.map(([type, n]) => (
             <li key={type} className="rounded bg-secondary px-2 py-1">
-              <span className="font-semibold">{n.toLocaleString()}</span> {RECORD_LABELS[type].toLowerCase()}
+              {/* A type this frontend doesn't know yet (newer backend) shows by its raw name */}
+              <span className="font-semibold">{n.toLocaleString()}</span>{" "}
+              {(RECORD_LABELS[type] ?? type.replace(/_/g, " ")).toLowerCase()}
             </li>
           ))}
         </ul>
@@ -189,8 +197,16 @@ export function SourceCard({ source }: { source: DataSource }) {
           </Button>
         )}
         {confirmingDelete ? (
-          <span className="flex gap-2">
-            <Button type="button" size="sm" variant="destructive" onClick={onDelete} disabled={remove.isPending}>
+          <span className="flex flex-wrap items-center gap-2">
+            {podCount > 0 && (
+              <label className="flex basis-full items-center gap-1.5 text-xs text-red-900">
+                <input type="checkbox" checked={withDependents} onChange={(e) => setWithDependents(e.target.checked)} />
+                Also delete the {podCount} Service POD snapshot{podCount === 1 ? "" : "s"} and {dependents.data!.cases.length} case
+                {dependents.data!.cases.length === 1 ? "" : "s"} made from it
+                {dependents.data!.evidence && " (includes approved or verified work)"}
+              </label>
+            )}
+            <Button type="button" size="sm" variant="destructive" onClick={onDelete} disabled={remove.isPending || dependents.isFetching}>
               {isQuickBooks ? "Yes, disconnect" : "Yes, remove"}
             </Button>
             <Button type="button" size="sm" variant="ghost" onClick={() => setConfirmingDelete(false)}>
