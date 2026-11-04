@@ -10,6 +10,7 @@ import {
   Workflow,
   Menu,
   Settings,
+  ShoppingCart,
   X,
   type LucideIcon,
 } from "lucide-react"
@@ -30,6 +31,7 @@ const NAV: NavItem[] = [
   { label: "Overview", icon: LayoutDashboard, to: "/overview" },
   { label: "Agent Catalog", icon: LayoutGrid, to: "/catalog" },
   { label: "Service POD", icon: Workflow, to: "/pod", adminOnly: true },
+  { label: "Finance POD", icon: ShoppingCart, to: "/finance-pod", adminOnly: true },
   { label: "My Worklist", icon: ListTodo, to: "/worklist" },
   { label: "Approvals", icon: CircleCheck, to: "/approvals" },
   { label: "Audit Trail", icon: History, to: "/audit" },

@@ -7,14 +7,14 @@ not contain numbers of its own, so it can't introduce an unsupported figure.
 """
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 from src.app.core.errors import AppError
-from src.app.core.llm.base import LLMProvider, LLMResult
+from src.app.core.llm.base import ImageInput, LLMProvider, LLMResult
 
 
 class AiOutputRejectedError(AppError):
@@ -58,10 +58,16 @@ async def extract[T: BaseModel](
     schema: type[T],
     prompt_version: str,
     validate: Callable[[T], list[str]],
+    images: Sequence[ImageInput] = (),
 ) -> Extraction[T]:
     """Structured output that also passes `validate` (a list of problems; empty = valid).
     LLMError from the provider propagates unchanged."""
-    result = await llm.generate_structured(system=system, user=user, schema=schema)
+    if images:
+        result = await llm.generate_structured(
+            system=system, user=user, schema=schema, images=images
+        )
+    else:
+        result = await llm.generate_structured(system=system, user=user, schema=schema)
     problems = validate(result.output)
     if problems:
         raise AiOutputRejectedError(

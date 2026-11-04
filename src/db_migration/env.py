@@ -15,6 +15,17 @@ import src.app.audit.models
 import src.app.auth.models
 import src.app.data_sources.models
 import src.app.entities.models
+import src.app.finance_pod.approvals.models
+import src.app.finance_pod.clients.models
+import src.app.finance_pod.invoices.models
+import src.app.finance_pod.mail
+import src.app.finance_pod.onboarding.models
+import src.app.finance_pod.orders.models
+import src.app.finance_pod.payments.models
+import src.app.finance_pod.reference.models
+import src.app.finance_pod.requests.models
+import src.app.finance_pod.settings.models
+import src.app.finance_pod.sourcing.models
 import src.app.governance.models
 import src.app.jobs.models
 import src.app.service_pod.core.cases.models

@@ -118,6 +118,19 @@ class Settings(BaseSettings):
     # The only addresses internal reports may be distributed to
     pod_internal_recipients: list[str] = []
 
+    # Finance POD: where approved vendors and POs are created. "local": the Finance POD's
+    # own records (default); "workday": Workday, once the tenant connection below is set up
+    finance_pod_erp: Literal["local", "workday"] = "local"
+    workday_base_url: str | None = None  # e.g. https://wd2-impl-services1.workday.com
+    workday_tenant: str | None = None
+    workday_client_id: str | None = None
+    workday_client_secret: SecretStr | None = None
+    workday_refresh_token: SecretStr | None = None
+    # Vendor onboarding portal links stay valid this long, and work once
+    vendor_portal_days: int = 14
+    # OFAC's Specially Designated Nationals list (CSV) for sanctions screening
+    ofac_sdn_url: str = "https://www.treasury.gov/ofac/downloads/sdn.csv"
+
     # Demo seed user (uv run poe seed)
     demo_admin_email: str = "finance.admin@example.com"
     demo_admin_name: str = "Finance Admin"
@@ -136,6 +149,11 @@ class Settings(BaseSettings):
         "mailbox_poll_seconds",
         "email_test_recipient",
         "pod_allow_demo_snapshots",
+        "workday_base_url",
+        "workday_tenant",
+        "workday_client_id",
+        "workday_client_secret",
+        "workday_refresh_token",
         mode="before",
     )
     @classmethod

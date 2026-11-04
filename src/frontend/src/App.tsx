@@ -18,6 +18,32 @@ import { AuditPage } from "@/features/audit/audit-page"
 import { WorklistPage } from "@/features/worklist/worklist-page"
 import { GuestOnly, RequireAdmin, RequireAuth } from "@/features/auth/route-guards"
 import { DataSourcesPage } from "@/features/data-sources/data-sources-page"
+import { ApprovalsPage as FinanceApprovalsPage } from "@/features/finance-pod/approvals-page"
+import { ClientApplicationPage } from "@/features/finance-pod/client-application-page"
+import { ClientPage } from "@/features/finance-pod/client-page"
+import { ClientPortalPage } from "@/features/finance-pod/client-portal-page"
+import { ClientsPage } from "@/features/finance-pod/clients-page"
+import { FpodShell } from "@/features/finance-pod/components/fpod-shell"
+import { CreditReviewsPage } from "@/features/finance-pod/credit-reviews-page"
+import { FinancePodHomePage } from "@/features/finance-pod/home-page"
+import { ExceptionsPage } from "@/features/finance-pod/exceptions-page"
+import { InvoicePage } from "@/features/finance-pod/invoice-page"
+import { InvoicesPage } from "@/features/finance-pod/invoices-page"
+import { MeasuresPage } from "@/features/finance-pod/measures-page"
+import { NewInvoicePage } from "@/features/finance-pod/new-invoice-page"
+import { ReceiptConfirmPage } from "@/features/finance-pod/receipt-page"
+import { OrdersPage } from "@/features/finance-pod/orders-page"
+import { PaymentRunPage } from "@/features/finance-pod/payment-run-page"
+import { PaymentsPage } from "@/features/finance-pod/payments-page"
+import { VendorHelpPage } from "@/features/finance-pod/vendor-help-page"
+import { VendorQueriesPage } from "@/features/finance-pod/vendor-queries-page"
+import { VendorPortalPage } from "@/features/finance-pod/portal-page"
+import { VendorPage } from "@/features/finance-pod/vendor-page"
+import { VendorsPage } from "@/features/finance-pod/vendors-page"
+import { NewRequestPage } from "@/features/finance-pod/new-request-page"
+import { RequestPage } from "@/features/finance-pod/request-page"
+import { RequestsPage } from "@/features/finance-pod/requests-page"
+import { SetupPage } from "@/features/finance-pod/setup-page"
 import { AiMonitoringPage } from "@/features/monitoring/ai-monitoring-page"
 import { OverviewPage } from "@/features/overview/overview-page"
 import { CasePage } from "@/features/service-pod/case-page"
@@ -30,6 +56,13 @@ import { queryClient } from "@/lib/query-client"
 
 const router = createBrowserRouter([
   { element: <GuestOnly />, children: [{ path: "/login", element: <LoginPage /> }] },
+  // Vendors' secure onboarding form: no login, the single-use link is the key
+  { path: "/vendor-portal/:token", element: <VendorPortalPage /> },
+  { path: "/vendor-help", element: <VendorHelpPage /> },
+  // Clients apply for an account: the single-use link is the key
+  { path: "/client-portal/:token", element: <ClientPortalPage /> },
+  // Receivers confirm deliveries from their phone: the single-use link is the key
+  { path: "/receipt/:token", element: <ReceiptConfirmPage /> },
   {
     element: <RequireAuth />,
     children: [
@@ -67,6 +100,38 @@ const router = createBrowserRouter([
               { path: "/admin/governance", element: <GovernancePage /> },
               { path: "/admin/data-sources", element: <AdminDataSourcesPage /> },
               { path: "/admin/ai-monitoring", element: <AiMonitoringPage /> },
+            ],
+          },
+        ],
+      },
+      {
+        // Finance POD: procure-to-pay agents (Finance Admins only), an application of its own
+        element: <RequireAdmin />,
+        children: [
+          {
+            element: <FpodShell />,
+            children: [
+              { path: "/finance-pod", element: <FinancePodHomePage /> },
+              { path: "/finance-pod/requests", element: <RequestsPage /> },
+              { path: "/finance-pod/requests/new", element: <NewRequestPage /> },
+              { path: "/finance-pod/requests/:requestId", element: <RequestPage /> },
+              { path: "/finance-pod/approvals", element: <FinanceApprovalsPage /> },
+              { path: "/finance-pod/vendors", element: <VendorsPage /> },
+              { path: "/finance-pod/vendors/:onboardingId", element: <VendorPage /> },
+              { path: "/finance-pod/orders", element: <OrdersPage /> },
+              { path: "/finance-pod/measures", element: <MeasuresPage /> },
+              { path: "/finance-pod/invoices", element: <InvoicesPage /> },
+              { path: "/finance-pod/invoices/new", element: <NewInvoicePage /> },
+              { path: "/finance-pod/invoices/:invoiceId", element: <InvoicePage /> },
+              { path: "/finance-pod/exceptions", element: <ExceptionsPage /> },
+              { path: "/finance-pod/payments", element: <PaymentsPage /> },
+              { path: "/finance-pod/payments/:runId", element: <PaymentRunPage /> },
+              { path: "/finance-pod/vendor-queries", element: <VendorQueriesPage /> },
+              { path: "/finance-pod/clients", element: <ClientsPage /> },
+              { path: "/finance-pod/clients/applications/:applicationId", element: <ClientApplicationPage /> },
+              { path: "/finance-pod/clients/:clientId", element: <ClientPage /> },
+              { path: "/finance-pod/credit-reviews", element: <CreditReviewsPage /> },
+              { path: "/finance-pod/setup", element: <SetupPage /> },
             ],
           },
         ],

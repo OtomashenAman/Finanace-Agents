@@ -10,6 +10,7 @@ export type AuditCategory =
   | "governance"
   | "audit"
   | "service_pod"
+  | "finance_pod"
 
 export interface AuditPerson {
   id: string
@@ -90,4 +91,5 @@ export const CATEGORY_LABELS: Record<AuditCategory, string> = {
   governance: "Governance",
   audit: "Audit exports",
   service_pod: "Service POD",
+  finance_pod: "Finance POD",
 }

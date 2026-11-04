@@ -1,10 +1,13 @@
+import base64
 import time
+from collections.abc import Sequence
+from typing import Any
 
 import openai
 from openai import AsyncAzureOpenAI
 from pydantic import BaseModel
 
-from src.app.core.llm.base import LLMError, LLMResult, LLMUsage
+from src.app.core.llm.base import ImageInput, LLMError, LLMResult, LLMUsage
 
 
 class AzureOpenAIProvider:
@@ -33,16 +36,32 @@ class AzureOpenAIProvider:
         )
 
     async def generate_structured[T: BaseModel](
-        self, *, system: str, user: str, schema: type[T]
+        self, *, system: str, user: str, schema: type[T], images: Sequence[ImageInput] = ()
     ) -> LLMResult[T]:
         started = time.perf_counter()
+        content: Any = user
+        if images:  # needs a vision deployment (e.g. gpt-4o)
+            content = [
+                {"type": "text", "text": user},
+                *(
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{i.content_type};base64,"
+                            + base64.b64encode(i.data).decode(),
+                            "detail": "high",
+                        },
+                    }
+                    for i in images
+                ),
+            ]
         try:
             completion = await self._client.chat.completions.parse(
                 model=self.model,
                 messages=[
                     # Stable system prompt first: Azure caches long identical prefixes
                     {"role": "system", "content": system},
-                    {"role": "user", "content": user},
+                    {"role": "user", "content": content},
                 ],
                 response_format=schema,
                 max_completion_tokens=self._max_output_tokens,

@@ -2,7 +2,7 @@
 
 import asyncio
 import os
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Sequence
 from typing import Any
 
 import asyncpg
@@ -60,6 +60,46 @@ from src.app.core.llm.factory import get_llm_provider  # noqa: E402
 from src.app.main import app  # noqa: E402
 
 TABLES = (
+    "fpod_credit_reviews",
+    "fpod_client_history",
+    "fpod_lab_clients",
+    "fpod_client_documents",
+    "fpod_client_applications",
+    "fpod_clients",
+    "fpod_vendor_queries",
+    "fpod_payment_approvals",
+    "fpod_payment_items",
+    "fpod_payment_runs",
+    "fpod_receipt_requests",
+    "fpod_receipt_lines",
+    "fpod_receipts",
+    "fpod_po_amendments",
+    "fpod_invoice_exceptions",
+    "fpod_invoice_lines",
+    "fpod_invoices",
+    "fpod_po_lines",
+    "fpod_purchase_orders",
+    "fpod_sourcing",
+    "fpod_quotes",
+    "fpod_vendor_bank_accounts",
+    "fpod_onboarding_documents",
+    "fpod_onboardings",
+    "fpod_sanctions_entries",
+    "fpod_emails",
+    "fpod_commitments",
+    "fpod_decisions",
+    "fpod_request_files",
+    "fpod_request_lines",
+    "fpod_requests",
+    "fpod_settings",
+    "fpod_cost_centres",
+    "fpod_labs",
+    "fpod_projects",
+    "fpod_grants",
+    "fpod_budgets",
+    "fpod_catalogue_items",
+    "fpod_vendors",
+    "fpod_authority_tiers",
     "pod_commitments",
     "pod_posting_tasks",
     "pod_messages",
@@ -183,16 +223,21 @@ class FakeLLM:
         self.error: Exception | None = None
         self.calls: list[tuple[str, str]] = []
         self.schemas: list[type[BaseModel]] = []
+        self.images: list[int] = []  # how many page images each call carried
+        # Several calls in one action can each answer differently: outputs are used in turn
+        # (then `output`) while any are queued
+        self.queue: list[dict[str, Any]] = []
 
     async def generate_structured[T: BaseModel](
-        self, *, system: str, user: str, schema: type[T]
+        self, *, system: str, user: str, schema: type[T], images: Sequence[Any] = ()
     ) -> LLMResult[T]:
         self.calls.append((system, user))
         self.schemas.append(schema)
+        self.images.append(len(images))
         if self.error:
             raise self.error
         try:
-            output = schema.model_validate(self.output)
+            output = schema.model_validate(self.queue.pop(0) if self.queue else self.output)
         except ValidationError as exc:  # a real provider can't return off-schema output
             raise LLMError("Model returned no structured output") from exc
         return LLMResult(

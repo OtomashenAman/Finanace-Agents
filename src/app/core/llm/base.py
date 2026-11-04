@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -29,6 +30,14 @@ class LLMResult[T: BaseModel]:
     latency_ms: int
 
 
+@dataclass(frozen=True)
+class ImageInput:
+    """A page image sent with the prompt (scanned documents); needs a vision model."""
+
+    content_type: str  # image/png or image/jpeg
+    data: bytes
+
+
 class LLMProvider(Protocol):
     """Everything features need from an LLM. Add providers by implementing this."""
 
@@ -36,7 +45,7 @@ class LLMProvider(Protocol):
     model: str
 
     async def generate_structured[T: BaseModel](
-        self, *, system: str, user: str, schema: type[T]
+        self, *, system: str, user: str, schema: type[T], images: Sequence[ImageInput] = ()
     ) -> LLMResult[T]:
         """Return output validated against `schema`, or raise LLMError."""
         ...
