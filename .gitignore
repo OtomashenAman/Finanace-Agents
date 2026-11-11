@@ -2,6 +2,8 @@
 .env
 .env.*
 !.env.example
+# deploy/migrate-to-prod.sh: the server already runs docker-compose.prod.yml
+.migrated-to-prod
 
 # Python
 __pycache__/
