@@ -519,11 +519,7 @@ def vendor_query(
 ) -> tuple[str, str]:
     """The exception agent's draft to the vendor: the facts, nothing invented."""
     org = get_settings().email_sender_name
-    facts = "\n".join(
-        f"  - {i['message']}"
-        for i in issues
-        if i["kind"] in ("price", "quantity", "not_on_po", "header", "vendor")
-    )
+    facts = "\n".join(f"  - {i['message']}" for i in issues if i.get("message"))
     ask = (
         f"Please send a credit note for {credit:,.2f} {invoice.currency}, quoting your invoice "
         f"{invoice.vendor_invoice_number}."
@@ -534,7 +530,7 @@ def vendor_query(
         f"Hello {invoice.vendor_name or 'there'},\n\n"
         f"We can't pay your invoice {invoice.vendor_invoice_number or ''}"
         f"{f' against our {po.reference}' if po else ''} as it stands:\n\n"
-        f"{facts or '  - see above'}\n\n"
+        f"{facts or '  - its figures do not match our purchase order and receipts'}\n\n"
         f"{ask}\n\nThank you,\n{org}"
     )
     return f"Your invoice {invoice.vendor_invoice_number or ''}: query from {org}", body

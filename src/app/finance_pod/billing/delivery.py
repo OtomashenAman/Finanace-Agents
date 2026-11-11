@@ -61,7 +61,11 @@ def invoice_pdf(inv: FpSalesInvoice, submission: FpLabSubmission) -> bytes:
         ("", 6, False),
         (f"Bill to: {inv.client_name} (account {inv.client_code})", 10, False),
         (
-            f"Invoice date: {inv.issue_date}    Due: {inv.due_date}    Terms: {inv.payment_terms}",
+            "Invoice date: "
+            + (mail.long_date(inv.issue_date) if inv.issue_date else "on sending")
+            + "    Due: "
+            + (mail.long_date(inv.due_date) if inv.due_date else "per terms")
+            + f"    Terms: {inv.payment_terms}",
             10,
             False,
         ),
@@ -78,7 +82,7 @@ def invoice_pdf(inv: FpSalesInvoice, submission: FpLabSubmission) -> bytes:
         lines.append(
             (
                 f"{ln.item_ref}  |  {ln.description} ({stone})  |  "
-                f"{ln.quantity} x {ln.unit_price:,.2f}  =  {ln.amount:,.2f}",
+                f"{ln.quantity} x {ln.unit_price:,.2f}  =  {ln.amount:,.2f} {inv.currency}",
                 9,
                 False,
             )
@@ -93,7 +97,8 @@ def invoice_pdf(inv: FpSalesInvoice, submission: FpLabSubmission) -> bytes:
         )
     lines += [
         (
-            f"{inv.tax_name or 'Tax'} ({inv.tax_rate:g}%): {_money(inv.tax, inv.currency)}",
+            f"{inv.tax_name or 'Tax'} ({mail.percent(inv.tax_rate)}): "
+            f"{_money(inv.tax, inv.currency)}",
             10,
             False,
         ),
@@ -134,8 +139,11 @@ async def deliver(
     org = get_settings().email_sender_name
     document = invoice_pdf(inv, submission)
     deposit = (
-        f"\nA {inv.deposit_pct:g}% deposit applies to your account.\n" if inv.deposit_pct else ""
+        f"\nA {mail.percent(inv.deposit_pct)} deposit applies to your account.\n"
+        if inv.deposit_pct
+        else ""
     )
+    assert inv.due_date is not None  # noqa: S101 - set above
     sent = await mail.send(
         session,
         kind=mail.MailKind.CLIENT_INVOICE,
@@ -145,7 +153,7 @@ async def deliver(
         body=(
             f"Hello {inv.client_name},\n\nYour reports for {submission.reference} are issued. "
             f"Invoice {inv.reference} for {_money(inv.total, inv.currency)} is attached, due "
-            f"{inv.due_date} ({inv.payment_terms}).\n{deposit}\nView it online: "
+            f"{mail.long_date(inv.due_date)} ({inv.payment_terms}).\n{deposit}\nView it online: "
             f"{invoice_url(token)}\n\nThank you,\n{org}"
         ),
         sent_by=actor_id,
@@ -235,19 +243,21 @@ async def send_statements(
         if not rows:
             continue
         balance = sum((r.amount for r in rows), Decimal("0"))
+        month = f"{as_of:%B %Y}"
         lines: list[pdf.Line] = [
             (org, 16, True),
-            (f"Statement of account: {period}", 13, True),
+            (f"Statement of account: {month}", 13, True),
             (f"{client.name} (account {client.code})", 10, False),
             ("", 6, False),
-            ("Invoice          Issued          Due              Amount     Status", 9, True),
+            ("Invoice  |  Issued  |  Due  |  Amount  |  Status", 9, True),
         ]
         for r in rows:
             late = (today - r.due_on).days
+            status = f"{mail.plural(late, 'day')} overdue" if late > 0 else "open"
             lines.append(
                 (
-                    f"{r.invoice_number[:14]:<17}{r.issued_on!s:<16}{r.due_on!s:<14}"
-                    f"{r.amount:>12,.2f}     {f'{late} days overdue' if late > 0 else 'open'}",
+                    f"{r.invoice_number}  |  {mail.long_date(r.issued_on)}  |  "
+                    f"{mail.long_date(r.due_on)}  |  {r.amount:,.2f}  |  {status}",
                     9,
                     False,
                 )
@@ -258,11 +268,11 @@ async def send_statements(
             kind=mail.MailKind.CLIENT_STATEMENT,
             to_email=client.billing_email,
             to_name=client.name,
-            subject=f"{org}: statement for {period}, account {client.code}",
+            subject=f"{org}: statement for {month}, account {client.code}",
             body=(
-                f"Hello {client.name},\n\nYour statement for {period} is attached: "
-                f"{len(rows)} open invoice(s), balance {_money(balance, client.currency)}.\n\n"
-                f"Thank you,\n{org}"
+                f"Hello {client.name},\n\nYour statement for {month} is attached: "
+                f"{mail.plural(len(rows), 'open invoice')}, balance "
+                f"{_money(balance, client.currency)}.\n\nThank you,\n{org}"
             ),
             sent_by=actor_id,
             attachments=[

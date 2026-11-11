@@ -653,9 +653,14 @@ async def _post_and_remit(
         if vendor is None or not vendor.email:
             continue
         lines = "\n".join(
-            f"  {inv.vendor_invoice_number or inv.reference}: {item.invoice_total:,.2f}"
-            + (f" less early-pay discount {item.discount:,.2f}" if item.discount else "")
-            + f" = {item.amount:,.2f} {item.currency}  (ref {item.payment_ref})"
+            f"  Invoice {inv.vendor_invoice_number or inv.reference}: "
+            + (
+                f"{item.invoice_total:,.2f} less early-payment discount {item.discount:,.2f}"
+                f" = {item.amount:,.2f} {item.currency}"
+                if item.discount
+                else f"{item.amount:,.2f} {item.currency}"
+            )
+            + f"  (payment reference {item.payment_ref})"
             for item, inv in rows
         )
         total = sum((item.amount for item, _ in rows), Decimal("0"))

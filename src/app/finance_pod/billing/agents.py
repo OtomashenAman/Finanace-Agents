@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.common.clock import utcnow
+from src.app.finance_pod import mail
 from src.app.finance_pod.billing.models import (
     FpContractPrice,
     FpFee,
@@ -217,7 +218,8 @@ async def build(
             _flag(
                 "client_on_hold",
                 "Client on hold",
-                f"{client.code} is on hold: collect the {client.deposit_pct:g}% deposit before "
+                f"{client.code} is on hold: collect the {mail.percent(client.deposit_pct)} "
+                "deposit before "
                 "releasing the reports.",
             )
         )
