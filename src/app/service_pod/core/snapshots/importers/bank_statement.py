@@ -14,6 +14,7 @@ counted. A line without a bank reference gets a stable one from its date, amount
 description, so the same statement imported twice gives the same receipts.
 """
 
+import asyncio
 import csv
 import hashlib
 import io
@@ -30,7 +31,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from src.app.common import documents
 from src.app.common.text_extraction.delimited import decode_text
-from src.app.core.llm.base import LLMError, LLMProvider
+from src.app.core.llm.base import ImageInput, LLMError, LLMNotConfiguredError, LLMProvider
 from src.app.service_pod.common import ai
 from src.app.service_pod.core.snapshots.contract import BankReceipt
 from src.app.service_pod.core.snapshots.exceptions import SnapshotInvalidError
@@ -505,48 +506,111 @@ class _StatementRead(BaseModel):
     transactions: list[_Txn]
 
 
+PART_CHARS = 1800  # a part's text: its transactions fit in one answer of the AI
+HEADER_CHARS = 600  # the statement's top (bank, account, period, currency), sent with each part
+PARALLEL = 4
+SCAN_PAGES = 20  # page images read from a scanned statement
+DATE_START = re.compile(r"^\s*(\d{1,4}[-/.]\d{1,2}|\d{1,2}[ -][A-Za-z]{3}|[A-Za-z]{3}\.? \d{1,2})")
+
+
+def parts_of(text: str) -> list[str]:
+    """The statement's text in parts the AI can each answer in full: a long statement read in
+    one go overflows the answer. A part starts at a line beginning with a date where possible,
+    so a transaction isn't cut in two."""
+    out: list[str] = []
+    current: list[str] = []
+    size = 0
+    for line in text.splitlines():
+        if size >= PART_CHARS and (DATE_START.match(line) or size >= PART_CHARS * 2):
+            out.append("\n".join(current))
+            current, size = [], 0
+        current.append(line)
+        size += len(line) + 1
+    if any(ln.strip() for ln in current):
+        out.append("\n".join(current))
+    return out
+
+
 async def from_document(
     data: bytes, filename: str, llm: LLMProvider
 ) -> tuple[list[Line], str | None, bool]:
-    """(lines, currency, verified): verified = checked against the document's text."""
-    prepared = documents.prepare(data, filename)
+    """(lines, currency, verified): verified = checked against the document's text. The text
+    is read in parts (one page image at a time for a scan) so every transaction is kept."""
+    prepared = documents.prepare(data, filename, max_pages=SCAN_PAGES)
     if not prepared.readable:
         raise SnapshotInvalidError(f"The statement can't be read ({prepared.problem}).")
     stated = documents.digits(prepared.text) if prepared.text else ""
 
     def problems(r: _StatementRead) -> list[str]:
-        out = []
-        if not r.transactions:
-            out.append("no transactions were found")
-        if prepared.text:
-            for t in r.transactions:
-                if documents.digits(t.amount) not in stated:
-                    out.append(f"amount {t.amount} isn't in the statement's text")
-        return out[:10]
+        if not prepared.text:
+            return []
+        return [
+            f"amount {t.amount} isn't in the statement's text"
+            for t in r.transactions
+            if documents.digits(t.amount) not in stated
+        ][:10]
+
+    # The statement's top up to its first dated line: context, with no transaction in it
+    top = []
+    for line in (prepared.text or "").splitlines():
+        if DATE_START.match(line):
+            break
+        top.append(line)
+    header = "\n".join(top)[:HEADER_CHARS]
+    jobs: list[tuple[str, list[ImageInput]]] = []
+    if prepared.text:
+        parts = parts_of(prepared.text)
+        for i, part in enumerate(parts, 1):
+            jobs.append(
+                (
+                    f"The statement ({filename}), part {i} of {len(parts)}."
+                    + (f"\nIts first lines, for context only:\n{header}\n" if i > 1 else "")
+                    + f"\nList the transactions in this part:\n\n{part}",
+                    [],
+                )
+            )
+    else:
+        for i, img in enumerate(prepared.images, 1):
+            jobs.append(
+                (
+                    f"The statement ({filename}), page {i} of {len(prepared.images)}, is in "
+                    "the image.",
+                    [img],
+                )
+            )
+    gate = asyncio.Semaphore(PARALLEL)
+
+    async def read_part(user: str, images: list[ImageInput]) -> _StatementRead:
+        async with gate:
+            result = await ai.extract(
+                llm,
+                system=SYSTEM,
+                user=user,
+                schema=_StatementRead,
+                prompt_version=PROMPT_VERSION,
+                validate=problems,
+                images=images,
+            )
+            return result.output
 
     try:
-        result = await ai.extract(
-            llm,
-            system=SYSTEM,
-            user=f"The statement ({filename}):\n\n{prepared.text}"
-            if prepared.text
-            else f"The statement ({filename}) is in the images.",
-            schema=_StatementRead,
-            prompt_version=PROMPT_VERSION,
-            validate=problems,
-            images=prepared.images,
-        )
+        reads = await asyncio.gather(*(read_part(u, imgs) for u, imgs in jobs))
+    except LLMNotConfiguredError as exc:
+        raise SnapshotInvalidError(
+            "This file needs the AI to read it, and no AI is configured. Upload a CSV, Excel, "
+            "OFX, CAMT.053 or MT940 export instead."
+        ) from exc
     except LLMError as exc:
         raise SnapshotInvalidError(
-            "This file needs the AI to read it, and the AI isn't available. Upload a CSV, "
-            "Excel, OFX, CAMT.053 or MT940 export instead."
+            f"The AI couldn't read the statement ({exc}). Try again in a moment, or upload a "
+            "CSV, Excel, OFX, CAMT.053 or MT940 export from your bank instead."
         ) from exc
     except ai.AiOutputRejectedError as exc:
         raise SnapshotInvalidError(
             f"The statement couldn't be read reliably: {exc.message}."
         ) from exc
     lines = []
-    for t in result.output.transactions:
+    for t in (t for r in reads for t in r.transactions):
         on, amount = parse_date(t.date), parse_amount(t.amount)
         if on is None or amount is None:
             continue
@@ -559,7 +623,8 @@ async def from_document(
                 reference=t.reference,
             )
         )
-    return lines, (result.output.currency or "").upper()[:3] or None, bool(prepared.text)
+    currency = next((r.currency for r in reads if r.currency), None)
+    return lines, (currency or "").upper()[:3] or None, bool(prepared.text)
 
 
 # --- the reader --------------------------------------------------------------------------------

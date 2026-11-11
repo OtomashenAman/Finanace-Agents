@@ -1,12 +1,14 @@
 """Bank statements in any format become bank receipts (money in) for Bank-to-Invoice."""
 
 import io
+import re
 from datetime import date
 from decimal import Decimal
 
 import pytest
 from openpyxl import Workbook
 
+from src.app.core.llm.base import LLMError
 from src.app.finance_pod import pdf
 from src.app.service_pod.core.snapshots.exceptions import SnapshotInvalidError
 from src.app.service_pod.core.snapshots.importers import bank_statement
@@ -175,6 +177,57 @@ async def test_a_pdf_statement_is_read_by_the_ai_and_checked_against_its_text() 
     )
     llm.output["transactions"][0]["amount"] = "9,500.00"  # not in the document: refused
     with pytest.raises(SnapshotInvalidError, match="couldn't be read reliably"):
+        await read(document, "statement.pdf", llm)
+
+
+async def test_a_long_pdf_statement_is_read_in_parts_so_nothing_is_cut_off() -> None:
+    """One answer of the AI holds about 25 transactions: 120 lines are read in parts."""
+    rows = [("Harbor Bank statement, November 2026, USD", 12, True)] + [
+        (
+            f"2026-11-{1 + i % 28:02d}  Wire from Customer {i}  ref FT{1000 + i}  {100 + i}.00 CR",
+            9,
+            False,
+        )
+        for i in range(120)
+    ]
+    document = pdf.render(rows)
+    text = bank_statement.documents.prepare(document, "s.pdf").text or ""
+    parts = bank_statement.parts_of(text)
+    assert len(parts) >= 4
+    assert sum(p.count(" CR") for p in parts) == 120  # every line in exactly one part
+
+    def answer(part: str) -> dict[str, object]:
+        found = re.findall(
+            r"(2026-11-\d\d)  Wire from (Customer \d+)  ref (FT\d+)  ([\d.]+) CR", part
+        )
+        return {
+            "currency": "USD",
+            "transactions": [
+                {
+                    "date": d,
+                    "description": f"Wire from {c}",
+                    "payer": c,
+                    "reference": r,
+                    "amount": a,
+                    "direction": "in",
+                }
+                for d, c, r, a in found
+            ],
+        }
+
+    llm = FakeLLM()
+    llm.queue = [answer(p) for p in parts]
+    s = await read(document, "statement.pdf", llm)
+    assert len(s.receipts) == 120 and len(llm.calls) == len(parts)
+
+
+async def test_an_ai_failure_is_reported_as_what_happened() -> None:
+    llm = FakeLLM()
+    llm.error = LLMError("Output was cut off (max output tokens reached)")
+    document = pdf.render([("2026-11-05  Wire from Harbor  9,000.00 CR", 10, False)])
+    with pytest.raises(
+        SnapshotInvalidError, match="couldn't read the statement \\(Output was cut off"
+    ):
         await read(document, "statement.pdf", llm)
 
 

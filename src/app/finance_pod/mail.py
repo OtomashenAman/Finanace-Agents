@@ -7,7 +7,8 @@ EMAIL_TEST_RECIPIENT set, every mail goes to the tester, its subject naming the 
 """
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 from enum import StrEnum
 
 from sqlalchemy import ForeignKey, String, Text
@@ -116,6 +117,20 @@ async def send(
         row.status, row.sent_at = MailStatus.SENT, utcnow()
     session.add(row)
     return row
+
+
+def long_date(value: date) -> str:
+    """How a date reads in an email: 11 November 2026."""
+    return f"{value.day} {value:%B %Y}"
+
+
+def percent(value: Decimal) -> str:
+    """50.00 -> 50%, 12.50 -> 12.5%."""
+    return f"{value.normalize():f}%"
+
+
+def plural(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
 
 
 def outcome(row: FpEmail) -> str:

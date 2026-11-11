@@ -111,9 +111,9 @@ def _money(value: Decimal | None, currency: str) -> str:
 
 def _terms_text(limit: Decimal | None, deposit: Decimal, terms: str, currency: str) -> str:
     if limit is None:
-        return f"deposit only ({deposit:g}% up front), {terms}"
+        return f"deposit only ({mail.percent(deposit)} up front), {terms}"
     return f"credit limit {_money(limit, currency)} on {terms}" + (
-        f", {deposit:g}% deposit" if deposit else ""
+        f", {mail.percent(deposit)} deposit" if deposit else ""
     )
 
 

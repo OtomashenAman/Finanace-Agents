@@ -32,11 +32,11 @@ class DocumentInput:
         return bool(self.text) or bool(self.images)
 
 
-def _pdf_images(data: bytes) -> list[ImageInput]:
+def _pdf_images(data: bytes, max_pages: int) -> list[ImageInput]:
     images: list[ImageInput] = []
     try:
         reader = PdfReader(io.BytesIO(data))
-        for page in reader.pages[:MAX_PAGES]:
+        for page in reader.pages[:max_pages]:
             for image in page.images:
                 kind = filetype.guess_extension(image.data)
                 if kind in IMAGE_KINDS:
@@ -46,7 +46,9 @@ def _pdf_images(data: bytes) -> list[ImageInput]:
     return images
 
 
-def prepare(data: bytes, filename: str) -> DocumentInput:
+def prepare(data: bytes, filename: str, max_pages: int = MAX_PAGES) -> DocumentInput:
+    """`max_pages`: how many page images of a scanned PDF to take (a statement needs more
+    than a tax form)."""
     kind = filetype.guess_extension(data)
     if kind in IMAGE_KINDS:
         return DocumentInput(images=[ImageInput(IMAGE_KINDS[kind], data)])
@@ -59,7 +61,7 @@ def prepare(data: bytes, filename: str) -> DocumentInput:
     if text:
         return DocumentInput(text=text[:MAX_TEXT])
     if kind == "pdf":
-        images = _pdf_images(data)
+        images = _pdf_images(data, max_pages)
         if images:
             return DocumentInput(images=images)
         reason = "a scanned PDF whose pages couldn't be read as images"
