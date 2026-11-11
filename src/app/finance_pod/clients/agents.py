@@ -25,9 +25,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import undefer
 
+from src.app.common import documents
 from src.app.common.clock import utcnow
 from src.app.core.llm.base import LLMError, LLMProvider
-from src.app.finance_pod import documents
 from src.app.finance_pod.clients.models import (
     ClientDocumentKind,
     FpClient,

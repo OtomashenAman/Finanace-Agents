@@ -1,3 +1,5 @@
+import { Link } from "react-router"
+
 import { BrandPanel } from "./components/brand-panel"
 import { LoginForm } from "./components/login-form"
 
@@ -16,9 +18,17 @@ export function LoginPage() {
         </section>
       </main>
 
-      <p className="mt-6 w-full max-w-[1120px] px-2 text-xs text-muted-foreground">
-        Demo environment: SSO with Microsoft Entra ID requires enterprise configuration.
-      </p>
+      <div className="mt-6 flex w-full max-w-[1120px] flex-wrap justify-between gap-2 px-2 text-xs text-muted-foreground">
+        <p>Demo environment: SSO with Microsoft Entra ID requires enterprise configuration.</p>
+        <p className="flex gap-3">
+          <Link to="/legal/privacy" className="hover:text-foreground hover:underline">
+            Privacy policy
+          </Link>
+          <Link to="/legal/terms" className="hover:text-foreground hover:underline">
+            Terms of use
+          </Link>
+        </p>
+      </div>
     </div>
   )
 }

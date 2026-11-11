@@ -162,15 +162,8 @@ function BankStatementImport({ snapshots }: { snapshots: Snapshot[] }) {
           ))}
         </select>
       </Field>
-      <Field
-        label="Bank statement (CSV)"
-        hint="Headers required: reference, payer, date, amount, currency, cleared."
-      >
-        <Input
-          type="file"
-          accept=".csv,text/csv"
-          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-        />
+      <Field label="Bank statement (any format)" hint={STATEMENT_HINT}>
+        <Input type="file" accept={STATEMENT_TYPES} onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
       </Field>
       <Button type="submit" size="sm" disabled={!file || !selectedId || importCsv.isPending}>
         <Upload /> Attach to snapshot
@@ -178,6 +171,11 @@ function BankStatementImport({ snapshots }: { snapshots: Snapshot[] }) {
     </form>
   )
 }
+
+// Any bank's export, or the statement itself: read by content, not by the file's name
+const STATEMENT_TYPES = ".csv,.tsv,.txt,.xlsx,.ofx,.qfx,.xml,.sta,.mt940,.940,.pdf,.docx,.png,.jpg,.jpeg,.webp"
+const STATEMENT_HINT =
+  "CSV, Excel, OFX/QFX, CAMT.053, MT940 in any bank's layout, or a PDF, Word file or photo (read by AI). Money in becomes receipts."
 
 function BankStatement({ snapshot }: { snapshot: Snapshot }) {
   const [file, setFile] = useState<File | null>(null)
@@ -191,8 +189,8 @@ function BankStatement({ snapshot }: { snapshot: Snapshot }) {
           void attempt(() => importCsv.mutateAsync({ snapshotId: snapshot.id, file }), imported)
       }}
     >
-      <Field label="Add a bank statement (CSV)" hint="reference, payer, date, amount, currency, cleared. Creates a new snapshot.">
-        <Input type="file" accept=".csv,text/csv" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+      <Field label="Add a bank statement (any format)" hint={`${STATEMENT_HINT} Creates a new snapshot.`}>
+        <Input type="file" accept={STATEMENT_TYPES} onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
       </Field>
       <Button type="submit" size="sm" variant="outline" disabled={!file || importCsv.isPending}>
         <Upload /> Add statement

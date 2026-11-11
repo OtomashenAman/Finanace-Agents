@@ -13,9 +13,9 @@ from decimal import Decimal, InvalidOperation
 
 from pydantic import BaseModel, Field
 
+from src.app.common import documents
 from src.app.core.config import get_settings
 from src.app.core.llm.base import LLMProvider
-from src.app.finance_pod import documents
 from src.app.finance_pod.reference.models import VendorStatus
 from src.app.finance_pod.requests.agent import Reference, price_checks
 from src.app.finance_pod.requests.models import FpPurchaseRequest
