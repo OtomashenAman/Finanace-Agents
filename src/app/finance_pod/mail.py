@@ -37,6 +37,8 @@ class MailKind(StrEnum):
     CLIENT_INVITE = "client_invite"  # AR 1.1: the client's secure application link
     CLIENT_GAPS = "client_gaps"  # AR 1.1.2.c: what's missing or wrong, with a new link
     CLIENT_WELCOME = "client_welcome"  # AR 1.3: the account details, once approved
+    CLIENT_INVOICE = "client_invoice"  # AR 3.5: the invoice PDF and its online link
+    CLIENT_STATEMENT = "client_statement"  # AR 3.5: the monthly statement
 
 
 class MailStatus(StrEnum):
@@ -62,7 +64,8 @@ class FpEmail(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     provider_message_id: Mapped[str | None] = mapped_column(String(300))
     simulated: Mapped[bool]
     error: Mapped[str | None] = mapped_column(String(500))
-    sent_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+    # None: sent by an agent on its own (the delivery agent's invoices and statements)
+    sent_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
     sent_at: Mapped[datetime | None]
 
 
@@ -74,7 +77,7 @@ async def send(
     to_name: str | None,
     subject: str,
     body: str,
-    sent_by: uuid.UUID,
+    sent_by: uuid.UUID | None,
     request_id: uuid.UUID | None = None,
     attachments: list[providers.Attachment] | None = None,
 ) -> FpEmail:

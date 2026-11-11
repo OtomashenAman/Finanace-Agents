@@ -1,7 +1,7 @@
 import { Card, LoadError, Loading } from "@/features/service-pod/components/bits"
 
 import { FpodPage } from "./components/fpod-page"
-import { useClientMeasures, useInvoiceMeasures, useMeasures, usePaymentMeasures } from "./hooks"
+import { useBillingMeasures, useClientMeasures, useInvoiceMeasures, useMeasures, usePaymentMeasures } from "./hooks"
 import { ISSUE_KIND, money } from "./labels"
 
 const days = (v: number | null) => (v === null ? "—" : `${v.toLocaleString(undefined, { maximumFractionDigits: 1 })} d`)
@@ -125,6 +125,24 @@ function ClientMeasures() {
   )
 }
 
+function BillingMeasures() {
+  const q = useBillingMeasures()
+  if (q.isPending) return <Loading what="billing measures" />
+  if (q.isError) return <LoadError what="billing measures" />
+  const d = q.data
+  const pct = (n: number) => (d.sent ? `${Math.round((n / d.sent) * 100)}%` : "—")
+  return (
+    <section className="space-y-4">
+      <h2 className="text-sm font-semibold tracking-wider text-muted-foreground uppercase">Receivables · billing</h2>
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Stat label="Billing accuracy" value={pct(d.accurate)} hint={`${d.accurate} of ${d.sent} sent with no price corrected`} />
+        <Stat label="Days to invoice (median)" value={days(d.days_to_invoice_median)} hint={`report issued to invoice sent · ${d.same_day} the same day`} />
+        <Stat label="Straight through" value={pct(d.straight_through)} hint={`nothing flagged · ${d.in_review} with the billing analyst now`} />
+      </div>
+    </section>
+  )
+}
+
 export function MeasuresPage() {
   const m = useMeasures()
   return (
@@ -136,6 +154,7 @@ export function MeasuresPage() {
       ) : (
         <div className="space-y-5">
           <ClientMeasures />
+          <BillingMeasures />
           <PaymentMeasures />
           <InvoiceMeasures />
           <h2 className="text-sm font-semibold tracking-wider text-muted-foreground uppercase">Purchasing · request to PO</h2>

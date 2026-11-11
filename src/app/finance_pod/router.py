@@ -2,11 +2,15 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from sqlalchemy import func, select
 
+from src.app.common.context import RequestContextDep
 from src.app.core.db import SessionDep
+from src.app.finance_pod import demo
 from src.app.finance_pod import measures as measures_module
 from src.app.finance_pod.access import FinanceAccessDep
 from src.app.finance_pod.approvals import service as approvals_service
 from src.app.finance_pod.approvals.router import router as approvals_router
+from src.app.finance_pod.billing import service as billing_service
+from src.app.finance_pod.billing.router import router as billing_router
 from src.app.finance_pod.clients import service as clients_service
 from src.app.finance_pod.clients.router import router as clients_router
 from src.app.finance_pod.invoices import service as invoices_service
@@ -45,6 +49,7 @@ router.include_router(orders_router)
 router.include_router(invoices_router)
 router.include_router(payments_router)
 router.include_router(clients_router)
+router.include_router(billing_router)
 
 
 class OverviewOut(BaseModel):
@@ -59,12 +64,15 @@ class OverviewOut(BaseModel):
     queries: dict[str, int]  # vendor queries by status
     client_applications: dict[str, int]  # receivables: applications by status
     credit_reviews_open: int  # the monitor's proposals waiting for the credit controller
+    lab_submissions: dict[str, int]  # billing: submissions by status
+    sales_invoices: dict[str, int]  # billing: client invoices by status
 
 
 @router.get("/overview", response_model=OverviewOut)
 async def overview(session: SessionDep, access: FinanceAccessDep) -> OverviewOut:
     """Where requests stand, and whether the reference data is loaded."""
     client_applications, credit_reviews_open = await clients_service.overview_counts(session)
+    lab_submissions, sales_invoices = await billing_service.overview_counts(session)
     reference = {}
     for name, model in (
         ("cost_centres", FpCostCentre),
@@ -122,6 +130,8 @@ async def overview(session: SessionDep, access: FinanceAccessDep) -> OverviewOut
         },
         client_applications=client_applications,
         credit_reviews_open=credit_reviews_open,
+        lab_submissions=lab_submissions,
+        sales_invoices=sales_invoices,
     )
 
 
@@ -137,7 +147,29 @@ async def invoice_measures(session: SessionDep, _: FinanceAccessDep) -> dict[str
     return await invoices_service.measures(session)
 
 
+class DemoDataOut(BaseModel):
+    loaded: list[str]
+    skipped: list[str]  # already there
+    notes: list[str]
+
+
+@router.post("/demo-data", response_model=DemoDataOut)
+async def load_demo_data(
+    session: SessionDep, ctx: RequestContextDep, access: FinanceAccessDep
+) -> DemoDataOut:
+    """Load the demo data (any environment). Sections already there are left alone; no
+    email is sent."""
+    result = await demo.load(session, access.user, ctx)
+    return DemoDataOut(loaded=result.loaded, skipped=result.skipped, notes=result.notes)
+
+
 @router.get("/measures/clients")
 async def client_measures(session: SessionDep, _: FinanceAccessDep) -> dict[str, object]:
     """Receivables: account set-up time and data errors."""
     return await clients_service.measures(session)
+
+
+@router.get("/measures/billing")
+async def billing_measures(session: SessionDep, _: FinanceAccessDep) -> dict[str, object]:
+    """Receivables: billing accuracy and days to invoice."""
+    return await billing_service.measures(session)

@@ -1,5 +1,5 @@
 import { useRef, useState, type FormEvent, type ReactNode } from "react"
-import { Download, Upload } from "lucide-react"
+import { Database, Download, Upload } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -7,7 +7,7 @@ import { Switch } from "@/components/ui/switch"
 import { Card, Empty, Field, LoadError, Loading } from "@/features/service-pod/components/bits"
 import { attempt, selectClass } from "@/features/service-pod/ui"
 
-import { fpodApi, type FinanceSettings, type ImportResult, type Reference } from "./api"
+import { fpodApi, type DemoDataResult, type FinanceSettings, type ImportResult, type Reference } from "./api"
 import { FpodPage } from "./components/fpod-page"
 import { useFinanceSettings, useFpodMutation, useReference } from "./hooks"
 import { formatDate, money } from "./labels"
@@ -95,6 +95,7 @@ function SettingsForm({ saved }: { saved: FinanceSettings }) {
     bank_change_days: saved.bank_change_days,
     max_new_client_limit: saved.max_new_client_limit,
     credit_review_days: saved.credit_review_days,
+    estimate_tolerance_pct: saved.estimate_tolerance_pct,
   })
   const submit = (e: FormEvent) => {
     e.preventDefault()
@@ -153,6 +154,9 @@ function SettingsForm({ saved }: { saved: FinanceSettings }) {
         </Field>
         <Field label="Client review every (days)" hint="The monitor proposes a periodic review of each account's terms.">
           <Input type="number" min={30} max={1095} value={form.credit_review_days} onChange={(e) => setForm({ ...form, credit_review_days: Number(e.target.value) })} />
+        </Field>
+        <Field label="Above estimate (%)" hint="An invoice this much over the intake fee estimate goes to the billing analyst.">
+          <Input inputMode="decimal" value={form.estimate_tolerance_pct} onChange={(e) => setForm({ ...form, estimate_tolerance_pct: e.target.value })} />
         </Field>
         <div className="space-y-1 text-sm">
           <span className="font-medium text-brand-navy">Self-approval</span>
@@ -339,11 +343,60 @@ function ReferenceTables({ d }: { d: Reference }) {
   )
 }
 
+/** Demo data for a fresh database (e.g. a new production deployment): no shell needed. */
+function DemoData() {
+  const load = useFpodMutation(fpodApi.loadDemoData)
+  const [result, setResult] = useState<DemoDataResult | null>(null)
+  return (
+    <Card
+      title="Demo data"
+      hint="Reference data, vendors with bank accounts, issued POs, invoices ready to pay, client accounts with history, a fee schedule and lab submissions. Safe to run again: what's already there is left alone. No email is sent."
+      actions={
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={load.isPending}
+          onClick={async () => {
+            if (!window.confirm("Load the Finance POD demo data into this environment?")) return
+            const r = await attempt(() => load.mutateAsync([]), (x) => (x.loaded.length ? `Loaded ${x.loaded.length} section(s).` : "Everything was already there."))
+            if (r) setResult(r)
+          }}
+        >
+          <Database aria-hidden /> {load.isPending ? "Loading…" : "Load demo data"}
+        </Button>
+      }
+    >
+      {result ? (
+        <ul className="space-y-1 text-sm">
+          {result.loaded.map((l) => (
+            <li key={l} className="text-emerald-800">
+              ✓ {l}
+            </li>
+          ))}
+          {result.skipped.map((l) => (
+            <li key={l} className="text-muted-foreground">
+              Already there: {l}
+            </li>
+          ))}
+          {result.notes.map((l) => (
+            <li key={l} className="text-amber-800">
+              {l}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-sm text-muted-foreground">For demos and testing. The person loading it is the requester and buyer; another Finance Admin is the approver.</p>
+      )}
+    </Card>
+  )
+}
+
 export function SetupPage() {
   const reference = useReference()
   return (
     <FpodPage title="Reference data & settings" subtitle="What the Finance POD agents work from, and the business rules they apply.">
       <div className="space-y-5">
+        <DemoData />
         <ReferenceUpload />
         <SettingsCard />
         {reference.isPending ? (

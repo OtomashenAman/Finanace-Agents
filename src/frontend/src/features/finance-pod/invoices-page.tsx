@@ -1,17 +1,17 @@
 import { useRef, useState } from "react"
 import { Link, useNavigate, useSearchParams } from "react-router"
-import { FileUp, Keyboard, LoaderCircle, Sparkles, Trash2 } from "lucide-react"
+import { FileUp, Keyboard, LoaderCircle, Sparkles, Trash2, Wand2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { AiBadge, AiCard, Card, Empty, LoadError, Loading, Pill } from "@/features/service-pod/components/bits"
-import { attempt } from "@/features/service-pod/ui"
+import { attempt, selectClass } from "@/features/service-pod/ui"
 import { errorMessage } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 import { FpodPage } from "./components/fpod-page"
-import { useFpodMutation, useInvoiceMeasures, useInvoices } from "./hooks"
-import { invoicesApi, type InvoiceStatus } from "./invoices-api"
+import { useFpodMutation, useInvoiceMeasures, useInvoices, usePurchaseOrders } from "./hooks"
+import { invoicesApi, type InvoiceStatus, type SampleScenario } from "./invoices-api"
 import { formatDate, INVOICE_STATUS, money } from "./labels"
 
 function Kpis() {
@@ -109,7 +109,65 @@ function Capture() {
           </>
         )}
       </div>
+      <Sample />
     </AiCard>
+  )
+}
+
+const SCENARIOS: { key: SampleScenario; label: string }[] = [
+  { key: "match", label: "Matches the PO and what was received" },
+  { key: "price", label: "A price above the tolerance" },
+  { key: "quantity", label: "More than was received" },
+  { key: "duplicate", label: "A duplicate of the last invoice" },
+]
+
+/** No document to hand: write a sample invoice from an issued PO, then read it like an upload. */
+function Sample() {
+  const navigate = useNavigate()
+  const pos = (usePurchaseOrders(null).data ?? []).filter((p) => p.status === "issued" || p.status === "acknowledged")
+  const make = useFpodMutation(invoicesApi.sample)
+  const [po, setPo] = useState("")
+  const [scenario, setScenario] = useState<SampleScenario>("match")
+  return (
+    <div className="mt-3 rounded-xl border border-border/80 bg-muted/20 p-3">
+      <p className="text-sm font-medium">No invoice to hand? Use a sample one</p>
+      <p className="text-xs text-muted-foreground">
+        The supplier's invoice is written as a PDF from an issued PO, then the capture agent reads it as if it were uploaded.
+      </p>
+      <div className="mt-2 flex flex-wrap items-end gap-2">
+        <select aria-label="Purchase order" className={cn(selectClass, "w-auto min-w-56 flex-1")} value={po} onChange={(e) => setPo(e.target.value)}>
+          <option value="">{pos.length ? "Choose an issued PO…" : "No issued PO yet"}</option>
+          {pos.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.reference} · {p.vendor_name} · {money(p.total, p.currency)}
+            </option>
+          ))}
+        </select>
+        <select aria-label="Scenario" className={cn(selectClass, "w-auto min-w-56 flex-1")} value={scenario} onChange={(e) => setScenario(e.target.value as SampleScenario)}>
+          {SCENARIOS.map((s) => (
+            <option key={s.key} value={s.key}>
+              {s.label}
+            </option>
+          ))}
+        </select>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!po || make.isPending}
+          onClick={async () => {
+            try {
+              const r = await make.mutateAsync([po, scenario])
+              toast.success(`${r.reference}: ${r.note}`)
+              navigate(`/finance-pod/invoices/${r.invoice_id}`)
+            } catch (error) {
+              toast.error(errorMessage(error, "The sample invoice couldn't be made."))
+            }
+          }}
+        >
+          {make.isPending ? <LoaderCircle className="animate-spin" aria-hidden /> : <Wand2 aria-hidden />} Make a sample invoice
+        </Button>
+      </div>
+    </div>
   )
 }
 

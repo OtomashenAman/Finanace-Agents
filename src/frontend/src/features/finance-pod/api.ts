@@ -19,6 +19,7 @@ export interface FinanceSettings {
   bank_change_days: number
   max_new_client_limit: string
   credit_review_days: number
+  estimate_tolerance_pct: string
   updated_at: string | null
 }
 
@@ -123,6 +124,8 @@ export interface Overview {
   queries: Partial<Record<string, number>>
   client_applications: Partial<Record<string, number>>
   credit_reviews_open: number
+  lab_submissions: Partial<Record<string, number>>
+  sales_invoices: Partial<Record<string, number>>
 }
 
 export interface LineIn {
@@ -308,8 +311,15 @@ export interface RequestDraft {
 const BASE = "/finance-pod"
 const R = `${BASE}/requests`
 
+export interface DemoDataResult {
+  loaded: string[]
+  skipped: string[]
+  notes: string[]
+}
+
 export const fpodApi = {
   overview: () => apiRequest<Overview>(`${BASE}/overview`),
+  loadDemoData: () => apiRequest<DemoDataResult>(`${BASE}/demo-data`, { method: "POST" }),
   settings: () => apiRequest<FinanceSettings>(`${BASE}/settings`),
   saveSettings: (body: FinanceSettingsUpdate) =>
     apiRequest<FinanceSettings>(`${BASE}/settings`, { method: "PUT", json: body }),

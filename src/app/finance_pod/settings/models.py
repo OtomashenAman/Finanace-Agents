@@ -64,6 +64,10 @@ class FinancePodSettings(TimestampMixin, Base):
         Numeric(18, 2), default=Decimal("50000.00"), server_default="50000.00"
     )
     credit_review_days: Mapped[int] = mapped_column(default=365, server_default="365")
+    # Billing: an invoice more than this % over the intake estimate goes to the analyst
+    estimate_tolerance_pct: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2), default=Decimal("10.00"), server_default="10.00"
+    )
     updated_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")
     )
