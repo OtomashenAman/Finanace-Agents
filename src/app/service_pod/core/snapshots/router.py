@@ -2,12 +2,14 @@ import uuid
 from datetime import date
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Form, Response, UploadFile, status
+from fastapi import APIRouter, Depends, Form, Response, UploadFile, status
 
 from src.app.common.context import RequestContextDep
 from src.app.common.schemas import ErrorResponse
 from src.app.core.config import get_settings
 from src.app.core.db import SessionDep
+from src.app.core.llm.base import LLMProvider
+from src.app.core.llm.factory import get_llm_provider
 from src.app.data_sources.models import DataSource
 from src.app.service_pod.core.access.service import PodAccessDep
 from src.app.service_pod.core.snapshots import purge, service, user_data
@@ -133,10 +135,15 @@ async def import_bank_statement(
     access: PodAccessDep,
     ctx: RequestContextDep,
     response: Response,
+    llm: Annotated[LLMProvider, Depends(get_llm_provider)],
 ) -> SnapshotImportResult:
-    """A new snapshot with the statement's receipts added; the original is unchanged."""
+    """A new snapshot with the statement's receipts (money in) added; the original is
+    unchanged. Any statement format: CSV/TSV/Excel in any layout, OFX/QFX, CAMT.053/054,
+    MT940; PDF, Word, photos and scans are read by the AI."""
     data = await _read(file, get_settings().pod_bank_csv_max_bytes)
-    result = await service.import_bank_statement(session, access, snapshot_id, data, ctx)
+    result = await service.import_bank_statement(
+        session, access, snapshot_id, data, file.filename or "statement", llm, ctx
+    )
     return _status(result, response)
 
 

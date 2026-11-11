@@ -26,6 +26,7 @@ import { ClientPage } from "@/features/finance-pod/client-page"
 import { ClientPortalPage } from "@/features/finance-pod/client-portal-page"
 import { ClientsPage } from "@/features/finance-pod/clients-page"
 import { FpodShell } from "@/features/finance-pod/components/fpod-shell"
+import { PrivacyPage, TermsPage } from "@/features/legal/legal-pages"
 import { CreditReviewsPage } from "@/features/finance-pod/credit-reviews-page"
 import { FeeSchedulePage } from "@/features/finance-pod/fee-schedule-page"
 import { LabSubmissionsPage } from "@/features/finance-pod/lab-submissions-page"
@@ -64,6 +65,9 @@ const router = createBrowserRouter([
   // Vendors' secure onboarding form: no login, the single-use link is the key
   { path: "/vendor-portal/:token", element: <VendorPortalPage /> },
   { path: "/vendor-help", element: <VendorHelpPage /> },
+  // Public legal pages (no login: required by Intuit and linked from the sign-in page)
+  { path: "/legal/privacy", element: <PrivacyPage /> },
+  { path: "/legal/terms", element: <TermsPage /> },
   // Clients apply for an account: the single-use link is the key
   { path: "/client-portal/:token", element: <ClientPortalPage /> },
   // Clients view an invoice from its email: the link is the key

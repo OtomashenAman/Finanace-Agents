@@ -17,9 +17,9 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from src.app.common import documents
 from src.app.core.config import get_settings
 from src.app.core.llm.base import LLMProvider
-from src.app.finance_pod import documents
 from src.app.finance_pod.invoices.models import FpInvoice
 from src.app.finance_pod.orders.models import FpPurchaseOrder
 from src.app.finance_pod.reference.models import FpVendor

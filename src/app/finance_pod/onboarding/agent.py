@@ -17,9 +17,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import undefer
 
+from src.app.common import documents
 from src.app.core.llm.base import LLMError, LLMProvider
 from src.app.data_sources import crypto
-from src.app.finance_pod import documents
 from src.app.finance_pod.onboarding import sanctions
 from src.app.finance_pod.onboarding.models import DocumentKind, FpOnboarding, FpOnboardingDocument
 from src.app.service_pod.common import ai

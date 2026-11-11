@@ -11,6 +11,7 @@ from src.app.audit.service import record_event
 from src.app.common.clock import utcnow
 from src.app.common.context import RequestContext
 from src.app.core.config import get_settings
+from src.app.core.llm.base import LLMProvider
 from src.app.data_sources import service as data_sources
 from src.app.data_sources.exceptions import AppCredentialsError
 from src.app.data_sources.models import DataSource, SourceKind
@@ -35,6 +36,7 @@ from src.app.service_pod.core.snapshots.exceptions import (
     SnapshotInvalidError,
     SnapshotNotFoundError,
 )
+from src.app.service_pod.core.snapshots.importers import bank_statement
 from src.app.service_pod.core.snapshots.importers.quickbooks_pnl import PnlReports, fetch_pnl
 from src.app.service_pod.core.snapshots.models import (
     PodSnapshot,
@@ -296,15 +298,20 @@ async def import_bank_statement(
     access: PodAccess,
     snapshot_id: uuid.UUID,
     data: bytes,
+    filename: str,
+    llm: LLMProvider,
     ctx: RequestContext,
 ) -> SnapshotImportResult:
-    """A new snapshot: the parent's content plus the statement's receipts. The parent stays
-    exactly as it was."""
+    """A new snapshot: the parent's content plus the statement's receipts (any statement
+    format: see importers.bank_statement). The parent stays exactly as it was."""
     parent = await load_snapshot(session, snapshot_id)
     entity = await _entity(session, parent.entity_id)
-    receipts = importers.parse_bank_csv(data)
-    doc = importers.with_bank_receipts(document(parent), receipts)
-    return await _store(session, access, entity, doc, SourceType.BANK_CSV, ctx, parent=parent)
+    parent_doc = document(parent)
+    statement = await bank_statement.read(data, filename, parent_doc.currency, llm)
+    doc = importers.with_bank_receipts(parent_doc, statement.receipts)
+    result = await _store(session, access, entity, doc, SourceType.BANK_CSV, ctx, parent=parent)
+    result.notes = [*statement.notes, *result.notes]
+    return result
 
 
 def archived_ids() -> Select[tuple[uuid.UUID]]:
