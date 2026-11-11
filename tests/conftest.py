@@ -60,6 +60,14 @@ from src.app.core.llm.factory import get_llm_provider  # noqa: E402
 from src.app.main import app  # noqa: E402
 
 TABLES = (
+    "fpod_statements",
+    "fpod_sales_invoice_lines",
+    "fpod_sales_invoices",
+    "fpod_submission_lines",
+    "fpod_lab_submissions",
+    "fpod_fees",
+    "fpod_contract_prices",
+    "fpod_tax_rates",
     "fpod_credit_reviews",
     "fpod_client_history",
     "fpod_lab_clients",

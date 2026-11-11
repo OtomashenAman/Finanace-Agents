@@ -18,6 +18,7 @@ class FinanceSettingsOut(BaseModel):
     bank_change_days: int
     max_new_client_limit: Decimal
     credit_review_days: int
+    estimate_tolerance_pct: Decimal
     updated_at: datetime | None
 
 
@@ -46,3 +47,4 @@ class FinanceSettingsUpdate(BaseModel):
         default=None, ge=0, max_digits=18, decimal_places=2
     )
     credit_review_days: int | None = Field(default=None, ge=30, le=1095)
+    estimate_tolerance_pct: Decimal | None = Field(default=None, ge=0, le=100, decimal_places=2)

@@ -2,6 +2,7 @@ import uuid
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Response, UploadFile
+from pydantic import BaseModel
 
 from src.app.common.context import RequestContextDep
 from src.app.common.schemas import ErrorResponse
@@ -10,7 +11,7 @@ from src.app.core.db import SessionDep
 from src.app.core.llm.base import LLMProvider
 from src.app.core.llm.factory import get_llm_provider
 from src.app.finance_pod.access import FinanceAccessDep
-from src.app.finance_pod.invoices import service
+from src.app.finance_pod.invoices import sample, service
 from src.app.finance_pod.invoices.models import ExceptionStatus, InvoiceStatus
 from src.app.finance_pod.invoices.schemas import (
     CreditNoteIn,
@@ -28,6 +29,7 @@ from src.app.finance_pod.invoices.schemas import (
     ReceiptRequestOut,
     VersionIn,
 )
+from src.app.finance_pod.orders.models import FpPurchaseOrder, PoStatus
 
 _ERRORS: dict[int | str, dict[str, Any]] = {
     code: {"model": ErrorResponse} for code in (403, 404, 409, 422, 503)
@@ -66,6 +68,35 @@ async def capture(
         session, access, file.filename or "invoice", file.content_type or "", data, llm, ctx
     )
     return await service.detail(session, inv.id)
+
+
+class SampleIn(BaseModel):
+    po_id: uuid.UUID
+    scenario: sample.Scenario = "match"
+
+
+class SampleOut(BaseModel):
+    invoice_id: uuid.UUID
+    reference: str
+    note: str  # what the sample was built to show
+
+
+@router.post("/invoices/sample", response_model=SampleOut, status_code=201, responses=_ERRORS)
+async def sample_invoice(
+    body: SampleIn,
+    session: SessionDep,
+    ctx: RequestContextDep,
+    access: FinanceAccessDep,
+    llm: LLMDep,
+) -> SampleOut:
+    """A sample supplier invoice for an issued PO (demo data instead of an upload): its PDF
+    goes through the capture agent like any other."""
+    po = await session.get(FpPurchaseOrder, body.po_id)
+    if po is None or po.status not in (PoStatus.ISSUED, PoStatus.ACKNOWLEDGED):
+        raise service.InvoiceInvalidError("Choose an issued purchase order.")
+    filename, data, note = await sample.build(session, po, body.scenario)
+    inv = await service.capture(session, access, filename, "application/pdf", data, llm, ctx)
+    return SampleOut(invoice_id=inv.id, reference=inv.reference, note=note)
 
 
 @router.post("/invoices", response_model=InvoiceOut, status_code=201, responses=_ERRORS)

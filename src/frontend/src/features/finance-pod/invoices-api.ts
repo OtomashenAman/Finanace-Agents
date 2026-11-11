@@ -1,7 +1,8 @@
 import { apiDownload, apiRequest } from "@/lib/api"
 
 export type InvoiceStatus = "captured" | "duplicate" | "posted" | "exception" | "ready" | "paid" | "rejected"
-export type ExceptionStatus = "open" | "waiting_vendor" | "waiting_receipt" | "resolved"
+export type SampleScenario = "match" | "price" | "quantity" | "duplicate"
+export type ExceptionStatus ="open" | "waiting_vendor" | "waiting_receipt" | "resolved"
 export type ExceptionDecision = "accept" | "credit" | "amend_po" | "reject"
 
 export interface InvoiceLineIn {
@@ -234,6 +235,11 @@ export const invoicesApi = {
     form.append("file", file)
     return apiRequest<Invoice>(`${FP}/invoices/capture`, { method: "POST", form })
   },
+  sample: (po_id: string, scenario: SampleScenario) =>
+    apiRequest<{ invoice_id: string; reference: string; note: string }>(`${FP}/invoices/sample`, {
+      method: "POST",
+      json: { po_id, scenario },
+    }),
   create: (body: InvoiceIn) => apiRequest<Invoice>(`${FP}/invoices`, { method: "POST", json: body }),
   update: (id: string, version: number, body: InvoiceIn) =>
     apiRequest<Invoice>(`${FP}/invoices/${id}`, { method: "PUT", json: { ...body, expected_version: version } }),

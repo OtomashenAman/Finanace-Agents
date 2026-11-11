@@ -16,6 +16,7 @@ import src.app.auth.models
 import src.app.data_sources.models
 import src.app.entities.models
 import src.app.finance_pod.approvals.models
+import src.app.finance_pod.billing.models
 import src.app.finance_pod.clients.models
 import src.app.finance_pod.invoices.models
 import src.app.finance_pod.mail

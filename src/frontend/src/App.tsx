@@ -19,12 +19,17 @@ import { WorklistPage } from "@/features/worklist/worklist-page"
 import { GuestOnly, RequireAdmin, RequireAuth } from "@/features/auth/route-guards"
 import { DataSourcesPage } from "@/features/data-sources/data-sources-page"
 import { ApprovalsPage as FinanceApprovalsPage } from "@/features/finance-pod/approvals-page"
+import { BillingPage } from "@/features/finance-pod/billing-page"
 import { ClientApplicationPage } from "@/features/finance-pod/client-application-page"
+import { ClientInvoicePage } from "@/features/finance-pod/client-invoice-page"
 import { ClientPage } from "@/features/finance-pod/client-page"
 import { ClientPortalPage } from "@/features/finance-pod/client-portal-page"
 import { ClientsPage } from "@/features/finance-pod/clients-page"
 import { FpodShell } from "@/features/finance-pod/components/fpod-shell"
 import { CreditReviewsPage } from "@/features/finance-pod/credit-reviews-page"
+import { FeeSchedulePage } from "@/features/finance-pod/fee-schedule-page"
+import { LabSubmissionsPage } from "@/features/finance-pod/lab-submissions-page"
+import { SalesInvoicePage } from "@/features/finance-pod/sales-invoice-page"
 import { FinancePodHomePage } from "@/features/finance-pod/home-page"
 import { ExceptionsPage } from "@/features/finance-pod/exceptions-page"
 import { InvoicePage } from "@/features/finance-pod/invoice-page"
@@ -61,6 +66,8 @@ const router = createBrowserRouter([
   { path: "/vendor-help", element: <VendorHelpPage /> },
   // Clients apply for an account: the single-use link is the key
   { path: "/client-portal/:token", element: <ClientPortalPage /> },
+  // Clients view an invoice from its email: the link is the key
+  { path: "/client-invoice/:token", element: <ClientInvoicePage /> },
   // Receivers confirm deliveries from their phone: the single-use link is the key
   { path: "/receipt/:token", element: <ReceiptConfirmPage /> },
   {
@@ -131,6 +138,10 @@ const router = createBrowserRouter([
               { path: "/finance-pod/clients/applications/:applicationId", element: <ClientApplicationPage /> },
               { path: "/finance-pod/clients/:clientId", element: <ClientPage /> },
               { path: "/finance-pod/credit-reviews", element: <CreditReviewsPage /> },
+              { path: "/finance-pod/lab-submissions", element: <LabSubmissionsPage /> },
+              { path: "/finance-pod/billing", element: <BillingPage /> },
+              { path: "/finance-pod/billing/:invoiceId", element: <SalesInvoicePage /> },
+              { path: "/finance-pod/fee-schedule", element: <FeeSchedulePage /> },
               { path: "/finance-pod/setup", element: <SetupPage /> },
             ],
           },

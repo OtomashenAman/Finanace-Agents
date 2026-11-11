@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { fpodApi, type RequestStatus } from "./api"
+import { billingApi, type SalesInvoiceStatus, type SubmissionStatus } from "./billing-api"
 import { clientsApi } from "./clients-api"
 import { invoicesApi, type ExceptionStatus, type InvoiceStatus } from "./invoices-api"
 import { paymentsApi } from "./payments-api"
@@ -144,6 +145,30 @@ export function useCreditReviews(openOnly: boolean) {
 
 export function useClientMeasures() {
   return useQuery({ queryKey: [FPOD_TAG, "client-measures"], queryFn: clientsApi.measures })
+}
+
+export function useSubmissions(status: SubmissionStatus | null) {
+  return useQuery({ queryKey: [FPOD_TAG, "lab-submissions", status], queryFn: () => billingApi.submissions(status) })
+}
+
+export function useSalesInvoices(status: SalesInvoiceStatus | null) {
+  return useQuery({ queryKey: [FPOD_TAG, "sales-invoices", status], queryFn: () => billingApi.invoices(status) })
+}
+
+export function useSalesInvoice(id: string | undefined) {
+  return useQuery({ queryKey: [FPOD_TAG, "sales-invoice", id], queryFn: () => billingApi.invoice(id!), enabled: Boolean(id) })
+}
+
+export function useFeeSchedule() {
+  return useQuery({ queryKey: [FPOD_TAG, "fee-schedule"], queryFn: billingApi.feeSchedule })
+}
+
+export function useStatements() {
+  return useQuery({ queryKey: [FPOD_TAG, "statements"], queryFn: billingApi.statements })
+}
+
+export function useBillingMeasures() {
+  return useQuery({ queryKey: [FPOD_TAG, "billing-measures"], queryFn: billingApi.measures })
 }
 
 /** A change to Finance POD data: on success, refresh every Finance POD query. */

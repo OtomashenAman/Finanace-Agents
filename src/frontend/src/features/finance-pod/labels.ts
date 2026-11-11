@@ -362,7 +362,7 @@ export function termsText(t: { credit_limit: string | null; deposit_pct: string;
 }
 
 /** GIA AR Phase 1 (to-be): client account and credit set-up. */
-export const RECEIVABLES_FLOW: ProcessStep[] = [
+const CLIENT_SETUP: ProcessStep[] = [
   {
     id: "1.1",
     title: "Client onboarding",
@@ -400,12 +400,74 @@ export const RECEIVABLES_FLOW: ProcessStep[] = [
   },
 ]
 
+/** GIA AR Phase 3 (to-be): billing and invoicing. */
+const BILLING: ProcessStep[] = [
+  {
+    id: "3.1",
+    title: "Build the invoice",
+    who: "Billing agent",
+    live: true,
+    tasks: [
+      { id: "3.1.1", actor: "agent", title: "Trigger", steps: ["On report-issued event"] },
+      { id: "3.1.2", actor: "agent", title: "Build", steps: ["Services actually performed", "Client and account terms"] },
+    ],
+  },
+  {
+    id: "3.2",
+    title: "Price and check",
+    who: "Fee-rule agent",
+    live: true,
+    tasks: [
+      { id: "3.2.1", actor: "agent", title: "Apply rules", steps: ["Fees, discounts, contract prices", "Currency and tax"] },
+      { id: "3.2.2", actor: "agent", title: "Check", steps: ["Compare to fee estimate", "Flag unusual items"] },
+    ],
+  },
+  {
+    id: "3.3",
+    title: "Exceptions",
+    who: "Billing analyst",
+    live: true,
+    tasks: [{ id: "3.3.1", actor: "person", title: "Billing analyst", steps: ["Reviews flagged invoices", "Approves price overrides"] }],
+  },
+  {
+    id: "3.5",
+    title: "Deliver",
+    who: "Delivery agent",
+    live: true,
+    tasks: [{ id: "3.5.1", actor: "agent", title: "Send", steps: ["Posts invoice; portal and email", "Monthly statements automatic"] }],
+  },
+]
+
+export const RECEIVABLES_FLOW: ProcessStep[] = [...CLIENT_SETUP, ...BILLING]
+
 export const RECEIVABLES_GUARDRAILS = [
   "No credit without human approval: the credit controller decides",
   "Whoever opened an application can't approve its credit",
   "Set up once from the approved record: ERP and lab system kept in sync",
+  "Agents never change the fee schedule; price overrides need the billing analyst",
   "All decisions logged",
 ]
+
+export const SUBMISSION_STATUS: Record<string, [string, Tone]> = {
+  in_lab: ["In the lab", "info"],
+  report_issued: ["Report issued", "warn"],
+  invoiced: ["Invoiced", "good"],
+  cancelled: ["Cancelled", "neutral"],
+}
+
+export const SALES_INVOICE_STATUS: Record<string, [string, Tone]> = {
+  review: ["Billing analyst reviews", "warn"],
+  approved: ["Approved: sending", "info"],
+  sent: ["Sent", "good"],
+  void: ["Void", "neutral"],
+}
+
+export const PRICE_SOURCE: Record<string, string> = {
+  schedule: "Fee schedule",
+  contract: "Contract",
+  override: "Approved override",
+  none: "Not on schedule",
+}
 
 export const QUERY_INTENT: Record<string, string> = {
   status: "Payment status",

@@ -34,6 +34,7 @@ async def current(session: AsyncSession) -> FinancePodSettings:
         bank_change_days=30,
         max_new_client_limit=Decimal("50000.00"),
         credit_review_days=365,
+        estimate_tolerance_pct=Decimal("10.00"),
     )
 
 
@@ -52,6 +53,7 @@ def _out(row: FinancePodSettings) -> FinanceSettingsOut:
         bank_change_days=row.bank_change_days,
         max_new_client_limit=row.max_new_client_limit,
         credit_review_days=row.credit_review_days,
+        estimate_tolerance_pct=row.estimate_tolerance_pct,
         updated_at=row.updated_at,  # None on the unsaved defaults
     )
 

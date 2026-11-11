@@ -130,6 +130,11 @@ class Settings(BaseSettings):
     vendor_portal_days: int = 14
     # OFAC's Specially Designated Nationals list (CSV) for sanctions screening
     ofac_sdn_url: str = "https://www.treasury.gov/ofac/downloads/sdn.csv"
+    # The key the lab system sends (X-Lab-Key) with "report issued" events; unset: the
+    # endpoint refuses every call
+    lab_events_key: SecretStr | None = None
+    # Clients' links to view an invoice online stay valid this long
+    invoice_link_days: int = 120
 
     # Demo seed user (uv run poe seed)
     demo_admin_email: str = "finance.admin@example.com"

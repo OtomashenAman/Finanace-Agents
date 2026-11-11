@@ -11,6 +11,7 @@ refuses to activate a vendor or issue a PO, with that reason, instead of pretend
 """
 
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 from typing import Protocol
 
@@ -71,8 +72,23 @@ class ErpCustomer:
     on_hold: bool
 
 
+@dataclass(frozen=True)
+class ErpSalesInvoice:
+    number: str  # ours, e.g. SI-00012
+    customer_code: str
+    currency: str
+    total: Decimal
+    tax: Decimal
+    issue_date: date
+    due_date: date
+
+
 class Erp(Protocol):
     name: str
+
+    async def post_sales_invoice(self, invoice: ErpSalesInvoice) -> str:
+        """The ERP's reference for the posted client invoice."""
+        ...
 
     async def upsert_customer(self, customer: ErpCustomer) -> str:
         """The ERP's reference for the client account (created, or updated in place)."""
@@ -98,6 +114,9 @@ class LocalErp:
 
     async def upsert_customer(self, customer: ErpCustomer) -> str:
         return customer.code
+
+    async def post_sales_invoice(self, invoice: ErpSalesInvoice) -> str:
+        return invoice.number
 
     async def create_vendor(self, vendor: ErpVendor) -> str:
         return vendor.code
@@ -133,6 +152,9 @@ class WorkdayErp:
         )
 
     async def upsert_customer(self, customer: ErpCustomer) -> str:
+        raise ErpNotReadyError(self._reason + " Set FINANCE_POD_ERP=local to keep working.")
+
+    async def post_sales_invoice(self, invoice: ErpSalesInvoice) -> str:
         raise ErpNotReadyError(self._reason + " Set FINANCE_POD_ERP=local to keep working.")
 
     async def create_vendor(self, vendor: ErpVendor) -> str:
