@@ -99,13 +99,18 @@ async def from_quickbooks(
 
     customer_ids = {c.name.lower(): c.external_id for c in customers}
     problems: list[str] = []
+    # Customers named on an invoice or payment but not synced: QuickBooks lists only active
+    # customers, and renames a deleted one "<name> (deleted)". Its invoices are still owed.
+    unlisted: dict[str, Customer] = {}
 
     def customer_id(name: str, what: str) -> str:
         found = customer_ids.get(name.lower())
-        if found is None:
-            problems.append(f"{what}: customer {name!r} isn't in the customer list")
-            return ""
-        return found
+        if found is not None:
+            return found
+        key = name.lower()
+        if key not in unlisted:
+            unlisted[key] = Customer(id=f"unlisted:{key}"[:100], name=name)
+        return unlisted[key].id
 
     pod_invoices = []
     for inv in invoices:
@@ -158,6 +163,12 @@ async def from_quickbooks(
         shown = "; ".join(problems[:MAX_REPORTED_ERRORS])
         more = len(problems) - MAX_REPORTED_ERRORS
         raise SnapshotInvalidError(shown + (f" (and {more} more)" if more > 0 else ""))
+    if unlisted and notes is not None:
+        names = ", ".join(sorted(c.name for c in unlisted.values()))
+        notes.append(
+            f"Not in the QuickBooks customer list (inactive or deleted), kept with their "
+            f"invoices and payments, no email on file: {names}."
+        )
 
     pod_accounts = [
         Account(
@@ -205,7 +216,8 @@ async def from_quickbooks(
             ),
             customers=[
                 Customer(id=c.external_id, name=c.name, email=_email(c.email)) for c in customers
-            ],
+            ]
+            + list(unlisted.values()),
             invoices=pod_invoices,
             payments=pod_payments,
             accounts=pod_accounts,
