@@ -17,6 +17,7 @@ from src.app.data_sources.models import (
 )
 from src.app.data_sources.records import Customer, Invoice, Payment, Record, RecordType
 from src.app.entities.models import LegalEntity
+from src.app.service_pod.core.snapshots.importers.quickbooks_online import _email
 
 
 async def _connection(
@@ -127,7 +128,14 @@ async def test_invoices_of_a_deleted_customer_are_kept(
         db,
         admin_user,
         {
-            RecordType.CUSTOMER: [Customer(external_id="c1", name="Amy's Bird Sanctuary")],
+            RecordType.CUSTOMER: [
+                # QuickBooks allows several addresses in one email field
+                Customer(
+                    external_id="c1",
+                    name="Amy's Bird Sanctuary",
+                    email="ap@birds.example,amy@birds.example",
+                )
+            ],
             RecordType.INVOICE: [
                 _invoice("1037", "100.00", "100.00"),
                 _invoice("2173301", "500.00", "500.00", gone),
@@ -156,6 +164,14 @@ async def test_invoices_of_a_deleted_customer_are_kept(
     assert r.status_code == 201, r.text
     counts = r.json()["snapshot"]["row_counts"]
     assert counts["customers"] == 2 and counts["invoices"] == 3 and counts["payments"] == 1
+
+
+def test_the_first_valid_address_is_the_contact() -> None:
+    assert _email("ap@birds.example,amy@birds.example") == "ap@birds.example"
+    assert _email("Amy; amy@birds.example") == "amy@birds.example"
+    assert _email("call Amy") is None
+    assert _email("amy@") is None
+    assert _email(None) is None
 
 
 async def test_a_bad_record_is_named_not_a_crash(
