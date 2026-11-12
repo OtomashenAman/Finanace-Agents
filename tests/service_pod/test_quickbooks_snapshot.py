@@ -52,11 +52,11 @@ async def _connection(
     return source
 
 
-def _invoice(n: str, total: str, balance: str) -> Invoice:
+def _invoice(n: str, total: str, balance: str, customer: str = "Amy's Bird Sanctuary") -> Invoice:
     return Invoice(
         external_id=f"i{n}",
         doc_number=n,
-        customer_name="Amy's Bird Sanctuary",
+        customer_name=customer,
         total=Decimal(total),
         balance=Decimal(balance),
         invoice_date=date(2026, 9, 1),
@@ -116,6 +116,46 @@ async def test_zero_payments_are_left_out(
     snap = r.json()["snapshot"]
     assert snap["is_demo"] is True  # a sandbox company
     assert snap["row_counts"]["payments"] == 1
+
+
+async def test_invoices_of_a_deleted_customer_are_kept(
+    pod: AsyncClient, admin_user: User, entity: LegalEntity, db: AsyncSession
+) -> None:
+    # QuickBooks lists only active customers and renames a deleted one "<name> (deleted)"
+    gone = "Kani Solutions Inc (deleted)"
+    source = await _connection(
+        db,
+        admin_user,
+        {
+            RecordType.CUSTOMER: [Customer(external_id="c1", name="Amy's Bird Sanctuary")],
+            RecordType.INVOICE: [
+                _invoice("1037", "100.00", "100.00"),
+                _invoice("2173301", "500.00", "500.00", gone),
+                _invoice("2174294", "250.00", "250.00", gone),
+            ],
+            RecordType.PAYMENT: [
+                Payment(
+                    external_id="p1",
+                    reference_number="CHK-9",
+                    customer_name=gone,
+                    total=Decimal("50.00"),
+                    payment_date=date(2026, 9, 25),
+                )
+            ],
+        },
+    )
+    r = await pod.post(
+        "/api/v1/pod/snapshots/quickbooks",
+        json={
+            "data_source_id": str(source.id),
+            "entity_id": str(entity.id),
+            "currency": "USD",
+            "basis": "Accrual",
+        },
+    )
+    assert r.status_code == 201, r.text
+    counts = r.json()["snapshot"]["row_counts"]
+    assert counts["customers"] == 2 and counts["invoices"] == 3 and counts["payments"] == 1
 
 
 async def test_a_bad_record_is_named_not_a_crash(
