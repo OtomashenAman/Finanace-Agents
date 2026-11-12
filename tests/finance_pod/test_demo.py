@@ -11,7 +11,10 @@ from src.app.finance_pod import demo
 from src.app.finance_pod.invoices import sample
 from src.app.finance_pod.mail import FpEmail
 from src.app.finance_pod.orders.models import FpPurchaseOrder
+from src.app.finance_pod.reference.models import FpVendor
+from src.app.finance_pod.settings.service import current
 from tests.conftest import FakeLLM
+from tests.finance_pod.conftest import upload
 
 FP = "/api/v1/finance-pod"
 
@@ -48,6 +51,45 @@ async def test_demo_data_loads_once_and_runs_end_to_end(
     detail = (await fpod.get(f"{FP}/client-applications/{meridian['id']}")).json()
     assert detail["can_decide"] is None  # opened by the other admin: this one decides
     assert len((await fpod.get(f"{FP}/sales-invoices?status=review")).json()) == 1
+
+
+async def test_a_single_finance_admin_is_told_to_add_a_second_one(
+    fpod: AsyncClient, db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(demo.sanctions, "load", no_download)
+    r = await fpod.post(f"{FP}/demo-data")
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["code"] == "demo_needs_second_admin"
+    assert "second Finance Admin" in r.json()["detail"]["message"]
+    assert (await db.scalar(select(FpPurchaseOrder.id))) is None  # nothing was loaded
+
+    # With self-approval on, one admin may load it (and is told who approves)
+    settings = await current(db)
+    settings.allow_self_approval = True
+    db.add(settings)
+    await db.commit()
+    r = await fpod.post(f"{FP}/demo-data")
+    assert r.status_code == 200, r.text
+    assert any("only Finance Admin" in n for n in r.json()["notes"])
+
+
+async def test_demo_data_loads_after_the_reference_template_was_uploaded(
+    fpod: AsyncClient,
+    other_admin: AsyncClient,
+    db: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The template's example rows include vendor V-FISH but not the demo's other vendors
+    monkeypatch.setattr(demo.sanctions, "load", no_download)
+    template = (await fpod.get(f"{FP}/reference/template")).content
+    assert (await upload(fpod, template)).status_code == 200
+    r = await fpod.post(f"{FP}/demo-data")
+    assert r.status_code == 200, r.text
+    assert any("wasn't there yet" in item for item in r.json()["loaded"])
+    vendors = await db.scalars(select(FpVendor))
+    by_code = {v.code: v for v in vendors}
+    assert {"V-FISH", "V-CHEM", "V-SEQ", "V-HELIX"} <= by_code.keys()
+    assert by_code["V-FISH"].email == "orders@labsupply.example"  # what was there is kept
 
 
 async def test_a_sample_invoice_for_a_po_goes_through_capture(

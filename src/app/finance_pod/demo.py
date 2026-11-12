@@ -22,6 +22,7 @@ from src.app.audit.service import record_event
 from src.app.auth.models import User, UserRole
 from src.app.common.clock import utcnow
 from src.app.common.context import RequestContext
+from src.app.core.errors import AppError
 from src.app.data_sources import crypto
 from src.app.finance_pod import pdf
 from src.app.finance_pod.billing import service as billing
@@ -49,7 +50,16 @@ from src.app.finance_pod.onboarding.models import (
 )
 from src.app.finance_pod.orders.models import FpPoLine, FpPurchaseOrder, PoStatus
 from src.app.finance_pod.reference import service as reference
-from src.app.finance_pod.reference.models import FpVendor
+from src.app.finance_pod.reference.models import (
+    FpAuthorityTier,
+    FpBudget,
+    FpCatalogueItem,
+    FpCostCentre,
+    FpGrant,
+    FpLab,
+    FpProject,
+    FpVendor,
+)
 from src.app.finance_pod.requests.models import FpPurchaseRequest, FpRequestLine, RequestStatus
 from src.app.finance_pod.settings.service import current
 
@@ -136,12 +146,44 @@ VENDORS = [
 ]
 
 
+# Sheets matched on a code column: rows whose code is already there are left out
+_CODED: dict[str, tuple[type[Any], str]] = {
+    "Cost centres": (FpCostCentre, "code"),
+    "Labs": (FpLab, "code"),
+    "Projects": (FpProject, "code"),
+    "Grants": (FpGrant, "code"),
+    "Catalogue": (FpCatalogueItem, "item_code"),
+    "Vendors": (FpVendor, "code"),
+}
+
+
+async def _missing(
+    session: AsyncSession, sheets: dict[str, list[list[Any]]]
+) -> dict[str, list[list[Any]]]:
+    """The demo rows not there yet (someone may have loaded their own data, or the template's
+    example rows), so what is there is never overwritten. Sheets with nothing new are left out."""
+    out: dict[str, list[list[Any]]] = {}
+    for title, (header, *rows) in sheets.items():
+        if title in _CODED:
+            model, column = _CODED[title]
+            have = set(await session.scalars(select(getattr(model, column))))
+            rows = [r for r in rows if r[0] not in have]
+        elif title == "Budgets":
+            have_keys = {
+                (b.fiscal_year, b.cost_centre_code, b.grant_code, b.category)
+                for b in await session.scalars(select(FpBudget))
+            }
+            rows = [r for r in rows if tuple(r[:4]) not in have_keys]
+        elif await session.scalar(select(FpAuthorityTier.id).limit(1)):
+            rows = []  # an import replaces the whole matrix: keep the one there
+        if rows:
+            out[title] = [header, *rows]
+    return out
+
+
 async def _reference(
     session: AsyncSession, p: People, ctx: RequestContext, out: DemoResult
 ) -> None:
-    if await session.scalar(select(FpVendor.id).where(FpVendor.code == "V-FISH")):
-        out.skipped.append("Reference data (cost centres, grants, budgets, catalogue, vendors)")
-        return
     today = utcnow().date()
     owner, dean = p.owner.email, p.dean.email
     sheets: dict[str, list[list[Any]]] = {
@@ -236,11 +278,21 @@ async def _reference(
             ["po", None, 15000, owner, "Senior buyer"],
         ],
     }
-    await reference.import_workbook(session, _workbook(sheets), 10000, p.me, ctx)
-    out.loaded.append(
-        "Reference data: 3 cost centres, grant GR-22, budgets, 4 catalogue items, 4 vendors, "
-        "authority matrix"
-    )
+    missing = await _missing(session, sheets)
+    if not missing:
+        out.skipped.append("Reference data (cost centres, grants, budgets, catalogue, vendors)")
+        return
+    await reference.import_workbook(session, _workbook(missing), 10000, p.me, ctx)
+    if missing == sheets:
+        out.loaded.append(
+            "Reference data: 3 cost centres, grant GR-22, budgets, 4 catalogue items, 4 vendors, "
+            "authority matrix"
+        )
+    else:
+        out.loaded.append(
+            "Reference data the demo needs that wasn't there yet: "
+            + ", ".join(f"{t.lower()} ({len(rows) - 1})" for t, rows in missing.items())
+        )
 
 
 async def _bank_accounts(session: AsyncSession, p: People, out: DemoResult) -> None:
@@ -878,9 +930,21 @@ async def _sanctions(session: AsyncSession, out: DemoResult) -> None:
     out.loaded.append(f"OFAC sanctions list ({count:,} entries)")
 
 
+class DemoNeedsSecondAdminError(AppError):
+    status_code = 409
+    code = "demo_needs_second_admin"
+    message = (
+        "The demo needs a second Finance Admin to approve what you request. Add one in Admin "
+        "Settings > Users (or turn on self-approval in Setup), then load the demo data again. "
+        "Nothing was loaded."
+    )
+
+
 async def load(session: AsyncSession, me: User, ctx: RequestContext) -> DemoResult:
     out = DemoResult()
     p = await _people(session, me)
+    if p.alone and not (await current(session)).allow_self_approval:
+        raise DemoNeedsSecondAdminError
     await _reference(session, p, ctx, out)  # commits (the reference import)
     await _bank_accounts(session, p, out)
     await _purchasing(session, p, out)
@@ -893,9 +957,8 @@ async def load(session: AsyncSession, me: User, ctx: RequestContext) -> DemoResu
     await session.commit()
     if p.alone:
         out.notes.append(
-            "You're the only Finance Admin, so you are every approver too. Add a second Finance "
-            "Admin (Admin Settings > Users), or turn on self-approval in Setup, to run the "
-            "two-person steps."
+            "You're the only Finance Admin, so with self-approval on you are every approver "
+            "too. Add a second Finance Admin (Admin Settings > Users) for real two-person steps."
         )
     else:
         out.notes.append(
