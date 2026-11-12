@@ -1,8 +1,9 @@
 """A frozen, read-only copy of a connected QuickBooks Online company's synced records."""
 
+import re
 from typing import Any
 
-from pydantic import ValidationError
+from pydantic import EmailStr, TypeAdapter, ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -70,10 +71,18 @@ async def _records(session: AsyncSession, source: DataSource, record_type: Recor
     return [model.model_validate(data) for data in rows]
 
 
+_EMAIL = TypeAdapter(EmailStr)
+
+
 def _email(value: str | None) -> str | None:
-    # QuickBooks allows free text here; only a well-formed address can be a verified contact
-    if value and "@" in value and " " not in value.strip():
-        return value.strip()
+    """QuickBooks allows free text here, often several addresses ("a@x.com, b@y.com"): the
+    first well-formed one is the verified contact; none, and the customer has no email."""
+    for part in re.split(r"[,;\s]+", value or ""):
+        if "@" in part:
+            try:
+                return str(_EMAIL.validate_python(part))
+            except ValidationError:
+                continue
     return None
 
 
