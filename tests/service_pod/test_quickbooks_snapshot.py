@@ -174,17 +174,37 @@ def test_the_first_valid_address_is_the_contact() -> None:
     assert _email(None) is None
 
 
-async def test_a_bad_record_is_named_not_a_crash(
+async def test_bad_quickbooks_records_are_repaired_or_left_out_never_refused(
     pod: AsyncClient, admin_user: User, entity: LegalEntity, db: AsyncSession
 ) -> None:
+    twin = _invoice("1138945", "80.00", "80.00").model_copy(update={"external_id": "i-twin"})
+    undated = _invoice("1200", "10.00", "10.00").model_copy(
+        update={"invoice_date": None, "due_date": None}
+    )
+    no_due = _invoice("1300", "20.00", "20.00").model_copy(update={"due_date": None})
     source = await _connection(
         db,
         admin_user,
         {
             RecordType.CUSTOMER: [Customer(external_id="c1", name="Amy's Bird Sanctuary")],
-            # balance above the invoice amount: refused by the contract
-            RecordType.INVOICE: [_invoice("1037", "100.00", "150.00")],
-            RecordType.PAYMENT: [],
+            RecordType.INVOICE: [
+                _invoice("1037", "100.00", "150.00"),  # balance above the amount: capped
+                _invoice("1138945", "60.00", "60.00"),
+                twin,  # QuickBooks allows the same number twice
+                undated,  # no date at all: left out
+                no_due,  # due date taken from the invoice date
+            ],
+            RecordType.PAYMENT: [
+                Payment(
+                    external_id="p1",
+                    reference_number="CHK-1",
+                    customer_name="Amy's Bird Sanctuary",
+                    total=Decimal("30.00"),
+                    payment_date=date(2026, 9, 25),
+                    invoice_number="1138945",
+                    applied_amount=Decimal("45.00"),  # more than the payment: capped
+                )
+            ],
         },
     )
     r = await pod.post(
@@ -196,5 +216,9 @@ async def test_a_bad_record_is_named_not_a_crash(
             "basis": "Accrual",
         },
     )
-    assert r.status_code == 422
-    assert "invoice 1037" in r.json()["detail"]["message"]
+    assert r.status_code == 201, r.text
+    assert r.json()["snapshot"]["row_counts"]["invoices"] == 4
+    notes = " ".join(r.json()["notes"])
+    assert "invoice 1037: balance 150.00 outside 0..100.00, capped" in notes
+    assert "invoice 1138945: number used twice" in notes
+    assert "invoice 1200: no date" in notes
