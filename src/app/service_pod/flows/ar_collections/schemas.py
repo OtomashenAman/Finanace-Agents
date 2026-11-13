@@ -13,7 +13,7 @@ from src.app.service_pod.core.snapshots.schemas import SnapshotSummary
 
 class ArSelection(BaseModel):
     customer_id: str = Field(min_length=1)
-    invoice_ids: list[str] = Field(min_length=1, max_length=50)
+    invoice_ids: list[str] = Field(min_length=1)  # a customer may owe on any number
 
 
 class ArTranche(BaseModel):
