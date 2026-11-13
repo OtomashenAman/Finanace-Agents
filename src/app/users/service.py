@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.app.agent_catalog.models import Agent, AgentAssignment
 from src.app.agent_catalog.runs.models import AgentRun, RunReview
 from src.app.audit.service import record_event
-from src.app.auth.models import User, UserRole
+from src.app.auth.models import ADMIN_ONLY_AREAS, Area, User, UserRole, default_areas
 from src.app.auth.security import hash_password
 from src.app.auth.service import resolve_reset_requests, revoke_user_tokens
 from src.app.common.clock import utcnow
@@ -17,6 +17,7 @@ from src.app.common.context import RequestContext
 from src.app.entities import service as entities
 from src.app.entities.schemas import EntityRef
 from src.app.users.exceptions import (
+    AreaNotAllowedError,
     EmailTakenError,
     SelfManagementError,
     UnknownAgentError,
@@ -61,6 +62,7 @@ def _to_out(
         is_locked=user.locked_until is not None and user.locked_until > utcnow(),
         last_login_at=user.last_login_at,
         created_at=user.created_at,
+        areas=[Area(a) for a in user.areas],
         assignments=assignments,
         entities=user_entities,
     )
@@ -78,6 +80,14 @@ async def _get(session: AsyncSession, user_id: uuid.UUID, *, lock: bool = False)
     if user is None:
         raise UserNotFoundError
     return user
+
+
+def _areas(role: UserRole, wanted: list[Area] | None) -> list[str]:
+    """The areas to store, in a fixed order. The PODs only for a Finance Admin."""
+    chosen = set(default_areas(role) if wanted is None else wanted)
+    if role != UserRole.FINANCE_ADMIN and chosen & ADMIN_ONLY_AREAS:
+        raise AreaNotAllowedError
+    return [a.value for a in Area if a in chosen]
 
 
 async def _replace_assignments(
@@ -145,6 +155,7 @@ async def create_user(
         full_name=body.full_name.strip(),
         role=body.role,
         password_hash=hash_password(body.password),
+        areas=_areas(body.role, body.areas),
     )
     session.add(user)
     await session.flush()
@@ -158,6 +169,7 @@ async def create_user(
         user_id=str(user.id),
         email=email,
         role=user.role.value,
+        areas=user.areas,
         assignments=assigned,
         entities=entity_codes,
     )
@@ -184,6 +196,15 @@ async def update_user(
     if body.role is not None and body.role != user.role:
         user.role = body.role
         changes["role"] = user.role.value
+    if body.areas is not None:
+        areas = _areas(user.role, body.areas)
+    elif user.role != UserRole.FINANCE_ADMIN:  # demoted: the PODs go with the role
+        areas = [a for a in user.areas if Area(a) not in ADMIN_ONLY_AREAS]
+    else:
+        areas = user.areas
+    if areas != user.areas:
+        user.areas = areas
+        changes["areas"] = areas
     if body.is_active is not None and body.is_active != user.is_active:
         user.is_active = body.is_active
         changes["is_active"] = user.is_active

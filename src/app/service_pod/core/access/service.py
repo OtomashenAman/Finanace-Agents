@@ -12,7 +12,8 @@ from typing import Annotated
 from fastapi import Depends
 
 from src.app.auth.dependencies import AdminUser
-from src.app.auth.models import User
+from src.app.auth.exceptions import PermissionDeniedError
+from src.app.auth.models import Area, User
 from src.app.service_pod.core.access.schemas import WorkflowOut
 from src.app.service_pod.core.workflows import WORKFLOWS
 
@@ -23,7 +24,9 @@ class PodAccess:
 
 
 async def get_pod_access(user: AdminUser) -> PodAccess:
-    """403 for anyone but a Finance Admin (AdminUser refuses them)."""
+    """403 for anyone but a Finance Admin (AdminUser refuses them) given the Service POD."""
+    if not user.can_use(Area.SERVICE_POD):
+        raise PermissionDeniedError
     return PodAccess(user=user)
 
 

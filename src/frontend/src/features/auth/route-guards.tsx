@@ -2,8 +2,9 @@ import { Navigate, Outlet, useLocation } from "react-router"
 
 import { FullPageError, FullPageSpinner } from "@/components/full-page-status"
 
+import type { Area } from "./api"
 import { useCurrentUser } from "./hooks"
-import { isAdmin } from "./roles"
+import { canUse, isAdmin } from "./roles"
 
 /** Only allow same-app paths as post-login targets (no open redirects). */
 function safeRedirect(target: unknown): string {
@@ -38,5 +39,12 @@ export function GuestOnly() {
 export function RequireAdmin() {
   const { data: user } = useCurrentUser()
   if (!isAdmin(user)) return <Navigate to="/overview" replace />
+  return <Outlet />
+}
+
+/** Routes of one area (nested inside <RequireAuth>); people without it go back to the overview. */
+export function RequireArea({ area }: { area: Area }) {
+  const { data: user } = useCurrentUser()
+  if (!canUse(user, area)) return <Navigate to="/overview" replace />
   return <Outlet />
 }

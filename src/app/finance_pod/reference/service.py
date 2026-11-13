@@ -13,8 +13,9 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.audit.service import record_event
-from src.app.auth.models import User, UserRole
+from src.app.auth.models import User
 from src.app.common.context import RequestContext
+from src.app.finance_pod.access import finance_pod_people
 from src.app.finance_pod.reference import workbook
 from src.app.finance_pod.reference.models import (
     AuthorityScope,
@@ -160,10 +161,7 @@ def _cross_checks(parsed: workbook.ParsedWorkbook, refs: _Refs) -> None:
 async def _warnings(session: AsyncSession, parsed: workbook.ParsedWorkbook) -> list[str]:
     """People named in the data who can't act in the Finance POD (not a Finance Admin)."""
     admins = {
-        e.lower()
-        for e in await session.scalars(
-            select(User.email).where(User.role == UserRole.FINANCE_ADMIN, User.is_active)
-        )
+        e.lower() for e in await session.scalars(select(User.email).where(finance_pod_people()))
     }
     named: dict[str, str] = {}
     for sheet in (Sheet.COST_CENTRES, Sheet.GRANTS, Sheet.AUTHORITY):
@@ -173,7 +171,8 @@ async def _warnings(session: AsyncSession, parsed: workbook.ParsedWorkbook) -> l
                 if email and email not in admins:
                     named.setdefault(email, SHEET_TITLES[sheet])
     return [
-        f"{email} ({sheet}) has no active Finance Admin account, so approvals routed to them "
+        f"{email} ({sheet}) has no active Finance Admin account with the Finance POD, so "
+        "approvals routed to them "
         "will wait until one is created."
         for email, sheet in named.items()
     ]

@@ -19,12 +19,13 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.audit.service import record_event
-from src.app.auth.models import User, UserRole
+from src.app.auth.models import User
 from src.app.common.clock import utcnow
 from src.app.common.context import RequestContext
 from src.app.core.errors import AppError
 from src.app.data_sources import crypto
 from src.app.finance_pod import pdf
+from src.app.finance_pod.access import finance_pod_people
 from src.app.finance_pod.billing import service as billing
 from src.app.finance_pod.billing import workbook as fee_workbook
 from src.app.finance_pod.billing.models import FpFee, SalesInvoiceStatus
@@ -85,9 +86,7 @@ class People:
 async def _people(session: AsyncSession, me: User) -> People:
     others = list(
         await session.scalars(
-            select(User)
-            .where(User.role == UserRole.FINANCE_ADMIN, User.is_active, User.id != me.id)
-            .order_by(User.created_at)
+            select(User).where(finance_pod_people(), User.id != me.id).order_by(User.created_at)
         )
     )
     owner = others[0] if others else me

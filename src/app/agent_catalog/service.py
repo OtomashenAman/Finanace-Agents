@@ -1,7 +1,7 @@
 import uuid
 from dataclasses import dataclass, field
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, false, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.agent_catalog.exceptions import AgentNotFoundError
@@ -9,7 +9,7 @@ from src.app.agent_catalog.models import Agent, AgentAssignment, AgentCapacity
 from src.app.agent_catalog.registry import REGISTRY, get_agent_definition
 from src.app.agent_catalog.schemas import AgentOut
 from src.app.audit.service import record_event
-from src.app.auth.models import User, UserRole
+from src.app.auth.models import Area, User, UserRole
 from src.app.common.clock import utcnow
 from src.app.common.context import RequestContext
 from src.app.data_sources.records import RecordType
@@ -55,8 +55,11 @@ async def sync_registry(session: AsyncSession) -> SyncResult:
 
 
 def _visible_agents(user: User) -> Select[Agent]:
-    """Finance Admin sees every registered agent; others only active agents assigned to them."""
+    """Finance Admin sees every registered agent; others only active agents assigned to them.
+    Nobody without the Agent Catalog area sees any."""
     query = select(Agent).where(Agent.retired_at.is_(None))
+    if not user.can_use(Area.AGENT_CATALOG):
+        return query.where(false())
     if user.role != UserRole.FINANCE_ADMIN:
         assigned = select(AgentAssignment.agent_id).where(AgentAssignment.user_id == user.id)
         query = query.where(Agent.is_active.is_(True), Agent.id.in_(assigned))

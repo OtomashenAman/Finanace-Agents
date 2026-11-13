@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, EmailStr, Field
 
 from src.app.agent_catalog.models import AgentCapacity
-from src.app.auth.models import UserRole
+from src.app.auth.models import Area, UserRole
 from src.app.entities.schemas import EntityRef
 
 # Login accepts up to 256 characters; new passwords must be long enough to resist guessing
@@ -33,6 +33,8 @@ class UserCreate(BaseModel):
     password: Password
     assignments: list[AssignmentIn] = []
     entity_ids: list[uuid.UUID] = []
+    # The parts of the app shown to them; None: everything the role allows
+    areas: list[Area] | None = None
 
 
 class UserUpdate(BaseModel):
@@ -41,6 +43,7 @@ class UserUpdate(BaseModel):
     full_name: FullName | None = None
     role: UserRole | None = None
     is_active: bool | None = None
+    areas: list[Area] | None = None  # the complete set
 
 
 class PasswordReset(BaseModel):
@@ -68,5 +71,6 @@ class ManagedUser(BaseModel):
     is_locked: bool
     last_login_at: datetime | None
     created_at: datetime
+    areas: list[Area]
     assignments: list[AssignmentOut]
     entities: list[EntityRef]

@@ -11,10 +11,12 @@ from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import Depends
+from sqlalchemy import ColumnElement
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.auth.dependencies import AdminUser
-from src.app.auth.models import User
+from src.app.auth.exceptions import PermissionDeniedError
+from src.app.auth.models import Area, User, UserRole
 from src.app.core.errors import AppError
 from src.app.finance_pod.settings.service import current
 
@@ -30,8 +32,20 @@ class FinanceAccess:
 
 
 async def get_finance_access(user: AdminUser) -> FinanceAccess:
-    """403 for anyone but a Finance Admin (AdminUser refuses them)."""
+    """403 for anyone but a Finance Admin (AdminUser refuses them) given the Finance POD."""
+    if not user.can_use(Area.FINANCE_POD):
+        raise PermissionDeniedError
     return FinanceAccess(user=user)
+
+
+def finance_pod_people() -> ColumnElement[bool]:
+    """Who can act in the Finance POD (approvers, owners, second persons): active Finance
+    Admins given the Finance POD."""
+    return (
+        (User.role == UserRole.FINANCE_ADMIN)
+        & User.is_active
+        & User.areas.contains([Area.FINANCE_POD.value])
+    )
 
 
 FinanceAccessDep = Annotated[FinanceAccess, Depends(get_finance_access)]

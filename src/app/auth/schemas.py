@@ -3,7 +3,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from src.app.auth.models import UserRole
+from src.app.auth.models import Area, UserRole
 
 
 class LoginRequest(BaseModel):
@@ -28,3 +28,4 @@ class UserOut(BaseModel):
     full_name: str
     role: UserRole
     last_login_at: datetime | None
+    areas: list[Area]  # the parts of the app shown to them (the nav)
