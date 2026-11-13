@@ -15,8 +15,9 @@ import {
   type LucideIcon,
 } from "lucide-react"
 
+import type { Area } from "@/features/auth/api"
 import { useCurrentUser } from "@/features/auth/hooks"
-import { isAdmin } from "@/features/auth/roles"
+import { canUse, isAdmin } from "@/features/auth/roles"
 import { useWorklist } from "@/features/worklist/hooks"
 import { cn } from "@/lib/utils"
 
@@ -25,13 +26,14 @@ interface NavItem {
   icon: LucideIcon
   to?: string // undefined = not built yet
   adminOnly?: boolean
+  area?: Area // shown only to people given this area
 }
 
 const NAV: NavItem[] = [
   { label: "Overview", icon: LayoutDashboard, to: "/overview" },
-  { label: "Agent Catalog", icon: LayoutGrid, to: "/catalog" },
-  { label: "Service POD", icon: Workflow, to: "/pod", adminOnly: true },
-  { label: "Finance POD", icon: ShoppingCart, to: "/finance-pod", adminOnly: true },
+  { label: "Agent Catalog", icon: LayoutGrid, to: "/catalog", area: "agent_catalog" },
+  { label: "Service POD", icon: Workflow, to: "/pod", area: "service_pod" },
+  { label: "Finance POD", icon: ShoppingCart, to: "/finance-pod", area: "finance_pod" },
   { label: "My Worklist", icon: ListTodo, to: "/worklist" },
   { label: "Approvals", icon: CircleCheck, to: "/approvals" },
   { label: "Audit Trail", icon: History, to: "/audit" },
@@ -60,7 +62,9 @@ function Brand() {
 
 function Nav({ onNavigate }: { onNavigate?: () => void }) {
   const { data: user } = useCurrentUser()
-  const items = NAV.filter((item) => !item.adminOnly || isAdmin(user))
+  const items = NAV.filter(
+    (item) => (!item.adminOnly || isAdmin(user)) && (!item.area || canUse(user, item.area)),
+  )
   const worklist = useWorklist()
   const todo = worklist.data?.action.length ?? 0
   const base = "relative flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150"

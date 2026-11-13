@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.audit.service import record_event
-from src.app.auth.models import User, UserRole
+from src.app.auth.models import User
 from src.app.common.clock import utcnow
 from src.app.common.context import RequestContext
 from src.app.core.config import get_settings
@@ -24,6 +24,7 @@ from src.app.finance_pod.access import (
     FinanceAccess,
     SeparationOfDutiesError,
     check_different_person,
+    finance_pod_people,
 )
 from src.app.finance_pod.erp import ErpPoLine, ErpPurchaseOrder, get_erp
 from src.app.finance_pod.orders.models import FpPoLine, FpPurchaseOrder, PoStatus
@@ -221,8 +222,7 @@ async def _can_approve(session: AsyncSession, po: FpPurchaseOrder, viewer: User)
     named = await session.scalar(
         select(User.id).where(
             User.email.ilike(po.approver_email or ""),
-            User.role == UserRole.FINANCE_ADMIN,
-            User.is_active,
+            finance_pod_people(),
         )
     )
     if named is not None and named != viewer.id:
@@ -444,8 +444,7 @@ async def approve(
     named = await session.scalar(
         select(User.id).where(
             User.email.ilike(po.approver_email or ""),
-            User.role == UserRole.FINANCE_ADMIN,
-            User.is_active,
+            finance_pod_people(),
         )
     )
     acting_for = None

@@ -4,12 +4,16 @@ import type { LoginFormValues } from "./schema"
 
 export type UserRole = "finance_admin" | "user"
 
+/** The parts of the app a Finance Admin gives each person (the PODs only to Finance Admins) */
+export type Area = "agent_catalog" | "service_pod" | "finance_pod"
+
 export interface User {
   id: string
   email: string
   full_name: string
   role: UserRole
   last_login_at: string | null
+  areas: Area[]
 }
 
 export const authApi = {

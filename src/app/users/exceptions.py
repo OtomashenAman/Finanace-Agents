@@ -21,6 +21,12 @@ class UnknownAgentError(AppError):
         super().__init__(f"Unknown agent(s): {', '.join(sorted(keys))}.")
 
 
+class AreaNotAllowedError(AppError):
+    status_code = 422
+    code = "area_not_allowed"
+    message = "Service POD and Finance POD can only be given to a Finance Admin."
+
+
 class SelfManagementError(AppError):
     # An admin locking themselves out would leave nobody able to undo it
     status_code = 409

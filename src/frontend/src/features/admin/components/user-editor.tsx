@@ -14,6 +14,8 @@ import { useRemoveUserData, useUserData } from "@/features/service-pod/hooks"
 import { errorMessage } from "@/lib/api"
 import { formatDateTime } from "@/features/agent-catalog/workspace/format"
 
+import type { Area } from "@/features/auth/api"
+
 import type { Assignment, ManagedUser } from "../api"
 import { describedBy, roleHint } from "../form-utils"
 import { useDeleteUser, useResetPassword, useSetAssignments, useSetEntities, useUpdateUser } from "../hooks"
@@ -24,6 +26,7 @@ import {
   type PasswordValues,
   type ProfileValues,
 } from "../schema"
+import { AreasEditor } from "./areas-editor"
 import { AssignmentsEditor } from "./assignments-editor"
 import { EntitiesEditor } from "./entities-editor"
 import { Field, RoleSelect } from "./form-bits"
@@ -113,6 +116,40 @@ function ProfileSection({ user, isSelf }: EditorProps) {
           </label>
         </div>
       </form>
+    </Section>
+  )
+}
+
+function AreasSection({ user }: { user: ManagedUser }) {
+  const save = useUpdateUser()
+  const [areas, setAreas] = useState<Area[]>(user.areas)
+  const [dirty, setDirty] = useState(false)
+
+  const onChange = (value: Area[]) => {
+    setAreas(value)
+    setDirty(true)
+  }
+
+  const onSave = () =>
+    save.mutate(
+      { id: user.id, areas },
+      {
+        onSuccess: (saved) => {
+          setAreas(saved.areas)
+          setDirty(false)
+          toast.success("Areas saved")
+        },
+        onError: (error) => toast.error(errorMessage(error, "Couldn't save the areas.")),
+      },
+    )
+
+  return (
+    <Section title="Areas">
+      <AreasEditor role={user.role} value={areas} onChange={onChange} disabled={save.isPending} />
+      <Button type="button" size="sm" onClick={onSave} disabled={!dirty || save.isPending}>
+        {save.isPending && <LoaderCircle className="animate-spin" aria-hidden />}
+        Save areas
+      </Button>
     </Section>
   )
 }
@@ -395,6 +432,7 @@ export function UserEditor({ user, isSelf, onDeleted }: UserEditorProps) {
           <Alert>This account is locked after too many failed sign-ins. Setting a new password unlocks it.</Alert>
         )}
         <ProfileSection user={user} isSelf={isSelf} />
+        <AreasSection key={`${user.id}:${user.role}:${user.areas.join()}`} user={user} />
         <AccessSection user={user} />
         <EntitiesSection user={user} />
         <PasswordSection user={user} />

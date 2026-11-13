@@ -10,10 +10,14 @@ import { Input } from "@/components/ui/input"
 import { Panel } from "@/features/agent-catalog/workspace/components/panel"
 import { errorMessage } from "@/lib/api"
 
+import type { Area } from "@/features/auth/api"
+import { defaultAreas } from "@/features/auth/roles"
+
 import type { Assignment, ManagedUser } from "../api"
 import { describedBy, roleHint } from "../form-utils"
 import { useCreateUser } from "../hooks"
 import { createUserSchema, PASSWORD_MIN_LENGTH, type CreateUserValues } from "../schema"
+import { AreasEditor } from "./areas-editor"
 import { AssignmentsEditor } from "./assignments-editor"
 import { EntitiesEditor } from "./entities-editor"
 import { Field, RoleSelect } from "./form-bits"
@@ -38,12 +42,16 @@ export function CreateUserForm({ onCreated, onCancel }: CreateUserFormProps) {
     mode: "onTouched",
   })
   const role = useWatch({ control, name: "role" })
+  // Until the admin picks: everything the chosen role allows
+  const [pickedAreas, setAreas] = useState<Area[] | null>(null)
+  const areas = (pickedAreas ?? defaultAreas(role)).filter((a) => defaultAreas(role).includes(a))
 
   const onSubmit = handleSubmit((values) =>
     create.mutate(
       // Admins get every agent and entity anyway; don't store assignments for them
       {
         ...values,
+        areas,
         assignments: values.role === "user" ? assignments : [],
         entity_ids: values.role === "user" ? entityIds : [],
       },
@@ -93,6 +101,11 @@ export function CreateUserForm({ onCreated, onCancel }: CreateUserFormProps) {
               {...register("password")}
             />
           </Field>
+        </div>
+
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold text-brand-navy">Areas</h3>
+          <AreasEditor role={role} value={areas} onChange={setAreas} disabled={create.isPending} />
         </div>
 
         {role === "user" && (

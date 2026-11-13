@@ -16,7 +16,7 @@ import { AccountPage } from "@/features/auth/account-page"
 import { HelpPage } from "@/features/help/help-page"
 import { AuditPage } from "@/features/audit/audit-page"
 import { WorklistPage } from "@/features/worklist/worklist-page"
-import { GuestOnly, RequireAdmin, RequireAuth } from "@/features/auth/route-guards"
+import { GuestOnly, RequireAdmin, RequireArea, RequireAuth } from "@/features/auth/route-guards"
 import { DataSourcesPage } from "@/features/data-sources/data-sources-page"
 import { ApprovalsPage as FinanceApprovalsPage } from "@/features/finance-pod/approvals-page"
 import { BillingPage } from "@/features/finance-pod/billing-page"
@@ -82,26 +82,36 @@ const router = createBrowserRouter([
         children: [
           { path: "/", element: <Navigate to="/overview" replace /> },
           { path: "/overview", element: <OverviewPage /> },
-          { path: "/catalog", element: <CatalogPage /> },
-          { path: "/catalog/:agentKey", element: <WorkspacePage /> },
-          { path: "/catalog/:agentKey/runs/:runId", element: <RunPage /> },
+          {
+            element: <RequireArea area="agent_catalog" />,
+            children: [
+              { path: "/catalog", element: <CatalogPage /> },
+              { path: "/catalog/:agentKey", element: <WorkspacePage /> },
+              { path: "/catalog/:agentKey/runs/:runId", element: <RunPage /> },
+            ],
+          },
           { path: "/worklist", element: <WorklistPage /> },
           { path: "/account", element: <AccountPage /> },
           { path: "/help", element: <HelpPage /> },
           { path: "/approvals", element: <ApprovalsPage /> },
           { path: "/audit", element: <AuditPage /> },
           { path: "/data-sources", element: <DataSourcesPage /> },
-          { path: "/pod", element: <DashboardPage /> },
-          { path: "/pod/cases", element: <CasesPage /> },
-          { path: "/pod/cases/:caseId", element: <CasePage /> },
-          { path: "/pod/queue", element: <MyQueuePage /> },
-          { path: "/pod/inbox", element: <LegacyQueue type="log" /> },
-          { path: "/pod/review", element: <LegacyQueue type="review" /> },
-          { path: "/pod/tasks", element: <LegacyQueue type="posting" /> },
-          { path: "/pod/sources", element: <SourcesPage /> },
-          // A workflow's own screen (where its cases start): /pod/ar, /pod/bank...
-          { path: "/pod/:slug", element: <WorkflowHomePage /> },
-          { path: "/pod/:slug/cases", element: <LegacyWorkflowCases /> },
+          {
+            element: <RequireArea area="service_pod" />,
+            children: [
+              { path: "/pod", element: <DashboardPage /> },
+              { path: "/pod/cases", element: <CasesPage /> },
+              { path: "/pod/cases/:caseId", element: <CasePage /> },
+              { path: "/pod/queue", element: <MyQueuePage /> },
+              { path: "/pod/inbox", element: <LegacyQueue type="log" /> },
+              { path: "/pod/review", element: <LegacyQueue type="review" /> },
+              { path: "/pod/tasks", element: <LegacyQueue type="posting" /> },
+              { path: "/pod/sources", element: <SourcesPage /> },
+              // A workflow's own screen (where its cases start): /pod/ar, /pod/bank...
+              { path: "/pod/:slug", element: <WorkflowHomePage /> },
+              { path: "/pod/:slug/cases", element: <LegacyWorkflowCases /> },
+            ],
+          },
           {
             element: <RequireAdmin />,
             children: [
@@ -116,8 +126,8 @@ const router = createBrowserRouter([
         ],
       },
       {
-        // Finance POD: procure-to-pay agents (Finance Admins only), an application of its own
-        element: <RequireAdmin />,
+        // Finance POD: procure-to-pay agents (Finance Admins given it), an application of its own
+        element: <RequireArea area="finance_pod" />,
         children: [
           {
             element: <FpodShell />,

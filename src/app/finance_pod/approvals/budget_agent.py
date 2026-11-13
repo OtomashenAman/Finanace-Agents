@@ -20,8 +20,9 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.app.auth.models import User, UserRole
+from src.app.auth.models import User
 from src.app.common.clock import utcnow
+from src.app.finance_pod.access import finance_pod_people
 from src.app.finance_pod.approvals.models import FpCommitment
 from src.app.finance_pod.approvals.schemas import BudgetCheck, BudgetImpact, Finding, RouteStep
 from src.app.finance_pod.reference.models import (
@@ -257,8 +258,7 @@ async def _route(
         for email, name in await session.execute(
             select(User.email, User.full_name).where(
                 func.lower(User.email).in_([s[0].lower() for s in steps]),
-                User.role == UserRole.FINANCE_ADMIN,
-                User.is_active,
+                finance_pod_people(),
             )
         )
     }

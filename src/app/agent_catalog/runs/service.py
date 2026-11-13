@@ -9,7 +9,7 @@ from typing import Any, Literal
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, TypeAdapter, ValidationError
-from sqlalchemy import Select, case, delete, func, or_, select
+from sqlalchemy import Select, case, delete, false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -79,7 +79,7 @@ from src.app.agent_catalog.service import ADMIN_CAPACITIES, visible_agent_ids
 from src.app.audit import service as audit
 from src.app.audit.schemas import AuditEventOut
 from src.app.audit.service import record_event
-from src.app.auth.models import User, UserRole
+from src.app.auth.models import Area, User, UserRole
 from src.app.common.clock import utcnow
 from src.app.common.context import RequestContext
 from src.app.common.text_extraction.base import ExtractionError
@@ -129,7 +129,7 @@ async def _access(session: AsyncSession, user: User, key: str) -> AgentAccess:
     assigned active agents."""
     agent = await session.scalar(select(Agent).where(Agent.key == key, Agent.retired_at.is_(None)))
     definition = get_agent_definition(key)
-    if agent is None or definition is None:
+    if agent is None or definition is None or not user.can_use(Area.AGENT_CATALOG):
         raise AgentNotFoundError
     if user.role == UserRole.FINANCE_ADMIN:
         capacities = ADMIN_CAPACITIES
@@ -154,7 +154,9 @@ def _require_owner(run: AgentRun, user: User) -> None:
 
 def _own_runs(query: Select[AgentRun], user: User) -> Select[AgentRun]:
     """Users only ever see their own runs, of the legal entities they work for; a Finance
-    Admin sees (and reviews) everyone's."""
+    Admin sees (and reviews) everyone's. Nobody without the Agent Catalog area sees any."""
+    if not user.can_use(Area.AGENT_CATALOG):
+        return query.where(false())
     if user.role == UserRole.FINANCE_ADMIN:
         return query
     return query.where(
