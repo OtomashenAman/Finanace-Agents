@@ -25,7 +25,7 @@ class AllocationLine(BaseModel):
 class SetAllocationPayload(BaseModel):
     """Recorded by hand from a reply (when the AI couldn't, or got it wrong)."""
 
-    lines: list[AllocationLine] = Field(min_length=1, max_length=50)
+    lines: list[AllocationLine] = Field(min_length=1)  # one receipt may pay any number
     source_message_id: str
     quote: str = Field(min_length=3, max_length=4000)
 
