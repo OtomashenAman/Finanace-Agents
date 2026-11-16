@@ -324,7 +324,7 @@ def test_what_counts_as_answering_a_subject(reply: str, sent: str, answers: bool
     assert answers_subject(reply, sent) is answers
 
 
-async def test_sandbox_may_mail_the_quickbooks_contact_only(
+async def test_sandbox_may_mail_the_quickbooks_contact_or_another_address(
     pod: AsyncClient,
     entity: LegalEntity,
     fake_graph: FakeGraph,
@@ -341,7 +341,7 @@ async def test_sandbox_may_mail_the_quickbooks_contact_only(
     assert sent["toRecipients"] == [{"emailAddress": {"address": CUSTOMER_EMAIL}}]
     assert sent["subject"] == "Confirm payment schedule"  # the real recipient: no test label
 
-    # On sandbox data a draft may name any address; it still can't go out
+    # Another address chosen by the sender goes out too
     draft = (
         await pod.post(
             f"/api/v1/pod/cases/{case['id']}/messages",
@@ -358,6 +358,7 @@ async def test_sandbox_may_mail_the_quickbooks_contact_only(
         f"/api/v1/pod/messages/{draft['id']}/send",
         json={"expected_version": draft["version"], "checks": CHECKS},
     )
-    assert r.status_code == 409
-    assert "as QuickBooks states it" in r.json()["detail"]["message"]
-    assert len(fake_graph.drafts) == 1
+    assert r.status_code == 200, r.text
+    assert fake_graph.drafts[-1]["toRecipients"] == [
+        {"emailAddress": {"address": "someone@else.example"}}
+    ]

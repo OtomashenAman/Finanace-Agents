@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, EmailStr, Field, model_validator
 
@@ -29,6 +29,7 @@ class MessageOut(BaseModel):
     body: str
     artifact_ids: list[uuid.UUID]
     fact_block: str | None
+    invoice_numbers: list[str] | None  # only some of the case's invoices (None: all)
     approval_checks: dict[str, bool] | None
     extraction: dict[str, Any] | None
     extraction_status: str | None
@@ -59,8 +60,12 @@ class _MessageFields(BaseModel):
     artifact_ids: list[uuid.UUID] = Field(default=[], max_length=10)
 
 
+# The invoices an email is about, when only some of the case's (None: all of them)
+InvoiceNumbers = Annotated[list[str], Field(min_length=1)] | None
+
+
 class MessageDraftIn(_MessageFields):
-    pass
+    invoice_numbers: InvoiceNumbers = None
 
 
 class MessageUpdate(BaseModel):
@@ -79,7 +84,7 @@ class MessageVersion(BaseModel):
 class ApprovalChecks(BaseModel):
     """What is confirmed before customer mail is sent."""
 
-    recipient: bool = False  # the address is the customer's verified contact
+    recipient: bool = False  # the address is the right contact at the customer
     mapping: bool = False  # the invoices and amounts are the right ones for this customer
     tone: bool = False  # the wording is appropriate
 
@@ -94,12 +99,14 @@ class MessageSend(MessageVersion):
 
 class ComposeRequest(BaseModel):
     purpose: str = Field(pattern=r"^[a-z][a-z_]{2,49}$")
+    invoice_numbers: InvoiceNumbers = None
 
 
 class AssistRequest(BaseModel):
     """Ask the AI in plain English to write or change the draft (tone, length, content)."""
 
     purpose: str = Field(pattern=r"^[a-z][a-z_]{2,49}$")
+    invoice_numbers: InvoiceNumbers = None
     instruction: str = Field(min_length=2, max_length=2000)
     subject: str = Field(default="", max_length=300)
     body: str = Field(default="", max_length=50_000)  # empty: write a new one
@@ -115,6 +122,7 @@ class TemplateIn(BaseModel):
     placeholders, filled in for each case."""
 
     purpose: str = Field(pattern=r"^[a-z][a-z_]{2,49}$")
+    invoice_numbers: InvoiceNumbers = None
     subject: str = Field(min_length=1, max_length=300)
     body: str = Field(min_length=1, max_length=50_000)
 

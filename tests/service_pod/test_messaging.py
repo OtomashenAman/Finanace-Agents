@@ -37,16 +37,24 @@ async def _sent(pod: AsyncClient, ar_case: dict[str, Any]) -> dict[str, Any]:
     return r.json()  # type: ignore[no-any-return]
 
 
-async def test_customer_mail_only_to_the_verified_contact(
+async def test_customer_mail_may_go_to_another_address(
     pod: AsyncClient, ar_case: dict[str, Any]
 ) -> None:
-    r = await _draft(pod, ar_case, to_email="someone@else.example")
-    assert r.status_code == 409
-    assert "verified contact" in r.json()["detail"]["message"]
-    # Cobalt's contact is real, but this case is about Harbor
-    r = await _draft(pod, ar_case, to_email="pay@cobalt.example")
-    assert r.status_code == 409
+    # Not the QuickBooks contact: the sender chooses it and confirms it when sending
+    msg = (await _draft(pod, ar_case, to_email="ap-team@harbor.example")).json()
+    assert msg["to_email"] == "ap-team@harbor.example"
+    r = await pod.patch(
+        f"/api/v1/pod/messages/{msg['id']}",
+        json={"expected_version": msg["version"], "to_email": "controller@harbor.example"},
+    )
+    assert r.status_code == 200, r.text
+    edited = r.json()
+    sent = await _post(pod, f"/api/v1/pod/messages/{msg['id']}/send", edited)
+    assert sent.status_code == 200, sent.text
+    assert sent.json()["to_email"] == "controller@harbor.example"
 
+    r = await _draft(pod, ar_case, to_email="not-an-email")
+    assert r.status_code == 422
     r = await _draft(pod, ar_case, audience="internal", to_email="cfo@example.com")
     assert r.status_code == 409  # not a configured internal recipient
 

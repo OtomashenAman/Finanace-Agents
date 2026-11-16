@@ -138,6 +138,45 @@ async def test_the_customer_template_is_used_for_every_new_draft(
     assert "saved email template" not in ((await _compose(pod, ar_case))["note"] or "")
 
 
+async def test_an_email_about_only_the_selected_invoices(
+    pod: AsyncClient, ar_case: dict[str, Any]
+) -> None:
+    url = f"{POD}/cases/{ar_case['id']}/messages/compose"
+    r = await pod.post(url, json={"purpose": SCHEDULE, "invoice_numbers": ["INV-102"]})
+    assert r.status_code == 200, r.text
+    draft = r.json()
+    assert "INV-102" in draft["fact_block"] and "INV-101" not in draft["fact_block"]
+    assert "INV-101" not in draft["subject"]
+
+    saved = await pod.post(
+        f"{POD}/cases/{ar_case['id']}/messages",
+        json={
+            "audience": "customer",
+            "purpose": SCHEDULE,
+            "to_email": draft["to_email"],
+            "subject": draft["subject"],
+            "body": draft["body"],
+            "invoice_numbers": ["INV-102"],
+        },
+    )
+    assert saved.status_code == 201, saved.text
+    message = saved.json()
+    assert message["invoice_numbers"] == ["INV-102"]
+    sent = await pod.post(
+        f"{POD}/messages/{message['id']}/send",
+        json={
+            "expected_version": message["version"],
+            "checks": {"recipient": True, "mapping": True, "tone": True},
+        },
+    )
+    assert sent.status_code == 200, sent.text
+
+    # Only the case's own invoices, and at least one
+    for bad in (["INV-999"], []):
+        r = await pod.post(url, json={"purpose": SCHEDULE, "invoice_numbers": bad})
+        assert r.status_code == 422
+
+
 async def test_a_template_keeps_the_invoice_table(
     pod: AsyncClient, ar_case: dict[str, Any]
 ) -> None:

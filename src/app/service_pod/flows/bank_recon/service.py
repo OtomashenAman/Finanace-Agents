@@ -187,7 +187,9 @@ async def draft_blocker(session: AsyncSession, case: PodCase, purpose: str) -> s
     return None
 
 
-async def facts(session: AsyncSession, case: PodCase, purpose: str) -> str | None:
+async def facts(
+    session: AsyncSession, case: PodCase, purpose: str, invoices: list[str] | None = None
+) -> str | None:
     receipt = receipt_of(case)
     currency = str(receipt["currency"])
     amount = reading.money(reading.dec(receipt["amount"]), currency)
@@ -208,7 +210,13 @@ async def facts(session: AsyncSession, case: PodCase, purpose: str) -> str | Non
     )
 
 
-async def compose(session: AsyncSession, case: PodCase, purpose: str, llm: LLMProvider) -> Composed:
+async def compose(
+    session: AsyncSession,
+    case: PodCase,
+    purpose: str,
+    llm: LLMProvider,
+    invoices: list[str] | None = None,
+) -> Composed:
     customer = case.state["customer"]
     receipt = receipt_of(case)
     fact_block = await facts(session, case, purpose)

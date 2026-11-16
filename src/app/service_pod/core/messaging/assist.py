@@ -86,7 +86,7 @@ async def assist(
 ) -> AssistOut:
     case = await load_case(session, case_id)
     _require_open(case)
-    fact_block = await _facts_for(session, case, body.purpose)
+    fact_block = await _facts_for(session, case, body.purpose, body.invoice_numbers)
     current = _normalize(body.body)
     if fact_block:
         block = _normalize(fact_block)
@@ -174,14 +174,15 @@ async def save_template(
 ) -> TemplateOut:
     case = await load_case(session, case_id)
     key = await _key(session, case)
-    fact_block = await _facts_for(session, case, body.purpose)
-    text = templates.generalize(body.body, case, fact_block)
+    only = body.invoice_numbers
+    fact_block = await _facts_for(session, case, body.purpose, only)
+    text = templates.generalize(body.body, case, fact_block, only)
     if fact_block and templates.INVOICES not in text:
         raise MessageRefusedError(
             "Keep the invoice table in the email: the template marks where each case's "
             "verified figures go."
         )
-    subject = templates.generalize(body.subject, case, None)
+    subject = templates.generalize(body.subject, case, None, only)
     saved = await templates.find(session, key)
     if saved is None:
         saved = PodEmailTemplate(

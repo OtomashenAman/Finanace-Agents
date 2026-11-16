@@ -166,6 +166,8 @@ export interface Message {
   artifact_ids: string[]
   /** The source's verified figures, which must stay in the body unchanged */
   fact_block: string | null
+  /** Only some of the case's invoices (null: all of them) */
+  invoice_numbers: string[] | null
   approval_checks: ApprovalChecks | null
   /** Replies: what the AI read, with provenance and notes, or why it couldn't */
   extraction: { output?: Record<string, unknown>; provenance?: Record<string, string>; notes?: string[]; error?: string } | null
@@ -544,6 +546,8 @@ export interface MessageDraft {
   subject: string
   body: string
   artifact_ids: string[]
+  /** The invoices the email is about, when only some of the case's (null: all) */
+  invoice_numbers?: string[] | null
 }
 
 const qs = (params: Record<string, string | null | undefined>) => {
@@ -652,13 +656,13 @@ export const podApi = {
   /** Approves the exact message (customer mail needs the checks) and sends it once */
   sendMessage: ({ id, version, checks }: { id: string; version: number; checks: ApprovalChecks }) =>
     apiRequest<Message>(`/pod/messages/${id}/send`, { method: "POST", json: { expected_version: version, checks } }),
-  compose: ({ caseId, purpose }: { caseId: string; purpose: string }) =>
-    apiRequest<Composed>(`/pod/cases/${caseId}/messages/compose`, { method: "POST", json: { purpose } }),
+  compose: ({ caseId, ...body }: { caseId: string; purpose: string; invoice_numbers?: string[] | null }) =>
+    apiRequest<Composed>(`/pod/cases/${caseId}/messages/compose`, { method: "POST", json: body }),
   /** The AI writes or changes the draft from a plain-English request; figures stay locked */
-  assist: ({ caseId, ...body }: { caseId: string; purpose: string; instruction: string; subject: string; body: string }) =>
+  assist: ({ caseId, ...body }: { caseId: string; purpose: string; instruction: string; subject: string; body: string; invoice_numbers?: string[] | null }) =>
     apiRequest<{ subject: string; body: string }>(`/pod/cases/${caseId}/messages/assist`, { method: "POST", json: body }),
   template: (caseId: string) => apiRequest<EmailTemplate | null>(`/pod/cases/${caseId}/template`),
-  saveTemplate: ({ caseId, ...body }: { caseId: string; purpose: string; subject: string; body: string }) =>
+  saveTemplate: ({ caseId, ...body }: { caseId: string; purpose: string; subject: string; body: string; invoice_numbers?: string[] | null }) =>
     apiRequest<EmailTemplate>(`/pod/cases/${caseId}/template`, { method: "PUT", json: body }),
   deleteTemplate: (caseId: string) => apiRequest<void>(`/pod/cases/${caseId}/template`, { method: "DELETE" }),
   arPortfolio: () => apiRequest<ArPortfolio>("/pod/ar/portfolio"),

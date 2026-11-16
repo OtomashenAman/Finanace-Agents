@@ -23,7 +23,7 @@ class Direction(StrEnum):
 
 
 class Audience(StrEnum):
-    CUSTOMER = "customer"  # only the verified contact from the snapshot
+    CUSTOMER = "customer"  # the source's contact by default, or an address the sender confirms
     INTERNAL = "internal"  # only the configured internal recipients
 
 
@@ -67,6 +67,8 @@ class PodMessage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     artifact_ids: Mapped[list[str]] = mapped_column(JSONB, default=list)
     # Verified figures from the source that must appear unchanged in the body
     fact_block: Mapped[str | None] = mapped_column(Text)
+    # The invoices the email is about, when only some of the case's (None: all of them)
+    invoice_numbers: Mapped[list[str] | None] = mapped_column(JSONB)
     # The checks confirmed when it was sent (recipient, invoice mapping, tone)
     approval_checks: Mapped[dict[str, bool] | None] = mapped_column(JSONB)
     # Replies: what the AI read (output, provenance, problems) and how that went:
