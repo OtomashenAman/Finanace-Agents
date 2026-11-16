@@ -50,9 +50,9 @@ async def email_status(_: PodAccessDep) -> EmailStatus:
 
 @router.get("/messages", response_model=list[MessageOut])
 async def list_messages(
-    session: SessionDep, _: PodAccessDep, status: MessageStatus | None = None
+    session: SessionDep, access: PodAccessDep, status: MessageStatus | None = None
 ) -> list[MessageOut]:
-    return await service.list_messages(session, status)
+    return await service.list_messages(session, access, status)
 
 
 @router.post(

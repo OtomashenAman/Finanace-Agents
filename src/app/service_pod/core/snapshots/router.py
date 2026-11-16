@@ -11,7 +11,7 @@ from src.app.core.db import SessionDep
 from src.app.core.llm.base import LLMProvider
 from src.app.core.llm.factory import get_llm_provider
 from src.app.data_sources.models import DataSource
-from src.app.service_pod.core.access.service import PodAccessDep
+from src.app.service_pod.core.access.service import PodAccessDep, PodAdminDep
 from src.app.service_pod.core.snapshots import purge, service, user_data
 from src.app.service_pod.core.snapshots.contract import Basis, Collection, Provenance
 from src.app.service_pod.core.snapshots.exceptions import (
@@ -163,7 +163,7 @@ async def archive_snapshot(
     snapshot_id: uuid.UUID,
     body: SnapshotRemoval,
     session: SessionDep,
-    access: PodAccessDep,
+    access: PodAdminDep,
     ctx: RequestContextDep,
 ) -> SnapshotSummary:
     """Take a snapshot out of use (hidden from lists and pickers, kept as evidence)."""
@@ -172,7 +172,7 @@ async def archive_snapshot(
 
 @router.post("/{snapshot_id}/restore", response_model=SnapshotSummary, responses=_ERRORS)
 async def restore_snapshot(
-    snapshot_id: uuid.UUID, session: SessionDep, access: PodAccessDep, ctx: RequestContextDep
+    snapshot_id: uuid.UUID, session: SessionDep, access: PodAdminDep, ctx: RequestContextDep
 ) -> SnapshotSummary:
     return await service.restore_snapshot(session, access, snapshot_id, ctx)
 
@@ -187,7 +187,7 @@ async def delete_snapshot(
     snapshot_id: uuid.UUID,
     body: SnapshotRemoval,
     session: SessionDep,
-    access: PodAccessDep,
+    access: PodAdminDep,
     ctx: RequestContextDep,
 ) -> None:
     """Delete a snapshot nothing depends on (409 when a case, a verification or a later
@@ -197,7 +197,7 @@ async def delete_snapshot(
 
 @router.get("/sources/{source_id}/dependents", response_model=PurgePreview, responses=_ERRORS)
 async def data_source_dependents(
-    source_id: uuid.UUID, session: SessionDep, access: PodAccessDep
+    source_id: uuid.UUID, session: SessionDep, access: PodAdminDep
 ) -> PurgePreview:
     """What deleting your data source "with dependents" would remove from the Service POD."""
     source = await session.get(DataSource, source_id)
@@ -208,7 +208,7 @@ async def data_source_dependents(
 
 @router.get("/users/{user_id}/data", response_model=UserDataPreview, responses=_ERRORS)
 async def user_data_preview(
-    user_id: uuid.UUID, session: SessionDep, _: PodAccessDep
+    user_id: uuid.UUID, session: SessionDep, _: PodAdminDep
 ) -> UserDataPreview:
     """What removing this user's Service POD data would delete."""
     return await user_data.preview(session, user_id)
@@ -219,7 +219,7 @@ async def remove_user_data(
     user_id: uuid.UUID,
     body: UserDataRemoval,
     session: SessionDep,
-    access: PodAccessDep,
+    access: PodAdminDep,
     ctx: RequestContextDep,
 ) -> UserDataPreview:
     """Delete the user's data sources, imported snapshots and cases (with everything on them),
@@ -229,7 +229,7 @@ async def remove_user_data(
 
 @router.get("/{snapshot_id}/dependents", response_model=PurgePreview, responses=_ERRORS)
 async def snapshot_dependents(
-    snapshot_id: uuid.UUID, session: SessionDep, _: PodAccessDep
+    snapshot_id: uuid.UUID, session: SessionDep, _: PodAdminDep
 ) -> PurgePreview:
     """What deleting this snapshot with everything on it would remove."""
     await service.load_snapshot(session, snapshot_id)
@@ -241,7 +241,7 @@ async def purge_snapshot(
     snapshot_id: uuid.UUID,
     body: PurgeRequest,
     session: SessionDep,
-    access: PodAccessDep,
+    access: PodAdminDep,
     ctx: RequestContextDep,
 ) -> PurgePreview:
     """Delete the snapshot, the snapshots built on it and every case on them (the company

@@ -21,7 +21,12 @@ from src.app.common.context import RequestContext
 from src.app.entities import service as entities
 from src.app.service_pod.common.canonical import canonical, fingerprint, plain
 from src.app.service_pod.common.people import DELETED, name_of, names
-from src.app.service_pod.core.access.service import PodAccess
+from src.app.service_pod.core.access.service import (
+    PodAccess,
+    current_access,
+    require_admin,
+    require_workflow,
+)
 from src.app.service_pod.core.cases.access import load_case
 from src.app.service_pod.core.cases.exceptions import (
     CaseActionError,
@@ -481,6 +486,20 @@ ACTIONS: dict[str, ActionSpec] = {
 }
 
 
+# Signing off: Finance Admins only. Everything else is preparing, open to the workflow's people
+SIGNOFF_ACTIONS = frozenset({"approve", "complete", "cancel", "decide_commitment"})
+
+
+SIGNOFF_REFUSED = "Only a Finance Admin can sign off."
+
+
+def _why_not(c: "Ctx", name: str, action: "ActionSpec") -> str | None:
+    """Why this person can't take the action now (None: they can)."""
+    if name in SIGNOFF_ACTIONS and not c.access.is_admin:
+        return SIGNOFF_REFUSED
+    return action.guard(c)
+
+
 async def _ctx(
     session: AsyncSession, access: PodAccess, case: PodCase, request: RequestContext | None = None
 ) -> Ctx:
@@ -516,6 +535,7 @@ def actions_for(case: PodCase) -> dict[str, ActionSpec]:
 async def create_case(
     session: AsyncSession, access: PodAccess, body: CaseCreate, ctx: RequestContext
 ) -> CaseDetail:
+    require_workflow(access, body.workflow)
     spec = WORKFLOWS[body.workflow]
     snapshot = await snapshots.load_snapshot(session, body.snapshot_id)
     missing = sorted(spec.required - {Collection(c) for c in snapshot.coverage})
@@ -570,6 +590,8 @@ async def run_action(
     action = actions_for(case).get(body.action)
     if action is None:
         raise InvalidActionPayloadError(f"Unknown action {body.action!r}.")
+    if body.action in SIGNOFF_ACTIONS:
+        require_admin(access)
     try:
         payload = action.payload.model_validate(body.payload)
     except ValidationError as exc:
@@ -663,11 +685,17 @@ async def _summaries(session: AsyncSession, cases: list[PodCase]) -> list[CaseSu
 
 async def list_cases(
     session: AsyncSession,
+    access: PodAccess,
     workflow: str | None,
     status: CaseStatus | None,
     entity_id: uuid.UUID | None,
 ) -> list[CaseSummary]:
-    query = select(PodCase).order_by(PodCase.updated_at.desc()).limit(300)
+    query = (
+        select(PodCase)
+        .where(PodCase.workflow.in_(access.workflows))
+        .order_by(PodCase.updated_at.desc())
+        .limit(300)
+    )
     if workflow is not None:
         query = query.where(PodCase.workflow == workflow)
     if status is not None:
@@ -753,15 +781,16 @@ async def get_case(session: AsyncSession, access: PodAccess, case_id: uuid.UUID)
         blockers=c.blockers,
         completion_blockers=c.completion_blockers,
         next_signoff=next_signoff(c) if case.status == CaseStatus.DRAFT else None,
-        allowed_actions={name: a.guard(c) for name, a in actions_for(case).items()},
+        allowed_actions={name: _why_not(c, name, a) for name, a in actions_for(case).items()},
     )
 
 
 async def related_cases(session: AsyncSession, case: PodCase) -> list[RelatedCase]:
-    """Other workflows' cases about the same customer."""
+    """Other workflows' cases about the same customer (only workflows the viewer has)."""
     customer_id = case.selection.get("customer_id")
     if not customer_id:
         return []
+    access = current_access()
     others = list(
         await session.scalars(
             select(PodCase)
@@ -771,6 +800,7 @@ async def related_cases(session: AsyncSession, case: PodCase) -> list[RelatedCas
                 PodCase.workflow != case.workflow,
                 PodCase.selection["customer_id"].astext == str(customer_id),
                 PodCase.status != CaseStatus.CANCELLED,
+                *([PodCase.workflow.in_(access.workflows)] if access is not None else []),
             )
             .order_by(PodCase.created_at.desc())
             .limit(20)
@@ -809,7 +839,7 @@ def _task_out(t: PodReviewTask, people: dict[uuid.UUID, str]) -> ReviewTaskOut:
     )
 
 
-async def review_queue(session: AsyncSession) -> list[ReviewQueueItem]:
+async def review_queue(session: AsyncSession, access: PodAccess) -> list[ReviewQueueItem]:
     """Open review tasks on open cases, oldest first."""
     rows = (
         await session.execute(
@@ -818,6 +848,7 @@ async def review_queue(session: AsyncSession) -> list[ReviewQueueItem]:
             .where(
                 PodReviewTask.status == ReviewTaskStatus.OPEN,
                 PodCase.status.not_in(LOCKED_STATUSES),
+                PodCase.workflow.in_(access.workflows),
             )
             .order_by(PodReviewTask.created_at)
             .limit(300)

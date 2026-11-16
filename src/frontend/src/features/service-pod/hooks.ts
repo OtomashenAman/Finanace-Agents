@@ -1,6 +1,15 @@
 import { useMutation, useQuery } from "@tanstack/react-query"
 
+import { useCurrentUser } from "@/features/auth/hooks"
+import { isAdmin } from "@/features/auth/roles"
+
 import { podApi, type Collection, type MessageStatus, type TaskStatus } from "./api"
+
+/** Signing off (approving, sending email, approving documents, removing sources) is the
+ *  Finance Admin's; everyone else in the Service POD prepares */
+export function useIsPodAdmin(): boolean {
+  return isAdmin(useCurrentUser().data)
+}
 
 /** Every Service POD query starts with this key, and every POD change refreshes them all:
  *  a reply, an approval or a posting moves cases, the inbox and the task queue together. */

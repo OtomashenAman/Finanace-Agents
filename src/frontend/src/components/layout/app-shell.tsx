@@ -1,23 +1,20 @@
 import { useState } from "react"
 import { NavLink, Outlet } from "react-router"
 import {
-  CircleCheck,
+  // CircleCheck, LayoutDashboard, LayoutGrid, ShoppingCart: hidden nav items, see NAV
   Database,
   History,
-  LayoutDashboard,
-  LayoutGrid,
   ListTodo,
   Workflow,
   Menu,
   Settings,
-  ShoppingCart,
   X,
   type LucideIcon,
 } from "lucide-react"
 
 import type { Area } from "@/features/auth/api"
 import { useCurrentUser } from "@/features/auth/hooks"
-import { canUse, isAdmin } from "@/features/auth/roles"
+import { canUse, isAdmin, ROLE_LABELS } from "@/features/auth/roles"
 import { useWorklist } from "@/features/worklist/hooks"
 import { cn } from "@/lib/utils"
 
@@ -30,18 +27,22 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
-  { label: "Overview", icon: LayoutDashboard, to: "/overview" },
-  { label: "Agent Catalog", icon: LayoutGrid, to: "/catalog", area: "agent_catalog" },
+  // Hidden for now: the app is aligned on the Service POD. Overview and Approvals report on
+  // Agent Catalog runs. Uncomment (and set CATALOG_AND_FINANCE_POD_ENABLED) to bring back.
+  // { label: "Overview", icon: LayoutDashboard, to: "/overview" },
+  // { label: "Agent Catalog", icon: LayoutGrid, to: "/catalog", area: "agent_catalog" },
   { label: "Service POD", icon: Workflow, to: "/pod", area: "service_pod" },
-  { label: "Finance POD", icon: ShoppingCart, to: "/finance-pod", area: "finance_pod" },
+  // { label: "Finance POD", icon: ShoppingCart, to: "/finance-pod", area: "finance_pod" },
   { label: "My Worklist", icon: ListTodo, to: "/worklist" },
-  { label: "Approvals", icon: CircleCheck, to: "/approvals" },
+  // { label: "Approvals", icon: CircleCheck, to: "/approvals" },
   { label: "Audit Trail", icon: History, to: "/audit" },
   { label: "Data Sources", icon: Database, to: "/data-sources" },
   { label: "Admin Settings", icon: Settings, to: "/admin", adminOnly: true },
 ]
 
 function Brand() {
+  const { data: user } = useCurrentUser()
+  const count = user?.pod_workflows?.length ?? 0
   return (
     <div>
       <div className="flex items-center gap-2">
@@ -54,7 +55,7 @@ function Brand() {
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
           <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
         </span>
-        5 Workflows Active
+        {count} Workflow{count === 1 ? "" : "s"} Active
       </div>
     </div>
   )
@@ -131,7 +132,7 @@ function UserDock() {
         <div className="min-w-0 flex-1">
           <p className="truncate font-semibold text-white">{name}</p>
           <p className="truncate text-[11px] text-brand-ice/70">
-            {user?.role === "finance_admin" ? "Finance Admin" : "User"} · Demo
+            {user ? ROLE_LABELS[user.role] : "Finance Admin"} · Demo
           </p>
         </div>
       </div>

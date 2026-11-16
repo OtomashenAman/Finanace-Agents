@@ -18,19 +18,46 @@ from src.app.common.models import (
 
 
 class UserRole(StrEnum):
-    FINANCE_ADMIN = "finance_admin"  # every agent, user management, settings
-    USER = "user"  # only the agents (and capacities) an admin assigns
+    FINANCE_ADMIN = "finance_admin"  # every workflow, every sign-off, user management, settings
+    # Service POD roles: they prepare the work of the workflows they're given; a Finance
+    # Admin signs it off. Each role starts with ROLE_WORKFLOWS[role]; the admin can adjust.
+    AR_SPECIALIST = "ar_specialist"
+    ACCOUNTANT = "accountant"
+    TREASURY_ANALYST = "treasury_analyst"
+    FPA_ANALYST = "fpa_analyst"
+    CONTROLLER = "controller"
+    USER = "user"  # no workflows by default: only what an admin assigns
+
+
+# Service POD workflow keys (service_pod.core.workflows.WorkflowKey values; kept as strings
+# here so auth doesn't import the Service POD)
+POD_WORKFLOWS = ("ar_collections", "bank_recon", "fpa_trend", "treasury", "reporting")
+
+ROLE_WORKFLOWS: dict[UserRole, tuple[str, ...]] = {
+    UserRole.FINANCE_ADMIN: POD_WORKFLOWS,
+    UserRole.AR_SPECIALIST: ("ar_collections",),
+    UserRole.ACCOUNTANT: ("bank_recon",),
+    UserRole.TREASURY_ANALYST: ("treasury",),
+    UserRole.FPA_ANALYST: ("fpa_trend",),
+    UserRole.CONTROLLER: ("reporting", "bank_recon", "ar_collections"),
+    UserRole.USER: (),
+}
+
+
+def default_pod_workflows(role: UserRole) -> list[str]:
+    """The Service POD workflows a new account gets unless the admin picks."""
+    return list(ROLE_WORKFLOWS[role])
 
 
 class Area(StrEnum):
     """The parts of the app a Finance Admin gives each person (the nav shows only these)."""
 
     AGENT_CATALOG = "agent_catalog"
-    SERVICE_POD = "service_pod"  # Finance Admins only
+    SERVICE_POD = "service_pod"  # everyone, limited to their pod_workflows
     FINANCE_POD = "finance_pod"  # Finance Admins only
 
 
-ADMIN_ONLY_AREAS = frozenset({Area.SERVICE_POD, Area.FINANCE_POD})
+ADMIN_ONLY_AREAS = frozenset({Area.FINANCE_POD})
 
 
 def default_areas(role: UserRole) -> list[Area]:
@@ -41,6 +68,11 @@ def default_areas(role: UserRole) -> list[Area]:
 def _areas_for_new_row(context: DefaultExecutionContext) -> list[str]:
     role = context.get_current_parameters()["role"]  # type: ignore[no-untyped-call]
     return [a.value for a in default_areas(UserRole(role))]
+
+
+def _workflows_for_new_row(context: DefaultExecutionContext) -> list[str]:
+    role = context.get_current_parameters()["role"]  # type: ignore[no-untyped-call]
+    return default_pod_workflows(UserRole(role))
 
 
 class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -57,16 +89,38 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     failed_login_attempts: Mapped[int] = mapped_column(default=0, server_default=text("0"))
     locked_until: Mapped[datetime | None]
     last_login_at: Mapped[datetime | None]
-    # Area values; Service POD and Finance POD only ever for a Finance Admin
+    # Area values; Finance POD only ever for a Finance Admin
     areas: Mapped[list[str]] = mapped_column(
         JSONB,
         default=_areas_for_new_row,
         server_default=text("""'["agent_catalog", "service_pod", "finance_pod"]'::jsonb"""),
     )
 
+    # Service POD workflows they may work in (a Finance Admin always has every one)
+    pod_workflows: Mapped[list[str]] = mapped_column(
+        JSONB, default=_workflows_for_new_row, server_default=text("'[]'::jsonb")
+    )
+
+    @property
+    def is_admin(self) -> bool:
+        return self.role == UserRole.FINANCE_ADMIN
+
+    def workflows(self) -> list[str]:
+        """The Service POD workflows this person may work in, in the POD's order."""
+        if self.is_admin:
+            return list(POD_WORKFLOWS)
+        return [w for w in POD_WORKFLOWS if w in (self.pod_workflows or [])]
+
+    @property
+    def workflow_keys(self) -> list[str]:
+        """workflows() as an attribute (for UserOut)."""
+        return self.workflows()
+
     def can_use(self, area: Area) -> bool:
-        if area in ADMIN_ONLY_AREAS and self.role != UserRole.FINANCE_ADMIN:
+        if area in ADMIN_ONLY_AREAS and not self.is_admin:
             return False
+        if area == Area.SERVICE_POD and not self.workflows():
+            return False  # nothing to work on there
         return area.value in self.areas
 
 

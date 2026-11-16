@@ -7,11 +7,17 @@ from fastapi.responses import Response
 from src.app.common.context import RequestContextDep
 from src.app.common.schemas import ErrorResponse
 from src.app.core.db import SessionDep
-from src.app.service_pod.core.access.service import PodAccessDep
+from src.app.service_pod.core.access.service import PodAccessDep, for_workflow
+from src.app.service_pod.core.workflows import WorkflowKey
 from src.app.service_pod.flows.reporting import packs, views
 from src.app.service_pod.flows.reporting.schemas import PackOut, ReportMonths
 
-router = APIRouter(prefix="/reporting", tags=["service pod: financial reporting"])
+# Every endpoint here is this workflow's: only people given it
+router = APIRouter(
+    prefix="/reporting",
+    tags=["service pod: financial reporting"],
+    dependencies=[for_workflow(WorkflowKey.REPORTING)],
+)
 
 _ERRORS: dict[int | str, dict[str, Any]] = {
     code: {"model": ErrorResponse} for code in (403, 404, 409, 422)

@@ -8,6 +8,17 @@ const password = z
   .min(PASSWORD_MIN_LENGTH, `Use at least ${PASSWORD_MIN_LENGTH} characters`)
   .max(256, "Use at most 256 characters")
 
+// Mirrors UserRole in src/app/auth/models.py
+const role = z.enum([
+  "finance_admin",
+  "ar_specialist",
+  "accountant",
+  "treasury_analyst",
+  "fpa_analyst",
+  "controller",
+  "user",
+])
+
 const fullName = z.string().trim().min(1, "Enter a name").max(200, "Use at most 200 characters")
 
 export const createUserSchema = z.object({
@@ -18,7 +29,7 @@ export const createUserSchema = z.object({
     .trim()
     .min(1, "Enter an email")
     .refine((value) => z.email().safeParse(value).success, "Enter a valid email address"),
-  role: z.enum(["finance_admin", "user"]),
+  role,
   password,
 })
 
@@ -26,7 +37,7 @@ export type CreateUserValues = z.infer<typeof createUserSchema>
 
 export const profileSchema = z.object({
   full_name: fullName,
-  role: z.enum(["finance_admin", "user"]),
+  role,
 })
 
 export type ProfileValues = z.infer<typeof profileSchema>

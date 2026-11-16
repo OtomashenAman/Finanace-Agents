@@ -22,6 +22,7 @@ import {
   useSnapshotDependents,
   useSnapshotRows,
   useSnapshots,
+  useIsPodAdmin,
 } from "./hooks"
 import { COLLECTION_LABEL, formatDateTime, shortHash } from "./labels"
 import { snapshotKey, splitLatest } from "./components/latest"
@@ -255,6 +256,7 @@ function Rows({ snapshot }: { snapshot: Snapshot }) {
 
 /** Archive (hidden, kept as evidence) or, when nothing depends on it, delete a snapshot. */
 function Removal({ snapshot }: { snapshot: Snapshot }) {
+  const admin = useIsPodAdmin()
   const archive = useArchiveSnapshot()
   const restore = useRestoreSnapshot()
   const remove = useDeleteSnapshot()
@@ -265,6 +267,7 @@ function Removal({ snapshot }: { snapshot: Snapshot }) {
   const preview = useSnapshotDependents(how === "purge" ? snapshot.id : null)
   const busy = archive.isPending || restore.isPending || remove.isPending || purge.isPending
 
+  if (!admin) return null // archiving and removing sources: Finance Admins only
   if (snapshot.archived) {
     return (
       <div className="flex flex-wrap items-center gap-2 border-t pt-3 text-xs">

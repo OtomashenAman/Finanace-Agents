@@ -9,13 +9,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.app.agent_catalog.models import Agent, AgentAssignment
 from src.app.agent_catalog.runs.models import AgentRun, RunReview
 from src.app.audit.service import record_event
-from src.app.auth.models import ADMIN_ONLY_AREAS, Area, User, UserRole, default_areas
+from src.app.auth.models import (
+    ADMIN_ONLY_AREAS,
+    POD_WORKFLOWS,
+    Area,
+    User,
+    UserRole,
+    default_areas,
+    default_pod_workflows,
+)
 from src.app.auth.security import hash_password
 from src.app.auth.service import resolve_reset_requests, revoke_user_tokens
 from src.app.common.clock import utcnow
 from src.app.common.context import RequestContext
 from src.app.entities import service as entities
 from src.app.entities.schemas import EntityRef
+from src.app.service_pod.core.workflows import WorkflowKey
 from src.app.users.exceptions import (
     AreaNotAllowedError,
     EmailTakenError,
@@ -63,6 +72,7 @@ def _to_out(
         last_login_at=user.last_login_at,
         created_at=user.created_at,
         areas=[Area(a) for a in user.areas],
+        pod_workflows=[WorkflowKey(w) for w in user.workflows()],
         assignments=assignments,
         entities=user_entities,
     )
@@ -88,6 +98,15 @@ def _areas(role: UserRole, wanted: list[Area] | None) -> list[str]:
     if role != UserRole.FINANCE_ADMIN and chosen & ADMIN_ONLY_AREAS:
         raise AreaNotAllowedError
     return [a.value for a in Area if a in chosen]
+
+
+def _workflows(role: UserRole, wanted: list[WorkflowKey] | None) -> list[str]:
+    """The Service POD workflows to store, in the POD's order. None: the role's defaults.
+    Nothing is stored for a Finance Admin: they always have every workflow."""
+    if role == UserRole.FINANCE_ADMIN:
+        return []
+    chosen = set(default_pod_workflows(role) if wanted is None else (w.value for w in wanted))
+    return [w for w in POD_WORKFLOWS if w in chosen]
 
 
 async def _replace_assignments(
@@ -156,6 +175,7 @@ async def create_user(
         role=body.role,
         password_hash=hash_password(body.password),
         areas=_areas(body.role, body.areas),
+        pod_workflows=_workflows(body.role, body.pod_workflows),
     )
     session.add(user)
     await session.flush()
@@ -170,6 +190,7 @@ async def create_user(
         email=email,
         role=user.role.value,
         areas=user.areas,
+        pod_workflows=user.pod_workflows,
         assignments=assigned,
         entities=entity_codes,
     )
@@ -193,9 +214,16 @@ async def update_user(
     ):
         raise SelfManagementError
 
-    if body.role is not None and body.role != user.role:
+    role_changed = body.role is not None and body.role != user.role
+    if role_changed:
+        assert body.role is not None  # noqa: S101 - checked just above
         user.role = body.role
         changes["role"] = user.role.value
+    if body.pod_workflows is not None or role_changed:
+        workflows = _workflows(user.role, body.pod_workflows)
+        if workflows != user.pod_workflows:
+            user.pod_workflows = workflows
+            changes["pod_workflows"] = workflows
     if body.areas is not None:
         areas = _areas(user.role, body.areas)
     elif user.role != UserRole.FINANCE_ADMIN:  # demoted: the PODs go with the role

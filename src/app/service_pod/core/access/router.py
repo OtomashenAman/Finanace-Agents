@@ -8,6 +8,6 @@ router = APIRouter(tags=["service pod: access"])
 
 
 @router.get("/workflows", response_model=list[WorkflowOut])
-async def list_workflows(_: PodAccessDep) -> list[WorkflowOut]:
-    """The five workflows (Finance Admin only, like the whole Service POD)."""
-    return service.workflows_for()
+async def list_workflows(access: PodAccessDep) -> list[WorkflowOut]:
+    """The workflows this person works in (all five for a Finance Admin)."""
+    return service.workflows_for(access)

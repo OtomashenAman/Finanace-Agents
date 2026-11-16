@@ -239,7 +239,14 @@ async def _cash(session: AsyncSession) -> CashRunway | None:
 async def dashboard(session: AsyncSession, access: PodAccess) -> Dashboard:
     now = utcnow()
     today = now.date()
-    cases = list(await session.scalars(select(PodCase).order_by(PodCase.created_at)))
+    # Only the workflows this person works in (every one for a Finance Admin)
+    cases = list(
+        await session.scalars(
+            select(PodCase)
+            .where(PodCase.workflow.in_(access.workflows))
+            .order_by(PodCase.created_at)
+        )
+    )
     phase_of = await _phases(session, access, cases)
     open_cases = [c for c in cases if c.status not in LOCKED_STATUSES]
     closed_30d = sum(
@@ -262,7 +269,10 @@ async def dashboard(session: AsyncSession, access: PodAccess) -> Dashboard:
         )
         for label, lo, hi in AGING
     ]
-    promised, dated = await _promises(session)
+    # Payment promises come from AR Collections, the cash runway from Treasury
+    promised, dated = (
+        await _promises(session) if access.allows(WorkflowKey.AR_COLLECTIONS) else ([], [])
+    )
     week = today + timedelta(days=7)
     return Dashboard(
         open_cases=len(open_cases),
@@ -285,5 +295,5 @@ async def dashboard(session: AsyncSession, access: PodAccess) -> Dashboard:
         ],
         email=await _email(session),
         ai_activity=await _ai_activity(session),
-        cash=await _cash(session),
+        cash=await _cash(session) if access.allows(WorkflowKey.TREASURY) else None,
     )

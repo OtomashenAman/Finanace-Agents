@@ -30,10 +30,12 @@ const ICONS: Record<Kind, LucideIcon> = {
 }
 
 const PAGES: { title: string; link: string; adminOnly?: boolean; words: string }[] = [
-  { title: "Overview", link: "/overview", words: "dashboard kpi home" },
-  { title: "Agent Catalog", link: "/catalog", words: "agents new run" },
+  // Overview, Agent Catalog and Approvals: hidden for now (the app is aligned on the Service POD)
+  // { title: "Overview", link: "/overview", words: "dashboard kpi home" },
+  // { title: "Agent Catalog", link: "/catalog", words: "agents new run" },
+  { title: "Service POD", link: "/pod", words: "cases workflows dashboard home" },
   { title: "My Worklist", link: "/worklist", words: "todo tasks" },
-  { title: "Approvals", link: "/approvals", words: "review approve" },
+  // { title: "Approvals", link: "/approvals", words: "review approve" },
   { title: "Audit Trail", link: "/audit", words: "history log events" },
   { title: "Data Sources", link: "/data-sources", words: "quickbooks upload csv" },
   { title: "My account", link: "/account", words: "password profile" },

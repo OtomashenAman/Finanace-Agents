@@ -1,5 +1,5 @@
 import type { AgentCapacity } from "@/features/agent-catalog/api"
-import type { Area, UserRole } from "@/features/auth/api"
+import type { Area, PodWorkflow, UserRole } from "@/features/auth/api"
 import type { EntityRef } from "@/features/entities/api"
 import { apiRequest } from "@/lib/api"
 
@@ -18,6 +18,7 @@ export interface ManagedUser {
   last_login_at: string | null
   created_at: string
   areas: Area[]
+  pod_workflows: PodWorkflow[]
   assignments: (Assignment & { agent_name: string })[]
   entities: EntityRef[]
 }
@@ -28,6 +29,7 @@ export interface UserCreate {
   role: UserRole
   password: string
   areas: Area[]
+  pod_workflows: PodWorkflow[]
   assignments: Assignment[]
   entity_ids: string[]
 }
@@ -37,6 +39,7 @@ export interface UserUpdate {
   role?: UserRole
   is_active?: boolean
   areas?: Area[]
+  pod_workflows?: PodWorkflow[]
 }
 
 const user = (id: string) => `/users/${encodeURIComponent(id)}`

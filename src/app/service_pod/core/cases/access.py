@@ -5,6 +5,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.app.service_pod.core.access.service import current_access
 from src.app.service_pod.core.cases.exceptions import CaseNotFoundError, StaleVersionError
 from src.app.service_pod.core.cases.models import PodCase
 
@@ -20,7 +21,9 @@ async def load_case(
     if lock:
         query = query.with_for_update()
     case = await session.scalar(query)
-    if case is None:
+    access = current_access()
+    # A case outside the person's workflows is reported as missing, never shown
+    if case is None or (access is not None and not access.allows(case.workflow)):
         raise CaseNotFoundError
     if expected_version is not None and case.version != expected_version:
         raise StaleVersionError

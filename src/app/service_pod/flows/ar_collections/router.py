@@ -5,11 +5,17 @@ from fastapi import APIRouter
 
 from src.app.common.schemas import ErrorResponse
 from src.app.core.db import SessionDep
-from src.app.service_pod.core.access.service import PodAccessDep
+from src.app.service_pod.core.access.service import PodAccessDep, for_workflow
+from src.app.service_pod.core.workflows import WorkflowKey
 from src.app.service_pod.flows.ar_collections import views
 from src.app.service_pod.flows.ar_collections.schemas import ArPortfolio
 
-router = APIRouter(prefix="/ar", tags=["service pod: AR collections"])
+# Every endpoint here is this workflow's: only people given it
+router = APIRouter(
+    prefix="/ar",
+    tags=["service pod: AR collections"],
+    dependencies=[for_workflow(WorkflowKey.AR_COLLECTIONS)],
+)
 
 _ERRORS: dict[int | str, dict[str, Any]] = {code: {"model": ErrorResponse} for code in (403, 404)}
 

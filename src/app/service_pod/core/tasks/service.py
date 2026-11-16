@@ -18,7 +18,7 @@ from src.app.common.context import RequestContext
 from src.app.core.errors import AppError
 from src.app.service_pod.common.canonical import plain
 from src.app.service_pod.common.people import DELETED, name_of, names
-from src.app.service_pod.core.access.service import PodAccess
+from src.app.service_pod.core.access.service import PodAccess, current_access, require_admin
 from src.app.service_pod.core.cases.access import load_case
 from src.app.service_pod.core.cases.exceptions import StaleVersionError
 from src.app.service_pod.core.cases.models import LOCKED_STATUSES, CaseStatus, PodCase
@@ -60,6 +60,11 @@ def _guard(task: PodPostingTask, action: str) -> str | None:
 
 
 async def _outs(session: AsyncSession, tasks: list[PodPostingTask]) -> list[TaskOut]:
+    # Recording and verifying postings in QuickBooks is sign-off work: Finance Admins only
+    access = current_access()
+    refused = (
+        "Only a Finance Admin can record postings." if access and not access.is_admin else None
+    )
     if not tasks:
         return []
     cases = {
@@ -97,7 +102,7 @@ async def _outs(session: AsyncSession, tasks: list[PodPostingTask]) -> list[Task
             verification_snapshot_id=t.verification_snapshot_id,
             verification=t.verification,
             created_at=t.created_at,
-            allowed_actions={a: _guard(t, a) for a in ACTIONS},
+            allowed_actions={a: refused or _guard(t, a) for a in ACTIONS},
         )
         for t in tasks
     ]
@@ -112,9 +117,17 @@ async def tasks_for_case(session: AsyncSession, case: PodCase) -> list[TaskOut]:
     return await _outs(session, list(rows))
 
 
-async def list_tasks(session: AsyncSession, status: TaskStatus | None) -> list[TaskOut]:
-    """The manual QuickBooks queue, newest first."""
-    query = select(PodPostingTask).order_by(PodPostingTask.updated_at.desc()).limit(300)
+async def list_tasks(
+    session: AsyncSession, access: PodAccess, status: TaskStatus | None
+) -> list[TaskOut]:
+    """The manual QuickBooks queue, newest first (only the person's workflows)."""
+    query = (
+        select(PodPostingTask)
+        .join(PodCase, PodCase.id == PodPostingTask.case_id)
+        .where(PodCase.workflow.in_(access.workflows))
+        .order_by(PodPostingTask.updated_at.desc())
+        .limit(300)
+    )
     if status is not None:
         query = query.where(PodPostingTask.status == status)
     return await _outs(session, list(await session.scalars(query)))
@@ -231,6 +244,7 @@ async def run_action(
     body: TaskAction,
     ctx: RequestContext,
 ) -> TaskOut:
+    require_admin(access)
     task = await session.get(PodPostingTask, task_id, with_for_update=True)
     if task is None:
         raise TaskNotFoundError

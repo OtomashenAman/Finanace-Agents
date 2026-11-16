@@ -7,6 +7,7 @@ from pydantic import BaseModel, EmailStr, Field
 from src.app.agent_catalog.models import AgentCapacity
 from src.app.auth.models import Area, UserRole
 from src.app.entities.schemas import EntityRef
+from src.app.service_pod.core.workflows import WorkflowKey
 
 # Login accepts up to 256 characters; new passwords must be long enough to resist guessing
 PASSWORD_MIN_LENGTH = 12
@@ -35,6 +36,8 @@ class UserCreate(BaseModel):
     entity_ids: list[uuid.UUID] = []
     # The parts of the app shown to them; None: everything the role allows
     areas: list[Area] | None = None
+    # Service POD workflows they work in; None: the role's defaults (ignored for an admin)
+    pod_workflows: list[WorkflowKey] | None = None
 
 
 class UserUpdate(BaseModel):
@@ -44,6 +47,8 @@ class UserUpdate(BaseModel):
     role: UserRole | None = None
     is_active: bool | None = None
     areas: list[Area] | None = None  # the complete set
+    # The complete set; None: unchanged, or the new role's defaults when the role changes
+    pod_workflows: list[WorkflowKey] | None = None
 
 
 class PasswordReset(BaseModel):
@@ -72,5 +77,6 @@ class ManagedUser(BaseModel):
     last_login_at: datetime | None
     created_at: datetime
     areas: list[Area]
+    pod_workflows: list[WorkflowKey]  # every workflow for a Finance Admin
     assignments: list[AssignmentOut]
     entities: list[EntityRef]

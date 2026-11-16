@@ -9,13 +9,19 @@ from src.app.common.schemas import ErrorResponse
 from src.app.core.db import SessionDep
 from src.app.core.llm.base import LLMProvider
 from src.app.core.llm.factory import get_llm_provider
-from src.app.service_pod.core.access.service import PodAccessDep
+from src.app.service_pod.core.access.service import PodAccessDep, for_workflow
 from src.app.service_pod.core.cases.schemas import CaseDetail
 from src.app.service_pod.core.snapshots.contract import Period
+from src.app.service_pod.core.workflows import WorkflowKey
 from src.app.service_pod.flows.fpa_trend import narrative, views
 from src.app.service_pod.flows.fpa_trend.schemas import FpaPeriods
 
-router = APIRouter(prefix="/fpa", tags=["service pod: fp&a trends"])
+# Every endpoint here is this workflow's: only people given it
+router = APIRouter(
+    prefix="/fpa",
+    tags=["service pod: fp&a trends"],
+    dependencies=[for_workflow(WorkflowKey.FPA_TREND)],
+)
 
 _ERRORS: dict[int | str, dict[str, Any]] = {
     code: {"model": ErrorResponse} for code in (403, 404, 409, 422)

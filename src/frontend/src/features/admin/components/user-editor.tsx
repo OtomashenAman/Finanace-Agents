@@ -14,7 +14,8 @@ import { useRemoveUserData, useUserData } from "@/features/service-pod/hooks"
 import { errorMessage } from "@/lib/api"
 import { formatDateTime } from "@/features/agent-catalog/workspace/format"
 
-import type { Area } from "@/features/auth/api"
+import type { Area, PodWorkflow } from "@/features/auth/api"
+import { CATALOG_AND_FINANCE_POD_ENABLED } from "@/features/auth/roles"
 
 import type { Assignment, ManagedUser } from "../api"
 import { describedBy, roleHint } from "../form-utils"
@@ -30,6 +31,7 @@ import { AreasEditor } from "./areas-editor"
 import { AssignmentsEditor } from "./assignments-editor"
 import { EntitiesEditor } from "./entities-editor"
 import { Field, RoleSelect } from "./form-bits"
+import { WorkflowsEditor } from "./workflows-editor"
 
 interface EditorProps {
   user: ManagedUser
@@ -194,6 +196,45 @@ function AccessSection({ user }: { user: ManagedUser }) {
         {save.isPending && <LoaderCircle className="animate-spin" aria-hidden />}
         Save agent access
       </Button>
+    </Section>
+  )
+}
+
+function WorkflowsSection({ user }: { user: ManagedUser }) {
+  const save = useUpdateUser()
+  const [workflows, setWorkflows] = useState<PodWorkflow[]>(user.pod_workflows)
+  const [dirty, setDirty] = useState(false)
+
+  const onSave = () =>
+    save.mutate(
+      { id: user.id, pod_workflows: workflows },
+      {
+        onSuccess: (saved) => {
+          setWorkflows(saved.pod_workflows)
+          setDirty(false)
+          toast.success("Service POD workflows saved")
+        },
+        onError: (error) => toast.error(errorMessage(error, "Couldn't save the workflows.")),
+      },
+    )
+
+  return (
+    <Section title="Service POD workflows">
+      <WorkflowsEditor
+        role={user.role}
+        value={workflows}
+        onChange={(value) => {
+          setWorkflows(value)
+          setDirty(true)
+        }}
+        disabled={save.isPending}
+      />
+      {user.role !== "finance_admin" && (
+        <Button type="button" size="sm" onClick={onSave} disabled={!dirty || save.isPending}>
+          {save.isPending && <LoaderCircle className="animate-spin" aria-hidden />}
+          Save workflows
+        </Button>
+      )}
     </Section>
   )
 }
@@ -432,8 +473,14 @@ export function UserEditor({ user, isSelf, onDeleted }: UserEditorProps) {
           <Alert>This account is locked after too many failed sign-ins. Setting a new password unlocks it.</Alert>
         )}
         <ProfileSection user={user} isSelf={isSelf} />
-        <AreasSection key={`${user.id}:${user.role}:${user.areas.join()}`} user={user} />
-        <AccessSection user={user} />
+        {CATALOG_AND_FINANCE_POD_ENABLED && (
+          <>
+            <AreasSection key={`${user.id}:${user.role}:${user.areas.join()}`} user={user} />
+            <AccessSection user={user} />
+          </>
+        )}
+        {/* A role change resets the workflows to the new role's: start from the saved ones */}
+        <WorkflowsSection key={`${user.id}:${user.role}:${user.pod_workflows.join()}`} user={user} />
         <EntitiesSection user={user} />
         <PasswordSection user={user} />
         {!isSelf && <PodDataSection user={user} />}

@@ -6,7 +6,7 @@ import { Alert } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useCurrentUser } from "@/features/auth/hooks"
-import { ROLE_LABELS } from "@/features/auth/roles"
+import { ROLE_LABELS, workflowLabel } from "@/features/auth/roles"
 import { cn } from "@/lib/utils"
 
 import type { ManagedUser } from "./api"
@@ -25,10 +25,10 @@ function StatusPill({ user }: { user: ManagedUser }) {
 }
 
 function access(user: ManagedUser): string {
-  if (user.role === "finance_admin") return "All agents · all entities"
-  const agents = new Set(user.assignments.map((a) => a.agent_name))
+  if (user.role === "finance_admin") return "All workflows · all entities"
+  const workflows = user.pod_workflows.map(workflowLabel)
   const entities = user.entities.map((e) => e.code)
-  return [agents.size ? [...agents].join(", ") : "No agents", entities.length ? entities.join(", ") : null]
+  return [workflows.length ? workflows.join(", ") : "No workflows", entities.length ? entities.join(", ") : null]
     .filter(Boolean)
     .join(" · ")
 }
@@ -101,7 +101,7 @@ export function UsersPage() {
   return (
     <AppPage
       title="Admin Settings · Users"
-      subtitle="Create accounts, choose which agents each user can run, reset passwords and deactivate access."
+      subtitle="Create accounts, give each person a role and the Service POD workflows they work in, reset passwords and deactivate access."
     >
       <AdminTabs />
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
@@ -168,7 +168,7 @@ export function UsersPage() {
         )}
         {selection.kind === "none" && (
           <div className="hidden rounded-lg border border-dashed bg-card px-6 py-16 text-center text-sm text-muted-foreground xl:block">
-            Select a user to edit their profile, agent access or password.
+            Select a user to edit their role, workflows or password.
           </div>
         )}
       </div>

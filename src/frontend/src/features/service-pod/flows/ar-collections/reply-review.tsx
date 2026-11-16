@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 import type { CaseDetail, Message, ReviewTask } from "../../api"
 import { AiBadge, Pill } from "../../components/bits"
 import { Extraction } from "../../components/case-messages"
-import { useCompose, useCreateDraft, useDecideArtifact, useUploadArtifact } from "../../hooks"
+import { useCompose, useCreateDraft, useDecideArtifact, useIsPodAdmin, useUploadArtifact } from "../../hooks"
 import { ARTIFACT_KIND, CASE_STATUS } from "../../labels"
 import { attempt } from "../../ui"
 import { useRunAction } from "../../use-run-action"
@@ -38,10 +38,14 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 function DocumentButton({ c, task }: { c: CaseDetail; task: ReviewTask }) {
   const upload = useUploadArtifact()
   const decide = useDecideArtifact()
+  const admin = useIsPodAdmin()
   const kind = (task.requirement?.kind ?? "other") as keyof typeof ARTIFACT_KIND
   const invoice = task.requirement?.invoice ?? ""
   const label = ARTIFACT_KIND[kind] ?? kind
   const pending = c.artifacts.find((a) => a.kind === kind && a.status === "pending" && (!invoice || a.invoice_refs.includes(invoice)))
+  if (pending && !admin) {
+    return <span className="text-xs text-muted-foreground">{label} uploaded: awaiting a Finance Admin</span>
+  }
   if (pending) {
     return (
       <Button

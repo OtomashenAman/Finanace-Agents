@@ -2,10 +2,20 @@ import { ApiError, apiRequest } from "@/lib/api"
 
 import type { LoginFormValues } from "./schema"
 
-export type UserRole = "finance_admin" | "user"
+export type UserRole =
+  | "finance_admin"
+  | "ar_specialist"
+  | "accountant"
+  | "treasury_analyst"
+  | "fpa_analyst"
+  | "controller"
+  | "user"
 
-/** The parts of the app a Finance Admin gives each person (the PODs only to Finance Admins) */
+/** The parts of the app a Finance Admin gives each person (the Finance POD only to Finance Admins) */
 export type Area = "agent_catalog" | "service_pod" | "finance_pod"
+
+/** Service POD workflows (WorkflowKey in src/app/service_pod/core/workflows.py) */
+export type PodWorkflow = "ar_collections" | "bank_recon" | "fpa_trend" | "treasury" | "reporting"
 
 export interface User {
   id: string
@@ -14,6 +24,8 @@ export interface User {
   role: UserRole
   last_login_at: string | null
   areas: Area[]
+  /** Service POD workflows they work in (every one for a Finance Admin) */
+  pod_workflows: PodWorkflow[]
 }
 
 export const authApi = {

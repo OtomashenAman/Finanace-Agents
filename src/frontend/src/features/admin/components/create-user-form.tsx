@@ -10,17 +10,19 @@ import { Input } from "@/components/ui/input"
 import { Panel } from "@/features/agent-catalog/workspace/components/panel"
 import { errorMessage } from "@/lib/api"
 
-import type { Area } from "@/features/auth/api"
-import { defaultAreas } from "@/features/auth/roles"
+import type { PodWorkflow, UserRole } from "@/features/auth/api"
+import { defaultAreas, ROLE_WORKFLOWS } from "@/features/auth/roles"
 
 import type { Assignment, ManagedUser } from "../api"
 import { describedBy, roleHint } from "../form-utils"
 import { useCreateUser } from "../hooks"
 import { createUserSchema, PASSWORD_MIN_LENGTH, type CreateUserValues } from "../schema"
-import { AreasEditor } from "./areas-editor"
-import { AssignmentsEditor } from "./assignments-editor"
+// Agent Catalog and Finance POD are hidden for now: areas follow the role, no agent assignments
+// import { AreasEditor } from "./areas-editor"
+// import { AssignmentsEditor } from "./assignments-editor"
 import { EntitiesEditor } from "./entities-editor"
 import { Field, RoleSelect } from "./form-bits"
+import { WorkflowsEditor } from "./workflows-editor"
 
 interface CreateUserFormProps {
   onCreated: (user: ManagedUser) => void
@@ -29,7 +31,7 @@ interface CreateUserFormProps {
 
 export function CreateUserForm({ onCreated, onCancel }: CreateUserFormProps) {
   const create = useCreateUser()
-  const [assignments, setAssignments] = useState<Assignment[]>([])
+  const [assignments] = useState<Assignment[]>([])
   const [entityIds, setEntityIds] = useState<string[]>([])
   const {
     register,
@@ -42,9 +44,11 @@ export function CreateUserForm({ onCreated, onCancel }: CreateUserFormProps) {
     mode: "onTouched",
   })
   const role = useWatch({ control, name: "role" })
-  // Until the admin picks: everything the chosen role allows
-  const [pickedAreas, setAreas] = useState<Area[] | null>(null)
-  const areas = (pickedAreas ?? defaultAreas(role)).filter((a) => defaultAreas(role).includes(a))
+  // Everything the chosen role allows (the areas editor is hidden for now)
+  const areas = defaultAreas(role)
+  // The role's workflows until the admin changes them; picking another role starts over
+  const [picked, setPicked] = useState<{ role: UserRole; value: PodWorkflow[] } | null>(null)
+  const podWorkflows = picked?.role === role ? picked.value : ROLE_WORKFLOWS[role]
 
   const onSubmit = handleSubmit((values) =>
     create.mutate(
@@ -52,8 +56,9 @@ export function CreateUserForm({ onCreated, onCancel }: CreateUserFormProps) {
       {
         ...values,
         areas,
-        assignments: values.role === "user" ? assignments : [],
-        entity_ids: values.role === "user" ? entityIds : [],
+        pod_workflows: values.role === "finance_admin" ? [] : podWorkflows,
+        assignments: values.role === "finance_admin" ? [] : assignments,
+        entity_ids: values.role === "finance_admin" ? [] : entityIds,
       },
       {
         onSuccess: (user) => {
@@ -103,18 +108,30 @@ export function CreateUserForm({ onCreated, onCancel }: CreateUserFormProps) {
           </Field>
         </div>
 
+        {/* Hidden for now with the Agent Catalog and Finance POD:
         <div className="space-y-2">
           <h3 className="text-sm font-semibold text-brand-navy">Areas</h3>
           <AreasEditor role={role} value={areas} onChange={setAreas} disabled={create.isPending} />
         </div>
 
-        {role === "user" && (
+        {role !== "finance_admin" && (
           <div className="space-y-2">
             <h3 className="text-sm font-semibold text-brand-navy">Agent access</h3>
             <AssignmentsEditor value={assignments} onChange={setAssignments} disabled={create.isPending} />
           </div>
         )}
-        {role === "user" && (
+        */}
+
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold text-brand-navy">Service POD workflows</h3>
+          <WorkflowsEditor
+            role={role}
+            value={podWorkflows}
+            onChange={(value) => setPicked({ role, value })}
+            disabled={create.isPending}
+          />
+        </div>
+        {role !== "finance_admin" && (
           <div className="space-y-2">
             <h3 className="text-sm font-semibold text-brand-navy">Legal entities</h3>
             <EntitiesEditor value={entityIds} onChange={setEntityIds} disabled={create.isPending} />

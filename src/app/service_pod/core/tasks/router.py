@@ -20,10 +20,10 @@ _ERRORS: dict[int | str, dict[str, Any]] = {
 
 @router.get("/tasks", response_model=list[TaskOut])
 async def list_tasks(
-    session: SessionDep, _: PodAccessDep, status: TaskStatus | None = None
+    session: SessionDep, access: PodAccessDep, status: TaskStatus | None = None
 ) -> list[TaskOut]:
     """The manual QuickBooks task queue."""
-    return await service.list_tasks(session, status)
+    return await service.list_tasks(session, access, status)
 
 
 @router.post(

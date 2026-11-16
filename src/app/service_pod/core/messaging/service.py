@@ -26,7 +26,7 @@ from src.app.core.llm.factory import get_llm_provider
 from src.app.jobs import queue
 from src.app.service_pod.common.canonical import fingerprint
 from src.app.service_pod.common.people import DELETED, name_of, names
-from src.app.service_pod.core.access.service import PodAccess
+from src.app.service_pod.core.access.service import PodAccess, require_admin
 from src.app.service_pod.core.cases import system
 from src.app.service_pod.core.cases.access import load_case
 from src.app.service_pod.core.cases.exceptions import CaseActionError, StaleVersionError
@@ -157,9 +157,17 @@ async def messages_for_case(session: AsyncSession, case: PodCase) -> list[Messag
     return await _message_outs(session, list(rows))
 
 
-async def list_messages(session: AsyncSession, status: MessageStatus | None) -> list[MessageOut]:
-    """The inbox: messages on every case, newest first."""
-    query = select(PodMessage).order_by(PodMessage.updated_at.desc()).limit(300)
+async def list_messages(
+    session: AsyncSession, access: PodAccess, status: MessageStatus | None
+) -> list[MessageOut]:
+    """The inbox: messages on the cases of the person's workflows, newest first."""
+    query = (
+        select(PodMessage)
+        .join(PodCase, PodCase.id == PodMessage.case_id)
+        .where(PodCase.workflow.in_(access.workflows))
+        .order_by(PodMessage.updated_at.desc())
+        .limit(300)
+    )
     if status is not None:
         query = query.where(PodMessage.status == status)
     return await _message_outs(session, list(await session.scalars(query)))
@@ -431,6 +439,7 @@ async def send_message(
 ) -> MessageOut:
     """Approve the exact message (its hash binds subject, body, recipient, attachments,
     purpose and transport) and send it once."""
+    require_admin(access)  # signing off: Finance Admins only
     message, case = await _load_message(session, message_id, body.expected_version)
     _require_open(case)
     if message.direction != Direction.OUTBOUND or message.status not in EDITABLE:
@@ -525,6 +534,7 @@ async def reconcile_message(
     ctx: RequestContext,
 ) -> MessageOut:
     """Settle a send whose outcome was unknown, after checking the provider's own log."""
+    require_admin(access)  # signing off: Finance Admins only
     message, case = await _load_message(session, message_id, body.expected_version)
     _require_open(case)
     if message.status != MessageStatus.SEND_UNKNOWN:
@@ -758,6 +768,7 @@ async def decide_artifact(
     decision: str,
     ctx: RequestContext,
 ) -> ArtifactOut:
+    require_admin(access)  # signing off: Finance Admins only
     artifact = await session.get(PodArtifact, artifact_id, with_for_update=True)
     if artifact is None:
         raise ArtifactNotFoundError
@@ -802,5 +813,6 @@ async def artifact_content(
     artifact = await session.get(PodArtifact, artifact_id)
     if artifact is None:
         raise ArtifactNotFoundError
+    await load_case(session, artifact.case_id)  # refuses cases outside the person's workflows
     content = await session.scalar(select(PodArtifact.content).where(PodArtifact.id == artifact.id))
     return artifact, content or b""

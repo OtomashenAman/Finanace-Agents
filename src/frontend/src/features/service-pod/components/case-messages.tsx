@@ -17,6 +17,7 @@ import {
   useSendMessage,
   useUpdateMessage,
   useUploadArtifact,
+  useIsPodAdmin,
 } from "../hooks"
 import { money } from "../flows/shared"
 import { ARTIFACT_KIND, formatDateTime, MESSAGE_STATUS, THREAD_EVIDENCE } from "../labels"
@@ -68,9 +69,11 @@ export function Extraction({ m }: { m: Message }) {
 /** The checklist, then one click: the exact message is approved and sent once. */
 function SendBox({ m }: { m: Message }) {
   const send = useSendMessage()
+  const admin = useIsPodAdmin()
   const [checks, setChecks] = useState<ApprovalChecks>({ recipient: false, mapping: false, tone: false })
   const customer = m.audience === "customer"
   const ready = !customer || (checks.recipient && checks.mapping && checks.tone)
+  if (!admin) return <p className="text-xs text-muted-foreground">Ready for a Finance Admin to check and send.</p>
   return (
     <div className="w-full space-y-1 rounded border p-2">
       {customer &&
@@ -128,6 +131,7 @@ function MessageBody({ body, factBlock }: { body: string; factBlock: string | nu
 function MessageItem({ m, c, ReplyPanel }: { m: Message; c: CaseDetail; ReplyPanel?: ReplyPanelType }) {
   const update = useUpdateMessage()
   const reconcile = useReconcile()
+  const admin = useIsPodAdmin()
   const [editing, setEditing] = useState(false)
   const [to, setTo] = useState(m.to_email)
   const [subject, setSubject] = useState(m.subject)
@@ -230,7 +234,10 @@ function MessageItem({ m, c, ReplyPanel }: { m: Message; c: CaseDetail; ReplyPan
               </Button>
             )}
             {unsent && <SendBox m={m} />}
-            {m.status === "send_unknown" && (
+            {m.status === "send_unknown" && !admin && (
+              <p className="text-xs text-muted-foreground">A Finance Admin will check the provider log.</p>
+            )}
+            {m.status === "send_unknown" && admin && (
               <span className="flex w-full flex-wrap gap-2">
                 <Input className="max-w-sm" placeholder="What the provider log shows" value={note} onChange={(e) => setNote(e.target.value)} />
                 {(["sent", "send_failed"] as const).map((outcome) => (
@@ -673,6 +680,7 @@ export function Messages({
 export function Artifacts({ c }: { c: CaseDetail }) {
   const upload = useUploadArtifact()
   const decide = useDecideArtifact()
+  const admin = useIsPodAdmin()
   const [kind, setKind] = useState<ArtifactKind>("timesheet")
   const [refs, setRefs] = useState("")
   const [file, setFile] = useState<File | null>(null)
@@ -690,7 +698,8 @@ export function Artifacts({ c }: { c: CaseDetail }) {
             <Button size="sm" variant="ghost" onClick={() => void apiDownload(`/pod/artifacts/${a.id}/content`, a.filename)} aria-label={`Download ${a.filename}`}>
               <Download />
             </Button>
-            {a.status === "pending" && (
+            {a.status === "pending" && !admin && <span className="text-xs text-muted-foreground">Awaiting a Finance Admin</span>}
+            {a.status === "pending" && admin && (
               <>
                 <Button size="sm" disabled={decide.isPending} onClick={() => void attempt(() => decide.mutateAsync({ id: a.id, decision: "approved" }), "Document approved.")}>
                   Approve

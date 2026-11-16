@@ -25,18 +25,18 @@ async def test_new_accounts_get_everything_their_role_allows(
 ) -> None:
     assert (await adm.get(ME)).json()["areas"] == ["agent_catalog", "service_pod", "finance_pod"]
     plain = await make_user("plain@example.com")
-    assert plain.areas == ["agent_catalog"]
+    assert plain.areas == ["agent_catalog", "service_pod"]
 
     body = {"full_name": "A", "password": DEFAULT_PASSWORD}
     user = (await adm.post(USERS, json={**body, "email": "u@example.com"})).json()
-    assert user["areas"] == ["agent_catalog"]
+    assert user["areas"] == ["agent_catalog", "service_pod"]
     admin = (
         await adm.post(USERS, json={**body, "email": "a@example.com", "role": "finance_admin"})
     ).json()
     assert admin["areas"] == ["agent_catalog", "service_pod", "finance_pod"]
 
 
-async def test_the_pods_are_for_finance_admins_only(adm: AsyncClient) -> None:
+async def test_the_finance_pod_is_for_finance_admins_only(adm: AsyncClient) -> None:
     r = await adm.post(
         USERS,
         json={
@@ -89,7 +89,9 @@ async def test_a_finance_pod_only_admin_sees_only_the_finance_pod(
     assert event is not None and event.details["areas"] == ["service_pod", "finance_pod"]
 
 
-async def test_demoting_an_admin_takes_the_pods_away(adm: AsyncClient, db: AsyncSession) -> None:
+async def test_demoting_an_admin_takes_the_finance_pod_away(
+    adm: AsyncClient, db: AsyncSession
+) -> None:
     created = (
         await adm.post(
             USERS,
@@ -102,6 +104,8 @@ async def test_demoting_an_admin_takes_the_pods_away(adm: AsyncClient, db: Async
         )
     ).json()
     r = await adm.patch(f"{USERS}/{created['id']}", json={"role": "user"})
-    assert r.json()["areas"] == ["agent_catalog"]
+    assert r.json()["areas"] == ["agent_catalog", "service_pod"]
+    # A plain user starts with no Service POD workflow
+    assert r.json()["pod_workflows"] == []
     user = await db.scalar(select(User).where(User.email == "a@example.com"))
-    assert user is not None and user.areas == ["agent_catalog"]
+    assert user is not None and user.areas == ["agent_catalog", "service_pod"]

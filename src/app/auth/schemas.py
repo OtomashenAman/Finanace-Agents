@@ -29,3 +29,5 @@ class UserOut(BaseModel):
     role: UserRole
     last_login_at: datetime | None
     areas: list[Area]  # the parts of the app shown to them (the nav)
+    # Service POD workflows they may work in (every one for a Finance Admin)
+    pod_workflows: list[str] = Field(validation_alias="workflow_keys")
