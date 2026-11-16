@@ -152,6 +152,12 @@ export const useRestoreSnapshot = () => usePodMutation(podApi.restoreSnapshot)
 export const useDeleteSnapshot = () => usePodMutation(podApi.deleteSnapshot)
 /** A suggested draft: nothing is saved, so nothing to refresh */
 export const useCompose = () => useMutation({ mutationFn: podApi.compose })
+export const useAssist = () => useMutation({ mutationFn: podApi.assist })
+export function useEmailTemplate(caseId: string, enabled = true) {
+  return useQuery({ queryKey: [POD_TAG, "template", caseId], queryFn: () => podApi.template(caseId), enabled })
+}
+export const useSaveTemplate = () => usePodMutation(podApi.saveTemplate)
+export const useDeleteTemplate = () => usePodMutation(podApi.deleteTemplate)
 export const useReconcile = () => usePodMutation(podApi.reconcile)
 export const useImportReply = () => usePodMutation(podApi.importReply)
 export const useUploadArtifact = () => usePodMutation(podApi.uploadArtifact)

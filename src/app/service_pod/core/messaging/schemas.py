@@ -96,6 +96,37 @@ class ComposeRequest(BaseModel):
     purpose: str = Field(pattern=r"^[a-z][a-z_]{2,49}$")
 
 
+class AssistRequest(BaseModel):
+    """Ask the AI in plain English to write or change the draft (tone, length, content)."""
+
+    purpose: str = Field(pattern=r"^[a-z][a-z_]{2,49}$")
+    instruction: str = Field(min_length=2, max_length=2000)
+    subject: str = Field(default="", max_length=300)
+    body: str = Field(default="", max_length=50_000)  # empty: write a new one
+
+
+class AssistOut(BaseModel):
+    subject: str
+    body: str
+
+
+class TemplateIn(BaseModel):
+    """The draft as the customer's template; its invoice table and numbers become
+    placeholders, filled in for each case."""
+
+    purpose: str = Field(pattern=r"^[a-z][a-z_]{2,49}$")
+    subject: str = Field(min_length=1, max_length=300)
+    body: str = Field(min_length=1, max_length=50_000)
+
+
+class TemplateOut(BaseModel):
+    customer_name: str
+    subject: str
+    body: str
+    updated_by: str | None
+    updated_at: datetime
+
+
 class MessageReconcile(BaseModel):
     """After checking the provider's log for a send whose outcome was unknown."""
 

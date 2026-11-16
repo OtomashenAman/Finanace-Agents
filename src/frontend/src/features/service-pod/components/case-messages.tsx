@@ -20,6 +20,7 @@ import {
 } from "../hooks"
 import { ARTIFACT_KIND, formatDateTime, MESSAGE_STATUS, THREAD_EVIDENCE } from "../labels"
 import { AiBadge, Card, Empty, Field, Pill } from "./bits"
+import { EmailAssist } from "./email-assist"
 import { attempt, selectClass } from "../ui"
 
 const CHECK_LABELS: Record<keyof ApprovalChecks, string> = {
@@ -118,6 +119,18 @@ function MessageItem({ m, c, ReplyPanel }: { m: Message; c: CaseDetail; ReplyPan
           <Input value={subject} onChange={(e) => setSubject(e.target.value)} />
           <Textarea rows={8} value={body} onChange={(e) => setBody(e.target.value)} />
           {m.fact_block && <p className="text-xs text-muted-foreground">Keep the figures block exactly as it is.</p>}
+          {m.fact_block && m.audience === "customer" && (
+            <EmailAssist
+              c={c}
+              purpose={m.purpose}
+              subject={subject}
+              body={body}
+              onChange={(s, b) => {
+                setSubject(s)
+                setBody(b)
+              }}
+            />
+          )}
           <div className="flex gap-2">
             <Button
               size="sm"
@@ -265,7 +278,11 @@ function DraftForm({
             disabled={compose.isPending}
             onClick={() =>
               void attempt(() => compose.mutateAsync({ caseId: c.id, purpose }), (d) =>
-                d.ai_drafted ? "Draft suggested (AI wording, figures from the source)." : "Template draft (no AI wording).",
+                d.ai_drafted
+                  ? "Draft suggested (AI wording, figures from the source)."
+                  : d.note?.includes("saved email template")
+                    ? "Draft from the customer's saved template (figures from the source)."
+                    : "Template draft (no AI wording).",
               ).then((d) => {
                 if (!d) return
                 setTo(d.to_email ?? "")
@@ -286,7 +303,9 @@ function DraftForm({
             {composedNote}
           </p>
         ) : (
-          <p className="text-xs text-amber-800">{composedNote}</p>
+          <p className={`text-xs ${composedNote.includes("saved email template") ? "text-muted-foreground" : "text-amber-800"}`}>
+            {composedNote}
+          </p>
         ))}
       <div className="grid gap-2 sm:grid-cols-[140px_1fr]">
         <select
@@ -303,6 +322,20 @@ function DraftForm({
       </div>
       <Input placeholder="Subject" value={subject} onChange={(e) => setSubject(e.target.value)} />
       <Textarea rows={8} className="font-mono text-xs" placeholder="Message" value={body} onChange={(e) => setBody(e.target.value)} />
+      {workflowPurpose && audience === "customer" && (
+        <EmailAssist
+          c={c}
+          purpose={purpose}
+          subject={subject}
+          body={body}
+          onChange={(s, b) => {
+            setSubject(s)
+            setBody(b)
+            setComposedNote(null)
+            if (!to) setTo((c.state as { customer?: { email?: string | null } }).customer?.email ?? "")
+          }}
+        />
+      )}
       {approved.length > 0 && (
         <div className="flex flex-wrap gap-3 text-xs">
           {approved.map((a) => (

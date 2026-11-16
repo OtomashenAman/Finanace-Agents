@@ -1,4 +1,6 @@
+import { Fragment, useState } from "react"
 import { Link } from "react-router"
+import { ChevronRight } from "lucide-react"
 
 import type { CaseDetail } from "../../api"
 import { Card, Pill } from "../../components/bits"
@@ -7,12 +9,107 @@ import { money, type InvoiceState } from "../shared"
 import { CheckRow } from "../shared-ui"
 import { daysUntil, promiseLabel } from "./meta"
 
+interface InvoiceLine {
+  item?: string
+  description?: string
+  service_date?: string
+  quantity?: string
+  rate?: string
+  amount: string
+  class_name?: string
+}
+
+/** What the invoice is for, as QuickBooks shows it (lines, the consultant...), to verify it */
+interface InvoiceDetails {
+  lines?: InvoiceLine[]
+  custom_fields?: Record<string, string>
+  class_name?: string
+  location?: string
+  memo?: string
+  note?: string
+  service_start?: string
+  service_end?: string
+}
+
 interface ArState {
   customer?: { name: string; email: string | null }
-  invoices?: (InvoiceState & { original_amount?: string; terms?: string | null })[]
+  invoices?: (InvoiceState & {
+    original_amount?: string
+    terms?: string | null
+    txn_date?: string
+    details?: InvoiceDetails | null
+  })[]
   contract?: { id: string; terms: string | null } | null
   total_open?: string
   currency?: string
+}
+
+/** One line under the invoice number: who or what it's for */
+function forWhom(d: InvoiceDetails | null | undefined): string | null {
+  if (!d) return null
+  const custom = Object.entries(d.custom_fields ?? {}).map(([k, v]) => `${k}: ${v}`)
+  const first = d.lines?.[0]
+  return custom[0] ?? first?.description ?? first?.item ?? d.class_name ?? null
+}
+
+function Details({ d, cur, txnDate }: { d: InvoiceDetails | null | undefined; cur?: string; txnDate?: string }) {
+  if (!d)
+    return (
+      <p className="text-xs text-muted-foreground">
+        No line details in this source. Refresh the case's source after the next QuickBooks sync to see them.
+      </p>
+    )
+  const facts: [string, string | undefined][] = [
+    ["Invoice date", txnDate],
+    ["Service period", d.service_start ? `${d.service_start}${d.service_end && d.service_end !== d.service_start ? ` to ${d.service_end}` : ""}` : undefined],
+    ...Object.entries(d.custom_fields ?? {}),
+    ["Class", d.class_name],
+    ["Location", d.location],
+    ["Message on invoice", d.memo],
+    ["Internal note", d.note],
+  ]
+  return (
+    <div className="space-y-2 rounded-md bg-muted/40 p-3 text-xs">
+      <dl className="grid gap-x-6 gap-y-1 sm:grid-cols-2">
+        {facts
+          .filter(([, v]) => v)
+          .map(([k, v]) => (
+            <div key={k} className="flex gap-2">
+              <dt className="shrink-0 text-muted-foreground">{k}</dt>
+              <dd className="whitespace-pre-wrap break-words font-medium">{v}</dd>
+            </div>
+          ))}
+      </dl>
+      {(d.lines?.length ?? 0) > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[480px]">
+            <thead>
+              <tr className="text-left text-muted-foreground">
+                <th className="py-1 pr-3 font-medium">Product/service</th>
+                <th className="py-1 pr-3 font-medium">Description</th>
+                <th className="py-1 pr-3 font-medium">Date</th>
+                <th className="py-1 pr-3 text-right font-medium">Qty</th>
+                <th className="py-1 pr-3 text-right font-medium">Rate</th>
+                <th className="py-1 text-right font-medium">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {d.lines!.map((l, i) => (
+                <tr key={i} className="align-top">
+                  <td className="py-1 pr-3">{l.item ?? "-"}{l.class_name && <span className="block text-muted-foreground">{l.class_name}</span>}</td>
+                  <td className="py-1 pr-3 whitespace-pre-wrap">{l.description ?? "-"}</td>
+                  <td className="py-1 pr-3">{l.service_date ?? "-"}</td>
+                  <td className="py-1 pr-3 text-right tabular-nums">{l.quantity ? Number(l.quantity) : "-"}</td>
+                  <td className="py-1 pr-3 text-right tabular-nums">{l.rate ? money(l.rate, cur) : "-"}</td>
+                  <td className="py-1 text-right tabular-nums">{money(l.amount, cur)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
 }
 
 /** Deck AR screen 2: the invoices, what's promised against them and what QuickBooks shows
@@ -23,6 +120,15 @@ export function ArInvoices({ c }: { c: CaseDetail }) {
   const live = c.commitments.filter((x) => x.status !== "rejected")
   const sum = (xs: { amount: string }[]) => xs.reduce((t, x) => t + Number(x.amount), 0)
   const withTerms = (s.invoices ?? []).some((i) => i.terms)
+  const [open, setOpen] = useState<Set<string>>(new Set())
+  const toggle = (id: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  const columns = withTerms ? 6 : 5
 
   return (
     <Card
@@ -47,9 +153,23 @@ export function ArInvoices({ c }: { c: CaseDetail }) {
               const approved = mine.filter((x) => x.status === "approved")
               const proposed = mine.filter((x) => x.status === "proposed")
               const paid = Number(inv.original_amount ?? inv.balance) - Number(inv.balance)
+              const expanded = open.has(inv.id)
+              const summary = forWhom(inv.details)
               return (
-                <tr key={inv.id}>
-                  <td className="py-1.5 pr-3 font-medium">{inv.number}</td>
+                <Fragment key={inv.id}>
+                <tr>
+                  <td className="py-1.5 pr-3">
+                    <button
+                      type="button"
+                      onClick={() => toggle(inv.id)}
+                      aria-expanded={expanded}
+                      className="flex items-center gap-1 text-left font-medium hover:underline"
+                    >
+                      <ChevronRight className={`size-3.5 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`} aria-hidden />
+                      {inv.number}
+                    </button>
+                    {summary && <span className="block max-w-[260px] truncate pl-4.5 text-xs text-muted-foreground" title={summary}>{summary}</span>}
+                  </td>
                   <td className="py-1.5 pr-3">
                     {inv.due_date}
                     {inv.days_overdue !== undefined && <span className="ml-1 text-xs text-muted-foreground">({inv.days_overdue} d)</span>}
@@ -62,6 +182,14 @@ export function ArInvoices({ c }: { c: CaseDetail }) {
                   </td>
                   <td className="py-1.5 text-right tabular-nums">{money(paid, cur)}</td>
                 </tr>
+                {expanded && (
+                  <tr>
+                    <td colSpan={columns} className="pb-3">
+                      <Details d={inv.details} cur={cur} txnDate={inv.txn_date} />
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               )
             })}
           </tbody>

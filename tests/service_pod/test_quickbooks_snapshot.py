@@ -15,6 +15,7 @@ from src.app.data_sources.models import (
     SourceKind,
     SourceStatus,
 )
+from src.app.data_sources.providers.quickbooks import _invoice as qb_invoice
 from src.app.data_sources.records import Customer, Invoice, Payment, Record, RecordType
 from src.app.entities.models import LegalEntity
 from src.app.service_pod.core.snapshots.importers.quickbooks_online import _email
@@ -164,6 +165,50 @@ async def test_invoices_of_a_deleted_customer_are_kept(
     assert r.status_code == 201, r.text
     counts = r.json()["snapshot"]["row_counts"]
     assert counts["customers"] == 2 and counts["invoices"] == 3 and counts["payments"] == 1
+
+
+def test_an_invoice_keeps_what_it_is_for() -> None:
+    row = {
+        "Id": "77",
+        "DocNumber": "2173301",
+        "CustomerRef": {"value": "5", "name": "Kani Solutions Inc"},
+        "TotalAmt": 12000,
+        "Balance": 12000,
+        "TxnDate": "2026-10-01",
+        "DueDate": "2026-10-31",
+        "SalesTermRef": {"value": "3", "name": "Net 30"},
+        "CustomerMemo": {"value": "Thank you for your business"},
+        "CustomField": [
+            {"Name": "Consultant", "StringValue": "Priya Shah", "Type": "StringType"},
+            {"Name": "PO", "Type": "StringType"},  # no value: left out
+        ],
+        "Line": [
+            {
+                "DetailType": "SalesItemLineDetail",
+                "Amount": 12000,
+                "Description": "Java Developer - September hours",
+                "SalesItemLineDetail": {
+                    "ItemRef": {"value": "1", "name": "Consulting"},
+                    "Qty": 160,
+                    "UnitPrice": 75,
+                    "ServiceDate": "2026-09-30",
+                    "ClassRef": {"value": "9", "name": "Staffing"},
+                },
+            },
+            {"DetailType": "SubTotalLineDetail", "Amount": 12000, "SubTotalLineDetail": {}},
+        ],
+    }
+    inv = qb_invoice(row, {})
+    assert inv.custom_fields == {"Consultant": "Priya Shah"}
+    assert inv.terms == "Net 30" and inv.memo == "Thank you for your business"
+    [line] = inv.lines
+    assert (line.item, line.description, line.class_name) == (
+        "Consulting",
+        "Java Developer - September hours",
+        "Staffing",
+    )
+    assert (line.quantity, line.rate, line.amount) == (Decimal(160), Decimal(75), Decimal(12000))
+    assert line.service_date == date(2026, 9, 30)
 
 
 def test_the_first_valid_address_is_the_contact() -> None:

@@ -178,6 +178,20 @@ class Customer(Record):
         return self.name
 
 
+class InvoiceLine(BaseModel):
+    """One product/service line of a customer invoice, as the source shows it."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    item: str | None = Field(default=None, max_length=200)  # product/service name
+    description: str | None = Field(default=None, max_length=4000)
+    service_date: date | None = None
+    quantity: Decimal | None = None
+    rate: Decimal | None = None
+    amount: Money
+    class_name: str | None = Field(default=None, max_length=200)
+
+
 class Invoice(Record):
     """A customer (sales) invoice: the receivable side, unlike Bill."""
 
@@ -193,6 +207,14 @@ class Invoice(Record):
     # Earliest and latest service date on its lines (when the source has them)
     service_start: date | None = None
     service_end: date | None = None
+    # What the invoice is for, to verify it (e.g. the consultant whose hours it bills)
+    lines: list[InvoiceLine] = []
+    custom_fields: dict[str, str] = {}  # the company's own invoice fields, by name
+    terms: str | None = Field(default=None, max_length=200)
+    class_name: str | None = Field(default=None, max_length=200)
+    location: str | None = Field(default=None, max_length=200)
+    memo: str | None = Field(default=None, max_length=4000)  # message to the customer
+    note: str | None = Field(default=None, max_length=4000)  # internal note
 
     @property
     def reference(self) -> str:

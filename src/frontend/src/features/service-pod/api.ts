@@ -205,6 +205,15 @@ export interface Composed {
   note: string | null
 }
 
+/** A customer's own email format; {{invoices}} and {{invoice_numbers}} are filled per case */
+export interface EmailTemplate {
+  customer_name: string
+  subject: string
+  body: string
+  updated_by: string | null
+  updated_at: string
+}
+
 export interface InvoiceRow {
   id: string
   number: string
@@ -645,6 +654,13 @@ export const podApi = {
     apiRequest<Message>(`/pod/messages/${id}/send`, { method: "POST", json: { expected_version: version, checks } }),
   compose: ({ caseId, purpose }: { caseId: string; purpose: string }) =>
     apiRequest<Composed>(`/pod/cases/${caseId}/messages/compose`, { method: "POST", json: { purpose } }),
+  /** The AI writes or changes the draft from a plain-English request; figures stay locked */
+  assist: ({ caseId, ...body }: { caseId: string; purpose: string; instruction: string; subject: string; body: string }) =>
+    apiRequest<{ subject: string; body: string }>(`/pod/cases/${caseId}/messages/assist`, { method: "POST", json: body }),
+  template: (caseId: string) => apiRequest<EmailTemplate | null>(`/pod/cases/${caseId}/template`),
+  saveTemplate: ({ caseId, ...body }: { caseId: string; purpose: string; subject: string; body: string }) =>
+    apiRequest<EmailTemplate>(`/pod/cases/${caseId}/template`, { method: "PUT", json: body }),
+  deleteTemplate: (caseId: string) => apiRequest<void>(`/pod/cases/${caseId}/template`, { method: "DELETE" }),
   arPortfolio: () => apiRequest<ArPortfolio>("/pod/ar/portfolio"),
   bankWorklist: () => apiRequest<BankWorklist>("/pod/bank/unapplied"),
   reconcile: ({

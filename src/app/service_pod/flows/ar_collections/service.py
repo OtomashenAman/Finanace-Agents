@@ -20,6 +20,7 @@ from src.app.service_pod.core.cases.models import (
 )
 from src.app.service_pod.core.cases.service import Ctx
 from src.app.service_pod.core.hooks import Composed
+from src.app.service_pod.core.messaging import templates
 from src.app.service_pod.core.snapshots import service as snapshots
 from src.app.service_pod.core.snapshots.contract import SnapshotDocument
 from src.app.service_pod.flows.ar_collections.schemas import ArSelection
@@ -58,6 +59,9 @@ async def on_create(
                 "balance": inv.balance,
                 "days_overdue": max(0, (doc.as_of - inv.due_date).days),
                 "terms": inv.terms,
+                "txn_date": inv.txn_date,
+                # What it's for (lines, consultant...), to verify it; shown, never emailed
+                "details": inv.details.model_dump(exclude_none=True) if inv.details else None,
             }
         )
     # The agreement the invoices fall under (the MSA), for the email and its attachment
@@ -80,6 +84,7 @@ async def on_create(
                 "email": customer.email,
                 "contact_name": customer.contact_name,
             },
+            "company_id": doc.company_id,  # with the customer id: its saved email template
             "currency": doc.currency,
             "as_of": doc.as_of,
             "invoices": rows,
@@ -161,6 +166,18 @@ async def compose(session: AsyncSession, case: PodCase, purpose: str, llm: LLMPr
     numbers = " / ".join(invoices_of(case))
     fact_block = await facts(session, case, purpose)
     assert fact_block is not None  # noqa: S101
+    key = await templates.key_of(session, case)
+    saved = await templates.find(session, key) if key else None
+    if saved is not None:  # the customer's own format, as saved
+        return Composed(
+            to_email=customer.get("email"),
+            to_name=customer.get("contact_name") or customer.get("name"),
+            subject=templates.fill(saved.subject, case, fact_block),
+            body=templates.fill(saved.body, case, fact_block),
+            fact_block=fact_block,
+            ai_drafted=False,
+            note=f"From {customer.get('name')}'s saved email template.",
+        )
     schedule = purpose == "payment_schedule_request"
     return await drafting.compose(
         llm,
