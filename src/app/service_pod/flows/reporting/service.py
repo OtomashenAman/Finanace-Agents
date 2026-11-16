@@ -185,7 +185,13 @@ async def draft_blocker(session: AsyncSession, case: PodCase, purpose: str) -> s
     return None
 
 
-async def compose(session: AsyncSession, case: PodCase, purpose: str, llm: LLMProvider) -> Composed:
+async def compose(
+    session: AsyncSession,
+    case: PodCase,
+    purpose: str,
+    llm: LLMProvider,
+    invoices: list[str] | None = None,
+) -> Composed:
     month = fpa.month_name(str(case.state.get("report_month", "")))
     recipients = get_settings().pod_internal_recipients
     pack = await current_pack(session, case)

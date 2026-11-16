@@ -10,12 +10,13 @@ const FOLLOW_UP = "follow_up"
 
 export function InvoicesAndEmail({ c }: { c: CaseDetail }) {
   return (
-    <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+    // Stacked: the email thread reads as a conversation and needs the full width
+    <div className="space-y-4">
       <ArInvoices c={c} />
       <Messages
         c={c}
         title="Email to the customer"
-        hint="The invoice figures come from the source and stay locked; the email is checked and approved before it's sent."
+        hint="Pick the invoices, write the email (with AI if you like), then check and send. Figures come from the source and stay locked."
         filter={(m) => m.direction === "outbound" && m.purpose !== FOLLOW_UP}
         importReplies={false}
         purposes={PURPOSES}

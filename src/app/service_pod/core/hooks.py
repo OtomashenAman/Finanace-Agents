@@ -53,11 +53,17 @@ class WorkflowHooks:
     blockers: Callable[[Ctx], Awaitable[list[str]]] | None = None
     # Message purposes the workflow drafts (purpose -> label)
     purposes: Mapping[str, str] = field(default_factory=dict)
-    # The verified fact block a message of this purpose must carry (None: no facts)
-    facts: Callable[[AsyncSession, PodCase, str], Awaitable[str | None]] | None = None
+    # The verified fact block a message of this purpose must carry (None: no facts). The
+    # last argument: the invoice numbers the email is about (None: all of the case's)
+    facts: (
+        Callable[[AsyncSession, PodCase, str, list[str] | None], Awaitable[str | None]] | None
+    ) = None
     # Why a message of this purpose can't be drafted now (None: it can)
     draft_blocker: Callable[[AsyncSession, PodCase, str], Awaitable[str | None]] | None = None
-    compose: Callable[[AsyncSession, PodCase, str, LLMProvider], Awaitable[Composed]] | None = None
+    compose: (
+        Callable[[AsyncSession, PodCase, str, LLMProvider, list[str] | None], Awaitable[Composed]]
+        | None
+    ) = None
     # Read an imported reply into commitments / allocations / review tasks
     extract_reply: (
         Callable[[AsyncSession, PodCase, PodMessage, LLMProvider], Awaitable[None]] | None

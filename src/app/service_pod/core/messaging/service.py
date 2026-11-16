@@ -4,8 +4,8 @@
   recipient, attachments, purpose and transport, and customer mail needs the checklist.
 - A message is sent once: the idempotency key comes from the approval, and an unclear
   outcome becomes send_unknown to reconcile, never an automatic retry.
-- Customer mail goes only to the verified contact imported with the source; internal mail
-  only to the configured recipients.
+- Customer mail goes to the source's contact by default, or any address the sender chooses
+  and confirms; internal mail only to the configured recipients.
 - A reply is accepted only from the address the message went to, on a provable thread.
 """
 
@@ -126,6 +126,7 @@ async def _message_outs(session: AsyncSession, messages: list[PodMessage]) -> li
             body=m.body,
             artifact_ids=[uuid.UUID(a) for a in m.artifact_ids],
             fact_block=m.fact_block,
+            invoice_numbers=m.invoice_numbers,
             approval_checks=m.approval_checks,
             extraction=m.extraction,
             extraction_status=m.extraction_status,
@@ -217,16 +218,6 @@ def _require_open(case: PodCase) -> None:
         raise CaseActionError(f"{case.reference} is {case.status.value}; it can't change any more.")
 
 
-def _source_contacts(snapshot: PodSnapshot, case: PodCase) -> set[str]:
-    """The case customer's email as the source states it."""
-    selected = case.selection.get("customer_id")
-    return {
-        c.email.lower()
-        for c in snapshots.document(snapshot).customers or []
-        if c.email and (selected is None or c.id == selected)
-    }
-
-
 async def _check_recipient(
     session: AsyncSession, case: PodCase, audience: Audience, to_email: str
 ) -> None:
@@ -238,14 +229,8 @@ async def _check_recipient(
                 "Internal reports go only to the configured internal recipients."
             )
         return
-    snapshot = await session.get(PodSnapshot, case.snapshot_id)
-    assert snapshot is not None  # noqa: S101 - RESTRICT foreign key
-    if snapshot.is_demo:
-        return  # fictional customers: the demo recipient may be edited (see send_message)
-    if address not in _source_contacts(snapshot, case):
-        raise MessageRefusedError(
-            "Customer mail goes only to the verified contact imported with the source data."
-        )
+    # Customer mail may go to any address the Finance Admin chooses (the QuickBooks contact
+    # is only the default); the recipient check at sending confirms it
 
 
 async def _approved_artifacts(
@@ -288,9 +273,12 @@ def _normalize(text: str) -> str:
     return "\n".join(line.rstrip() for line in text.replace("\r\n", "\n").split("\n"))
 
 
-async def _facts_for(session: AsyncSession, case: PodCase, purpose: str) -> str | None:
-    """The fact block a message of this purpose must carry; refuses unknown purposes and
-    purposes that can't be drafted yet (e.g. an acknowledgement before verification)."""
+async def _facts_for(
+    session: AsyncSession, case: PodCase, purpose: str, invoices: list[str] | None = None
+) -> str | None:
+    """The fact block a message of this purpose must carry (invoices: only these of the
+    case's); refuses unknown purposes and purposes that can't be drafted yet (e.g. an
+    acknowledgement before verification)."""
     hooks = hooks_for(case.workflow)
     if purpose == GENERIC_PURPOSE:
         return None
@@ -300,7 +288,7 @@ async def _facts_for(session: AsyncSession, case: PodCase, purpose: str) -> str 
         blocked = await hooks.draft_blocker(session, case, purpose)
         if blocked:
             raise MessageRefusedError(blocked)
-    return await hooks.facts(session, case, purpose) if hooks.facts else None
+    return await hooks.facts(session, case, purpose, invoices) if hooks.facts else None
 
 
 def _require_facts(fact_block: str | None, body: str) -> None:
@@ -359,7 +347,7 @@ async def create_draft(
     _require_open(case)
     await _check_recipient(session, case, body.audience, body.to_email)
     await _approved_artifacts(session, case, body.artifact_ids)
-    fact_block = await _facts_for(session, case, body.purpose)
+    fact_block = await _facts_for(session, case, body.purpose, body.invoice_numbers)
     _require_facts(fact_block, body.body)
     message = PodMessage(
         case_id=case.id,
@@ -373,6 +361,7 @@ async def create_draft(
         body=body.body,
         artifact_ids=[str(a) for a in body.artifact_ids],
         fact_block=fact_block,
+        invoice_numbers=body.invoice_numbers if fact_block else None,
         internet_message_id=f"<{uuid.uuid4()}@finance-pod>",
         created_by=access.user.id,
     )
@@ -454,7 +443,8 @@ async def send_message(
     await _check_recipient(session, case, message.audience, message.to_email)
     if message.fact_block is not None:
         # The case may have moved to a newer source since the draft: figures must be current
-        if await _facts_for(session, case, message.purpose) != message.fact_block:
+        current = await _facts_for(session, case, message.purpose, message.invoice_numbers)
+        if current != message.fact_block:
             raise MessageRefusedError(
                 "The source figures changed since this draft: write it again from the case."
             )
@@ -470,18 +460,16 @@ async def send_message(
         snapshot = await session.get(PodSnapshot, case.snapshot_id)
         assert snapshot is not None  # noqa: S101 - RESTRICT foreign key
         settings = get_settings()
-        if snapshot.is_demo and not settings.email_test_recipient:
-            if not settings.email_sandbox_to_quickbooks_contacts:
-                raise MessageRefusedError(
-                    "This case is on demo / sandbox data: real mail from it goes only to a test "
-                    "address (EMAIL_TEST_RECIPIENT), or to the customer's own email from the "
-                    "source with EMAIL_SANDBOX_TO_QUICKBOOKS_CONTACTS=true."
-                )
-            if message.to_email.lower() not in _source_contacts(snapshot, case):
-                raise MessageRefusedError(
-                    "On sandbox data, mail goes only to the customer's email as QuickBooks "
-                    "states it, not to an edited address."
-                )
+        if (
+            snapshot.is_demo
+            and not settings.email_test_recipient
+            and not settings.email_sandbox_to_quickbooks_contacts
+        ):
+            raise MessageRefusedError(
+                "This case is on demo / sandbox data: real mail from it goes only to a test "
+                "address (EMAIL_TEST_RECIPIENT), or to the customer with "
+                "EMAIL_SANDBOX_TO_QUICKBOOKS_CONTACTS=true."
+            )
     message.provider = provider.name
     message.sender = provider.sender
     message.approval_hash = _approval_hash(message, artifacts, provider.name, provider.sender)
@@ -516,6 +504,7 @@ async def compose(
     case_id: uuid.UUID,
     purpose: str,
     llm: LLMProvider,
+    invoices: list[str] | None = None,
 ) -> Composed:
     """A suggested draft for a workflow purpose: the source's figures plus wording. Nothing
     is saved; it is edited and saved as a draft."""
@@ -524,8 +513,8 @@ async def compose(
     compose_hook = hooks_for(case.workflow).compose
     if compose_hook is None or purpose == GENERIC_PURPOSE:
         raise MessageRefusedError("This workflow has no suggested draft for that purpose.")
-    await _facts_for(session, case, purpose)  # unknown or blocked purposes are refused
-    return await compose_hook(session, case, purpose, llm)
+    await _facts_for(session, case, purpose, invoices)  # unknown or blocked: refused
+    return await compose_hook(session, case, purpose, llm, invoices)
 
 
 async def reconcile_message(

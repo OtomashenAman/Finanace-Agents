@@ -80,7 +80,7 @@ async def compose_message(
     llm: LLM,
 ) -> Composed:
     """A suggested draft for a workflow purpose (verified figures + wording). Not saved."""
-    return await service.compose(session, case_id, body.purpose, llm)
+    return await service.compose(session, case_id, body.purpose, llm, body.invoice_numbers)
 
 
 @router.post("/cases/{case_id}/messages/assist", response_model=AssistOut, responses=_ERRORS)

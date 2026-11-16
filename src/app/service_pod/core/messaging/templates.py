@@ -53,21 +53,27 @@ async def find(session: AsyncSession, key: CustomerKey) -> PodEmailTemplate | No
     )
 
 
-def invoice_numbers(case: PodCase) -> str:
-    return " / ".join(str(r["number"]) for r in case.state.get("invoices", []))
+def invoice_numbers(case: PodCase, only: list[str] | None = None) -> str:
+    """The numbers the email is about, in the case's order (only: the selected ones)."""
+    rows = case.state.get("invoices", [])
+    return " / ".join(
+        str(r["number"]) for r in rows if only is None or str(r["number"]) in set(only)
+    )
 
 
-def fill(text: str, case: PodCase, fact_block: str | None) -> str:
-    text = text.replace(INVOICE_NUMBERS, invoice_numbers(case))
+def fill(text: str, case: PodCase, fact_block: str | None, only: list[str] | None = None) -> str:
+    text = text.replace(INVOICE_NUMBERS, invoice_numbers(case, only))
     return text.replace(INVOICES, fact_block or "")
 
 
-def generalize(text: str, case: PodCase, fact_block: str | None) -> str:
+def generalize(
+    text: str, case: PodCase, fact_block: str | None, only: list[str] | None = None
+) -> str:
     """A draft of this case turned into the customer's template: its figures and invoice
     numbers become placeholders, filled in again for each new case."""
     if fact_block:
         text = _replace_block(text, fact_block, INVOICES)
-    numbers = invoice_numbers(case)
+    numbers = invoice_numbers(case, only)
     return text.replace(numbers, INVOICE_NUMBERS) if numbers else text
 
 

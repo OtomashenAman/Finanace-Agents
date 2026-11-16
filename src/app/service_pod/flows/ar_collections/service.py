@@ -138,9 +138,26 @@ async def blockers(c: Ctx) -> list[str]:
     return problems
 
 
-async def facts(session: AsyncSession, case: PodCase, purpose: str) -> str | None:
+def chosen(case: PodCase, numbers: list[str] | None) -> list[dict[str, object]]:
+    """The case's invoices an email is about, in the case's order (None: all of them)."""
+    rows: list[dict[str, object]] = case.state.get("invoices", [])
+    if numbers is None:
+        return rows
+    known = {str(r["number"]) for r in rows}
+    unknown = [n for n in numbers if n not in known]
+    if unknown:
+        raise CaseSelectionError(f"{', '.join(unknown)} isn't one of this case's invoices.")
+    picked = [r for r in rows if str(r["number"]) in set(numbers)]
+    if not picked:
+        raise CaseSelectionError("Select at least one invoice for the email.")
+    return picked
+
+
+async def facts(
+    session: AsyncSession, case: PodCase, purpose: str, numbers: list[str] | None = None
+) -> str | None:
     currency = str(case.state["currency"])
-    invoices = case.state.get("invoices", [])
+    invoices = chosen(case, numbers)
     # Payment terms as the source states them; the column only when the source has any
     with_terms = any(r.get("terms") for r in invoices)
     rows = [("Invoice", "Due date", "Open balance", *(("Terms",) if with_terms else ()))]
@@ -153,7 +170,12 @@ async def facts(session: AsyncSession, case: PodCase, purpose: str) -> str | Non
         )
         for r in invoices
     ]
-    total = reading.money(reading.dec(case.state["total_open"]), currency)
+    open_total = (
+        reading.dec(case.state["total_open"])
+        if numbers is None
+        else sum((reading.dec(r["balance"]) for r in invoices), Decimal(0))
+    )
+    total = reading.money(open_total, currency)
     block = f"{drafting.table(rows)}\nTotal open: {total}"
     if contract := case.state.get("contract"):
         terms = f": {contract['terms']}" if contract.get("terms") else ""
@@ -161,10 +183,16 @@ async def facts(session: AsyncSession, case: PodCase, purpose: str) -> str | Non
     return block
 
 
-async def compose(session: AsyncSession, case: PodCase, purpose: str, llm: LLMProvider) -> Composed:
+async def compose(
+    session: AsyncSession,
+    case: PodCase,
+    purpose: str,
+    llm: LLMProvider,
+    only: list[str] | None = None,
+) -> Composed:
     customer = case.state["customer"]
-    numbers = " / ".join(invoices_of(case))
-    fact_block = await facts(session, case, purpose)
+    numbers = templates.invoice_numbers(case, only)
+    fact_block = await facts(session, case, purpose, only)
     assert fact_block is not None  # noqa: S101
     key = await templates.key_of(session, case)
     saved = await templates.find(session, key) if key else None
@@ -172,8 +200,8 @@ async def compose(session: AsyncSession, case: PodCase, purpose: str, llm: LLMPr
         return Composed(
             to_email=customer.get("email"),
             to_name=customer.get("contact_name") or customer.get("name"),
-            subject=templates.fill(saved.subject, case, fact_block),
-            body=templates.fill(saved.body, case, fact_block),
+            subject=templates.fill(saved.subject, case, fact_block, only),
+            body=templates.fill(saved.body, case, fact_block, only),
             fact_block=fact_block,
             ai_drafted=False,
             note=f"From {customer.get('name')}'s saved email template.",
