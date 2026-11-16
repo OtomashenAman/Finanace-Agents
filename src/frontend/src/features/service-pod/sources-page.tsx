@@ -9,7 +9,7 @@ import { useEntities } from "@/features/entities/hooks"
 import { cn } from "@/lib/utils"
 
 import type { Collection, Snapshot, SnapshotImportResult } from "./api"
-import { Card, DemoBadge, Empty, Field, LoadError, Loading, Pill, PodTabs } from "./components/bits"
+import { Card, DemoBadge, Empty, Field, LoadError, Loading, Pill } from "./components/bits"
 import { attempt, selectClass } from "./ui"
 import {
   useArchiveSnapshot,
@@ -369,11 +369,10 @@ export function SourcesPage() {
 
   return (
     <PodPage
-      title="Data sources"
-      subtitle="Read-only source snapshots. Imported data is never changed; a refresh is a new snapshot."
+      title="Snapshots"
+      subtitle="Read-only copies of the books that cases work on. Imported data is never changed; a refresh is a new snapshot."
     >
-      <PodTabs />
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
         <Card
           title="Snapshots"
           hint="The latest snapshot of each company; earlier ones fold underneath. Missing collections stay missing: workflows that need them refuse the snapshot."

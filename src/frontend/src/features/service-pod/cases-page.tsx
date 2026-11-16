@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
 import type { CaseSummary, Workflow, WorkflowKey } from "./api"
-import { Card, Empty, Field, LoadError, Loading, Pill, PodTabs } from "./components/bits"
+import { Card, Empty, Field, LoadError, Loading, Pill } from "./components/bits"
 import { WorkflowWorkspace } from "./components/workspace"
 import { FLOW_UI } from "./flows"
 import { useCases, useCreateCase, useSnapshots, useWorkflows } from "./hooks"
@@ -238,7 +238,6 @@ export function CasesPage() {
 
   return (
     <PodPage title="Cases" subtitle="Cases categorized by workflow. Track progress, steps, and required sign-offs.">
-      <PodTabs />
       <div className="space-y-6">
         <Card
           title="Cases Directory"

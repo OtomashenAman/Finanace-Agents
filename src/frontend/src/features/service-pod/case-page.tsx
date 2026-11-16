@@ -40,7 +40,7 @@ function AiExecutiveSummary({ c, next }: { c: CaseDetail; next?: NextAction }) {
 
 
 import type { CaseDetail } from "./api"
-import { DemoBadge, LoadError, Loading, Pill, PodTabs } from "./components/bits"
+import { DemoBadge, LoadError, Loading, Pill } from "./components/bits"
 import { CaseAudit, CaseData, PostingTasks } from "./components/case-extras"
 import { Artifacts, Messages } from "./components/case-messages"
 import { Commitments, Decisions, OwnedActions, ReviewTasks } from "./components/case-sections"
@@ -93,7 +93,6 @@ export function CasePage() {
   const next = c && flow?.steps && flow.nextAction ? flow.nextAction(c) : undefined
   return (
     <PodPage title={c ? `${c.reference} · ${c.title}` : "Case"} subtitle={c ? `${WORKFLOW_SHORT[c.workflow]} · updated ${formatDateTime(c.updated_at)}` : undefined}>
-      <PodTabs />
       {isPending && <Loading what="the case" />}
       {isError && <LoadError what="this case (it may not exist or isn't yours)" />}
       {c && (

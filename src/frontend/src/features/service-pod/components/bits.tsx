@@ -1,5 +1,4 @@
 import type { ReactNode } from "react"
-import { Link, useLocation } from "react-router"
 import { FlaskConical, LoaderCircle, Sparkles } from "lucide-react"
 
 import { Alert } from "@/components/ui/alert"
@@ -7,16 +6,7 @@ import { Button, type ButtonProps } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 import type { WorkflowKey } from "../api"
-import { useMyQueue, useWorkflows } from "../hooks"
 import { AI_AGENTS, TONE_CLASSES, type Tone } from "../labels"
-
-const TABS = [
-  { to: "/pod", label: "Dashboard" },
-  { to: "/pod/cases", label: "Cases" },
-  { to: "/pod/queue", label: "My Queue" },
-  { to: "/pod/sources", label: "Sources" },
-]
-const SHARED = TABS.slice(1).map((t) => t.to)
 
 /** Live pulsing status dot for AI telemetry */
 export function LivePulse({
@@ -42,45 +32,6 @@ export function LivePulse({
       </span>
       {label && <span>{label}</span>}
     </span>
-  )
-}
-
-/** The same four tabs whatever the number of workflows; includes active AI telemetry pulse */
-export function PodTabs() {
-  const { pathname } = useLocation()
-  const { count } = useMyQueue()
-  const workflowCount = useWorkflows().data?.length ?? 0
-  const active = (tab: (typeof TABS)[number]) =>
-    tab.to === "/pod" ? !SHARED.some((to) => pathname.startsWith(to)) : pathname.startsWith(tab.to)
-  return (
-    <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-border/60">
-      <nav aria-label="Service POD" className="flex flex-wrap sm:flex-nowrap gap-1">
-        {TABS.map((tab) => (
-          <Link
-            key={tab.to}
-            to={tab.to}
-            aria-current={active(tab) ? "page" : undefined}
-            className={cn(
-              "-mb-px shrink-0 border-b-2 px-3.5 py-2 text-xs sm:text-sm font-medium transition-colors",
-              active(tab) ? "border-primary text-primary font-semibold" : "border-transparent text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {tab.label}
-            {tab.to === "/pod/queue" && count > 0 && (
-              <span className="ml-1.5 rounded-full bg-amber-100 px-1.5 py-0.2 text-[10px] font-bold text-amber-900 shadow-2xs dark:bg-amber-950 dark:text-amber-200">
-                {count}
-              </span>
-            )}
-          </Link>
-        ))}
-      </nav>
-      <div className="hidden sm:flex items-center gap-2 pb-1.5 text-xs text-muted-foreground">
-        <LivePulse
-          color="emerald"
-          label={`${workflowCount} Workflow${workflowCount === 1 ? "" : "s"} Active`}
-          className="text-emerald-700 font-semibold dark:text-emerald-300" />
-      </div>
-    </div>
   )
 }
 

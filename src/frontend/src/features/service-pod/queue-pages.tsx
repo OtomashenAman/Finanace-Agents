@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import type { MessageStatus } from "./api"
 import { TaskRow } from "./components/case-extras"
 import { TaskActions } from "./components/task-actions"
-import { Card, Empty, LoadError, Loading, Pill, PodTabs } from "./components/bits"
+import { Card, Empty, LoadError, Loading, Pill } from "./components/bits"
 import { selectClass } from "./ui"
 import { useMessages, useMyQueue, useWorkflows } from "./hooks"
 import { formatDateTime, MESSAGE_STATUS, REVIEW_KIND, WORKFLOW_SHORT } from "./labels"
@@ -95,7 +95,6 @@ export function MyQueuePage() {
 
   return (
     <PodPage title="My Queue" subtitle="Everything waiting on you, across all cases.">
-      <PodTabs />
       <Card title="My Queue" hint="Settle review tasks, send the emails, and post in QuickBooks by hand: each item opens where it's done.">
         <div className="mb-4 flex flex-wrap gap-1.5" role="group" aria-label="Show">
           {tabs.map(([key, label, n]) => (

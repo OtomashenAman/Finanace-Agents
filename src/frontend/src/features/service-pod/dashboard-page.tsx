@@ -10,7 +10,7 @@ import type { AiKind, BooksStatus, Dashboard, DashboardPhase, PromiseItem } from
 import type { PodWorkflow } from "@/features/auth/api"
 import { useCurrentUser } from "@/features/auth/hooks"
 
-import { AiBadge, AiCard, Card, LivePulse, LoadError, Loading, Pill, PodTabs } from "./components/bits"
+import { AiBadge, AiCard, Card, LivePulse, LoadError, Loading, Pill } from "./components/bits"
 import { fmt } from "./flows/shared"
 import { POD_TAG, useDashboard, useIsPodAdmin, useMyQueue } from "./hooks"
 import { CASE_PHASE, formatDateTime, REVIEW_KIND, WORKFLOW_SHORT } from "./labels"
@@ -34,7 +34,7 @@ function greeting(): string {
 }
 
 /** Who you are, what waits on you, and what the AI did while you were away. */
-function Hero({ d, waiting }: { d: Dashboard | undefined; waiting: number }) {
+function Hero({ d, refresh }: { d: Dashboard | undefined; refresh: ReactNode }) {
   const { data: me } = useCurrentUser()
   const admin = useIsPodAdmin()
   const done = d ? Object.values(d.ai_activity.last_7_days).reduce((a, b) => a + b, 0) : 0
@@ -45,7 +45,7 @@ function Hero({ d, waiting }: { d: Dashboard | undefined; waiting: number }) {
     >
       <div aria-hidden className="pointer-events-none absolute -top-16 right-10 size-56 rounded-full bg-violet-400/20 blur-3xl" />
       <div className="relative flex flex-wrap items-end justify-between gap-4">
-        <div>
+        <div className="min-w-0">
           <p className="flex items-center gap-2 text-xs font-medium text-violet-200">
             <Sparkles className="size-3.5" aria-hidden /> Finance AI · Service POD
           </p>
@@ -54,15 +54,14 @@ function Hero({ d, waiting }: { d: Dashboard | undefined; waiting: number }) {
             {me ? `, ${me.full_name}` : ""}
           </h2>
           <p className="mt-1 text-sm text-slate-200">
-            <Link to="/pod/queue" className="font-semibold text-white underline-offset-4 hover:underline">
-              {waiting} item{waiting === 1 ? "" : "s"} need{waiting === 1 ? "s" : ""} you
-            </Link>{" "}
-            · the AI handled {done} thing{done === 1 ? "" : "s"} in the last 7 days ·{" "}
+            The AI handled {done} thing{done === 1 ? "" : "s"} in the last 7 days ·{" "}
             {admin ? "QuickBooks stays read-only" : "what you prepare goes to a Finance Admin for sign-off"}
           </p>
         </div>
+        <div className="flex flex-col items-start gap-3 sm:items-end">
+          {refresh}
         {d && (
-          <ul className="flex flex-wrap gap-2 text-xs">
+          <ul className="flex flex-wrap gap-2 text-xs sm:justify-end">
             {(Object.keys(AI_KIND) as AiKind[]).map((k) => {
               const Icon = AI_KIND[k].icon
               return (
@@ -75,6 +74,7 @@ function Hero({ d, waiting }: { d: Dashboard | undefined; waiting: number }) {
             })}
           </ul>
         )}
+        </div>
       </div>
     </section>
   )
@@ -173,7 +173,7 @@ function CashRunway({ d }: { d: Dashboard }) {
 const PHASE_LABEL = (p: DashboardPhase) => (p === "closed" ? "Closed (30 days)" : CASE_PHASE[p][0])
 
 const TILE =
-  "group flex flex-col justify-between rounded-xl border border-border/80 bg-card p-4 shadow-2xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
+  "group flex min-w-0 flex-col justify-between rounded-xl border border-border/80 bg-card p-4 shadow-2xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
 
 function Tile({
   to,
@@ -555,11 +555,13 @@ function sinceUpdate(at: number): string {
 function RefreshBar({ updatedAt, fetching }: { updatedAt: number; fetching: boolean }) {
   const client = useQueryClient()
   return (
-    <div className="flex items-center justify-end gap-2 text-xs text-muted-foreground">
-      {updatedAt > 0 && <span>Updated {sinceUpdate(updatedAt)} · refreshes every minute</span>}
+    <div className="flex items-center gap-2 text-xs text-slate-300">
+      {updatedAt > 0 && <span>Updated {sinceUpdate(updatedAt)}</span>}
       <Button
         size="sm"
         variant="outline"
+        className="border-white/25 bg-white/10 text-white hover:bg-white/20 hover:text-white"
+        title="Figures also refresh by themselves every minute"
         disabled={fetching}
         onClick={() => void client.invalidateQueries({ queryKey: [POD_TAG] })}
         aria-label="Refresh the dashboard"
@@ -580,14 +582,9 @@ export function DashboardPage() {
   const has = (w: PodWorkflow) => workflows.includes(w)
 
   return (
-    <PodPage
-      title="Finance Service POD"
-      subtitle="Governed finance workflows on read-only QuickBooks books. Real-time monitoring, customer dunning, and audit-ready reconciliations."
-    >
-      <PodTabs />
+    <PodPage title="Dashboard">
       <div className="space-y-6">
-        <RefreshBar updatedAt={dataUpdatedAt} fetching={isFetching} />
-        <Hero d={d} waiting={q.count} />
+        <Hero d={d} refresh={<RefreshBar updatedAt={dataUpdatedAt} fetching={isFetching} />} />
 
         <DashboardKpis d={d} waitingCount={q.count} workflows={workflows} />
 
@@ -606,13 +603,16 @@ export function DashboardPage() {
         {isPending && <Loading what="the dashboard" />}
         {isError && <LoadError what="the dashboard" />}
         {d && (
+          // Two independent columns, so a short card never leaves a gap beside a tall one
           <div className="grid items-start gap-6 xl:grid-cols-2">
-            <NeedsYou />
-            <AiActivityFeed d={d} />
-            {has("treasury") && <CashRunway d={d} />}
-            <Stages d={d} />
-            {has("ar_collections") && <Promises d={d} />}
-            <div className="space-y-6">
+            <div className="min-w-0 space-y-6">
+              <NeedsYou />
+              <Stages d={d} />
+              {has("ar_collections") && <Promises d={d} />}
+            </div>
+            <div className="min-w-0 space-y-6">
+              <AiActivityFeed d={d} />
+              {has("treasury") && <CashRunway d={d} />}
               <EmailHealth d={d} />
               <Aging d={d} />
             </div>
