@@ -27,6 +27,8 @@ from src.app.service_pod.core.snapshots.contract import (
     Customer,
     GlLine,
     Invoice,
+    InvoiceDetails,
+    InvoiceLine,
     Payment,
     Provenance,
     SnapshotDocument,
@@ -194,6 +196,8 @@ async def from_quickbooks(
                     due_date=due,
                     original_amount=inv.total,
                     balance=balance,
+                    terms=inv.terms,
+                    details=_details(inv, fixed),
                 )
             )
         except ValidationError as exc:
@@ -266,6 +270,27 @@ async def from_quickbooks(
         pnl,
         notes,
     )
+
+
+def _details(inv: QbInvoice, fixed: list[str]) -> InvoiceDetails | None:
+    """What the invoice is for (lines, custom fields...), to verify it. Display only, so
+    details that don't fit leave the invoice itself in."""
+    try:
+        details = InvoiceDetails(
+            lines=[InvoiceLine(**line.model_dump(exclude_none=True)) for line in inv.lines],
+            custom_fields=inv.custom_fields,
+            class_name=inv.class_name,
+            location=inv.location,
+            memo=inv.memo,
+            note=inv.note,
+            service_start=inv.service_start,
+            service_end=inv.service_end,
+        )
+    except ValidationError:
+        fixed.append(f"invoice {inv.doc_number}: line details couldn't be shown")
+        return None
+    empty = InvoiceDetails()
+    return None if details == empty else details
 
 
 def _summary(title: str, items: list[str], shown: int = 10) -> list[str]:

@@ -13,11 +13,13 @@ from src.app.core.llm.base import LLMProvider
 from src.app.core.llm.factory import get_llm_provider
 from src.app.service_pod.core.access.service import PodAccessDep
 from src.app.service_pod.core.hooks import Composed
-from src.app.service_pod.core.messaging import service
+from src.app.service_pod.core.messaging import assist, service
 from src.app.service_pod.core.messaging.models import ArtifactKind, MessageStatus
 from src.app.service_pod.core.messaging.schemas import (
     ArtifactDecision,
     ArtifactOut,
+    AssistOut,
+    AssistRequest,
     ComposeRequest,
     EmailStatus,
     MessageDraftIn,
@@ -26,6 +28,8 @@ from src.app.service_pod.core.messaging.schemas import (
     MessageSend,
     MessageUpdate,
     ReplyImport,
+    TemplateIn,
+    TemplateOut,
 )
 from src.app.service_pod.core.snapshots.exceptions import SnapshotTooLargeError
 
@@ -77,6 +81,48 @@ async def compose_message(
 ) -> Composed:
     """A suggested draft for a workflow purpose (verified figures + wording). Not saved."""
     return await service.compose(session, case_id, body.purpose, llm)
+
+
+@router.post("/cases/{case_id}/messages/assist", response_model=AssistOut, responses=_ERRORS)
+async def assist_message(
+    case_id: uuid.UUID,
+    body: AssistRequest,
+    session: SessionDep,
+    _: PodAccessDep,
+    llm: LLM,
+) -> AssistOut:
+    """The AI writes or changes the draft from a plain-English request; the verified
+    invoice table stays exactly as given. Not saved."""
+    return await assist.assist(session, case_id, body, llm)
+
+
+@router.get("/cases/{case_id}/template", response_model=TemplateOut | None, responses=_ERRORS)
+async def get_template(
+    case_id: uuid.UUID, session: SessionDep, _: PodAccessDep
+) -> TemplateOut | None:
+    """The case customer's saved email template (null: none yet)."""
+    return await assist.get_template(session, case_id)
+
+
+@router.put("/cases/{case_id}/template", response_model=TemplateOut, responses=_ERRORS)
+async def save_template(
+    case_id: uuid.UUID,
+    body: TemplateIn,
+    session: SessionDep,
+    access: PodAccessDep,
+    ctx: RequestContextDep,
+) -> TemplateOut:
+    """Save the draft as the customer's template, used for every new draft to them."""
+    return await assist.save_template(session, access, case_id, body, ctx)
+
+
+@router.delete(
+    "/cases/{case_id}/template", status_code=status.HTTP_204_NO_CONTENT, responses=_ERRORS
+)
+async def delete_template(
+    case_id: uuid.UUID, session: SessionDep, access: PodAccessDep, ctx: RequestContextDep
+) -> None:
+    await assist.delete_template(session, access, case_id, ctx)
 
 
 @router.patch("/messages/{message_id}", response_model=MessageOut, responses=_ERRORS)

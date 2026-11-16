@@ -67,6 +67,30 @@ class Customer(_Row):
     contact_name: Name | None = None
 
 
+class InvoiceLine(_Row):
+    item: Name | None = None  # product/service
+    description: Text | None = None
+    service_date: date | None = None
+    quantity: Decimal | None = None
+    rate: Decimal | None = None
+    amount: Money
+    class_name: Name | None = None
+
+
+class InvoiceDetails(_Row):
+    """What the invoice is for, shown to verify it (e.g. whose hours it bills). Display only:
+    no figure here is used in a calculation or an email."""
+
+    lines: list[InvoiceLine] = []
+    custom_fields: dict[str, str] = {}
+    class_name: Name | None = None
+    location: Name | None = None
+    memo: Text | None = None
+    note: Text | None = None
+    service_start: date | None = None
+    service_end: date | None = None
+
+
 class Invoice(_Row):
     id: Id
     number: Id
@@ -77,6 +101,7 @@ class Invoice(_Row):
     balance: Money  # still open
     terms: Name | None = None
     document_ref: Text | None = None
+    details: InvoiceDetails | None = None
 
     @model_validator(mode="after")
     def _balance_within_amount(self) -> Self:

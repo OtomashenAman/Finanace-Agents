@@ -151,6 +151,25 @@ class PodArtifact(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     decided_at: Mapped[datetime | None]
 
 
+class PodEmailTemplate(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """A customer's own email format, one per customer of a company and workflow: every new
+    draft for that customer starts from it. {{invoices}} marks where the verified figures
+    from the source go; {{invoice_numbers}} is replaced by the case's invoice numbers."""
+
+    __tablename__ = "pod_email_templates"
+    __table_args__ = (UniqueConstraint("workflow", "company_id", "customer_id"),)
+
+    workflow: Mapped[str] = mapped_column(String(40))
+    company_id: Mapped[str] = mapped_column(String(100))  # the source's company (QB realm)
+    customer_id: Mapped[str] = mapped_column(String(100))
+    customer_name: Mapped[str] = mapped_column(String(200))
+    subject: Mapped[str] = mapped_column(String(300))
+    body: Mapped[str] = mapped_column(Text)
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+
+
 class PodMailboxCursor(TimestampMixin, Base):
     """How far the worker has read a mailbox's inbox for customer replies."""
 

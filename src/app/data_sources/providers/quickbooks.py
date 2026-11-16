@@ -20,6 +20,7 @@ from src.app.data_sources.records import (
     Customer,
     Expense,
     Invoice,
+    InvoiceLine,
     Payment,
     PeriodResult,
     PurchaseOrder,
@@ -400,6 +401,51 @@ def _sales_lines(row: dict[str, Any]) -> tuple[str | None, list[str]]:
     return ("\n".join(items) or None), sorted(dates)
 
 
+def _decimal(value: Any) -> Decimal | None:
+    try:
+        return None if value is None else Decimal(str(value))
+    except ArithmeticError:
+        return None
+
+
+def _invoice_lines(row: dict[str, Any]) -> list[InvoiceLine]:
+    """Every product/service line with what it says (item, description, date, qty, rate)."""
+    lines = []
+    for line in row.get("Line", []):
+        detail = line.get("SalesItemLineDetail")
+        if line.get("DetailType") != "SalesItemLineDetail" or detail is None:
+            continue
+        lines.append(
+            InvoiceLine(
+                item=(_ref_name(detail, "ItemRef") or "")[:200] or None,
+                description=(line.get("Description") or "")[:4000] or None,
+                service_date=detail.get("ServiceDate"),
+                quantity=_decimal(detail.get("Qty")),
+                rate=_decimal(detail.get("UnitPrice")),
+                amount=line.get("Amount", 0),
+                class_name=(_ref_name(detail, "ClassRef") or "")[:200] or None,
+            )
+        )
+    return lines
+
+
+def _custom_fields(row: dict[str, Any]) -> dict[str, str]:
+    """The company's own invoice fields that have a value (e.g. Consultant, PO number)."""
+    fields: dict[str, str] = {}
+    for field in row.get("CustomField", []):
+        value = field.get("StringValue") or field.get("NumberValue") or field.get("DateValue")
+        if field.get("Name") and value not in (None, ""):
+            fields[str(field["Name"])[:100]] = str(value)[:500]
+    return fields
+
+
+def _text(row: dict[str, Any], key: str) -> str | None:
+    value = row.get(key)
+    if isinstance(value, dict):
+        value = value.get("value")
+    return str(value)[:4000] if value else None
+
+
 def _invoice(row: dict[str, Any], paid_on: dict[str, str]) -> Invoice:
     balance = row.get("Balance")
     line_items, service_dates = _sales_lines(row)
@@ -416,6 +462,13 @@ def _invoice(row: dict[str, Any], paid_on: dict[str, str]) -> Invoice:
         line_items=line_items[:4000] if line_items else None,
         service_start=service_dates[0] if service_dates else None,
         service_end=service_dates[-1] if service_dates else None,
+        lines=_invoice_lines(row),
+        custom_fields=_custom_fields(row),
+        terms=(_ref_name(row, "SalesTermRef") or "")[:200] or None,
+        class_name=(_ref_name(row, "ClassRef") or "")[:200] or None,
+        location=(_ref_name(row, "DepartmentRef") or "")[:200] or None,
+        memo=_text(row, "CustomerMemo"),
+        note=_text(row, "PrivateNote"),
     )
 
 
