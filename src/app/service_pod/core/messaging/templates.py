@@ -61,8 +61,33 @@ def invoice_numbers(case: PodCase, only: list[str] | None = None) -> str:
     )
 
 
-def fill(text: str, case: PodCase, fact_block: str | None, only: list[str] | None = None) -> str:
-    text = text.replace(INVOICE_NUMBERS, invoice_numbers(case, only))
+SUBJECT_NUMBERS_MAX = 120
+
+
+def subject_numbers(case: PodCase, only: list[str] | None = None) -> str:
+    """The numbers as they fit a subject line: all of them when short, otherwise the first
+    few and how many more (the email's table always lists every one)."""
+    full = invoice_numbers(case, only)
+    numbers = full.split(" / ") if full else []
+    if len(full) <= SUBJECT_NUMBERS_MAX:
+        return full
+    shown: list[str] = []
+    for n in numbers:
+        if len(" / ".join([*shown, n])) > SUBJECT_NUMBERS_MAX - 30:
+            break
+        shown.append(n)
+    return f"{' / '.join(shown)} and {len(numbers) - len(shown)} more invoices"
+
+
+def fill(
+    text: str,
+    case: PodCase,
+    fact_block: str | None,
+    only: list[str] | None = None,
+    subject: bool = False,
+) -> str:
+    numbers = subject_numbers(case, only) if subject else invoice_numbers(case, only)
+    text = text.replace(INVOICE_NUMBERS, numbers)
     return text.replace(INVOICES, fact_block or "")
 
 
@@ -73,8 +98,10 @@ def generalize(
     numbers become placeholders, filled in again for each new case."""
     if fact_block:
         text = _replace_block(text, fact_block, INVOICES)
-    numbers = invoice_numbers(case, only)
-    return text.replace(numbers, INVOICE_NUMBERS) if numbers else text
+    for numbers in (invoice_numbers(case, only), subject_numbers(case, only)):
+        if numbers:
+            text = text.replace(numbers, INVOICE_NUMBERS)
+    return text
 
 
 def _normalize(text: str) -> str:

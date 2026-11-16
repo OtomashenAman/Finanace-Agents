@@ -7,6 +7,8 @@ from httpx import AsyncClient
 
 from src.app.core.llm.base import LLMError
 from src.app.entities.models import LegalEntity
+from src.app.service_pod.core.cases.models import PodCase
+from src.app.service_pod.core.messaging import templates
 from tests.conftest import FakeLLM
 from tests.service_pod.conftest import import_snapshot, open_ar_case, snapshot_payload
 
@@ -175,6 +177,19 @@ async def test_an_email_about_only_the_selected_invoices(
     for bad in (["INV-999"], []):
         r = await pod.post(url, json={"purpose": SCHEDULE, "invoice_numbers": bad})
         assert r.status_code == 422
+
+
+def test_a_subject_with_many_invoices_stays_short() -> None:
+    numbers = [f"24560{i:02d}R" for i in range(105)]
+    case = PodCase(state={"invoices": [{"number": n} for n in numbers]})
+    short = templates.subject_numbers(case)
+    assert len(f"Confirm payment schedule for {short}") < 300
+    assert short.startswith("2456000R / 2456001R") and short.endswith("more invoices")
+    assert templates.invoice_numbers(case).count(" / ") == 104  # the body keeps them all
+    few = PodCase(state={"invoices": [{"number": "INV-101"}, {"number": "INV-102"}]})
+    assert templates.subject_numbers(few) == "INV-101 / INV-102"
+    # A saved template turns either form back into the placeholder
+    assert templates.generalize(f"Re: {short}", case, None) == "Re: {{invoice_numbers}}"
 
 
 async def test_a_template_keeps_the_invoice_table(

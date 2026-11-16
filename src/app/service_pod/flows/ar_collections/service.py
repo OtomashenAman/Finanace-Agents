@@ -191,7 +191,7 @@ async def compose(
     only: list[str] | None = None,
 ) -> Composed:
     customer = case.state["customer"]
-    numbers = templates.invoice_numbers(case, only)
+    numbers = templates.subject_numbers(case, only)  # short enough for a subject line
     fact_block = await facts(session, case, purpose, only)
     assert fact_block is not None  # noqa: S101
     key = await templates.key_of(session, case)
@@ -200,7 +200,7 @@ async def compose(
         return Composed(
             to_email=customer.get("email"),
             to_name=customer.get("contact_name") or customer.get("name"),
-            subject=templates.fill(saved.subject, case, fact_block, only),
+            subject=templates.fill(saved.subject, case, fact_block, only, subject=True)[:300],
             body=templates.fill(saved.body, case, fact_block, only),
             fact_block=fact_block,
             ai_drafted=False,

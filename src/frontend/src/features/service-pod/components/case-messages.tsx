@@ -164,7 +164,7 @@ function MessageItem({ m, c, ReplyPanel }: { m: Message; c: CaseDetail; ReplyPan
           {editing ? (
             <div className="space-y-2">
               {m.audience === "customer" && <RecipientInput value={to} onChange={setTo} sourceEmail={sourceEmail} />}
-              <Input value={subject} onChange={(e) => setSubject(e.target.value)} aria-label="Subject" />
+              <Input value={subject} maxLength={300} onChange={(e) => setSubject(e.target.value)} aria-label="Subject" />
               <Textarea rows={10} className="font-mono text-xs" value={body} onChange={(e) => setBody(e.target.value)} aria-label="Message" />
               {m.fact_block && (
                 <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -504,7 +504,7 @@ function DraftForm({
               <Input type="email" placeholder="To: a configured internal recipient" value={to} onChange={(e) => setTo(e.target.value)} aria-label="To" />
             )}
           </div>
-          <Input placeholder="Subject" value={subject} onChange={(e) => setSubject(e.target.value)} aria-label="Subject" />
+          <Input placeholder="Subject" maxLength={300} value={subject} onChange={(e) => setSubject(e.target.value)} aria-label="Subject" />
           <Textarea
             rows={10}
             className="font-mono text-xs"
