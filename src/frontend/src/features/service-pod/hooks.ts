@@ -72,10 +72,15 @@ export function useMyQueue() {
   const messages = useMessages(null)
   const tasks = useTasks(null)
   const dashboard = useDashboard()
+  // Sign-offs, sending email and QuickBooks postings are the Finance Admin's: a preparer's
+  // queue holds only the review tasks they can settle
+  const admin = useIsPodAdmin()
   // Cases whose work is done and wait only for the sign-off (dashboard phase "ready")
-  const signoffs = (dashboard.data?.open ?? []).filter((c) => c.phase === "ready")
-  const emails = (messages.data ?? []).filter((m) => m.direction === "outbound" && EMAIL_TO_ACT.includes(m.status))
-  const postings = (tasks.data ?? []).filter((t) => POSTING_TO_ACT.includes(t.status))
+  const signoffs = admin ? (dashboard.data?.open ?? []).filter((c) => c.phase === "ready") : []
+  const emails = admin
+    ? (messages.data ?? []).filter((m) => m.direction === "outbound" && EMAIL_TO_ACT.includes(m.status))
+    : []
+  const postings = admin ? (tasks.data ?? []).filter((t) => POSTING_TO_ACT.includes(t.status)) : []
   const reviewItems = reviews.data ?? []
   return {
     reviews: reviewItems,

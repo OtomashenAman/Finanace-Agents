@@ -8,12 +8,14 @@ from datetime import timedelta
 from decimal import Decimal
 from typing import cast
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, String, func, select
+from sqlalchemy import cast as sql_cast
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.audit.models import AuditEvent
 from src.app.common.clock import utcnow
 from src.app.core.config import get_settings
+from src.app.data_sources.models import DataSource, SourceKind, SourceStatus
 from src.app.service_pod.core.access.service import PodAccess
 from src.app.service_pod.core.cases.models import (
     LOCKED_STATUSES,
@@ -31,6 +33,7 @@ from src.app.service_pod.core.dashboard.schemas import (
     AiActivity,
     AiEvent,
     AiKind,
+    BooksStatus,
     CashRunway,
     CashWeek,
     Dashboard,
@@ -43,7 +46,7 @@ from src.app.service_pod.core.dashboard.schemas import (
 from src.app.service_pod.core.hooks import hooks_for
 from src.app.service_pod.core.messaging import service as messaging
 from src.app.service_pod.core.messaging.models import Direction, MessageStatus, PodMessage
-from src.app.service_pod.core.snapshots.models import PodSnapshot
+from src.app.service_pod.core.snapshots.models import PodSnapshot, PodSnapshotArchive
 from src.app.service_pod.core.workflows import WorkflowKey
 
 AGING = [
@@ -186,19 +189,22 @@ AI_EVENTS: dict[str, AiKind] = {
 }
 
 
-async def _ai_activity(session: AsyncSession) -> AiActivity:
+async def _ai_activity(session: AsyncSession, access: PodAccess) -> AiActivity:
     since = utcnow() - timedelta(days=7)
+    events = [AuditEvent.event_type.in_(AI_EVENTS)]
+    if not access.is_admin:  # only events on cases of the person's workflows
+        own_cases = select(sql_cast(PodCase.id, String)).where(
+            PodCase.workflow.in_(access.workflows)
+        )
+        events.append(AuditEvent.details["case_id"].astext.in_(own_cases))
     grouped = await session.execute(
         select(AuditEvent.event_type, func.count())
-        .where(AuditEvent.event_type.in_(AI_EVENTS), AuditEvent.created_at >= since)
+        .where(*events, AuditEvent.created_at >= since)
         .group_by(AuditEvent.event_type)
     )
     counts = {event: n for event, n in grouped.all()}  # noqa: C416
     rows = await session.scalars(
-        select(AuditEvent)
-        .where(AuditEvent.event_type.in_(AI_EVENTS))
-        .order_by(AuditEvent.created_at.desc())
-        .limit(8)
+        select(AuditEvent).where(*events).order_by(AuditEvent.created_at.desc()).limit(8)
     )
     return AiActivity(
         last_7_days={kind: counts.get(event, 0) for event, kind in AI_EVENTS.items()},
@@ -211,6 +217,32 @@ async def _ai_activity(session: AsyncSession) -> AiActivity:
             )
             for e in rows
         ],
+    )
+
+
+async def _books(session: AsyncSession) -> BooksStatus:
+    statuses = dict(
+        (
+            await session.execute(
+                select(DataSource.status, func.count())
+                .where(DataSource.kind == SourceKind.QUICKBOOKS)
+                .group_by(DataSource.status)
+            )
+        ).all()
+    )
+    in_use = select(PodSnapshot).where(
+        PodSnapshot.id.not_in(select(PodSnapshotArchive.snapshot_id))
+    )
+    latest = await session.scalar(in_use.order_by(PodSnapshot.created_at.desc()).limit(1))
+    count = await session.scalar(select(func.count()).select_from(in_use.subquery()))
+    return BooksStatus(
+        quickbooks_connected=statuses.get(SourceStatus.CONNECTED, 0),
+        quickbooks_attention=statuses.get(SourceStatus.NEEDS_REAUTH, 0)
+        + statuses.get(SourceStatus.ERROR, 0),
+        snapshots=count or 0,
+        latest_as_of=latest.as_of if latest else None,
+        latest_imported_at=latest.created_at if latest else None,
+        latest_company=latest.company_name if latest else None,
     )
 
 
@@ -294,6 +326,7 @@ async def dashboard(session: AsyncSession, access: PodAccess) -> Dashboard:
             for c in open_cases
         ],
         email=await _email(session),
-        ai_activity=await _ai_activity(session),
+        ai_activity=await _ai_activity(session, access),
         cash=await _cash(session) if access.allows(WorkflowKey.TREASURY) else None,
+        books=await _books(session),
     )

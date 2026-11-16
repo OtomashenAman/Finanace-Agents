@@ -397,7 +397,18 @@ export interface PromiseItem {
 
 export type AiKind = "reply_read" | "reply_not_read" | "commentary" | "reply_imported"
 
+/** Where the books come from: QuickBooks connections and the newest imported source */
+export interface BooksStatus {
+  quickbooks_connected: number
+  quickbooks_attention: number
+  snapshots: number
+  latest_as_of: string | null
+  latest_imported_at: string | null
+  latest_company: string | null
+}
+
 export interface Dashboard {
+  books: BooksStatus
   ai_activity: {
     last_7_days: Record<AiKind, number>
     recent: { at: string; kind: AiKind; summary: string; case_reference: string | null }[]

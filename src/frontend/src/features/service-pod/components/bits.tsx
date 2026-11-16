@@ -7,7 +7,7 @@ import { Button, type ButtonProps } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 import type { WorkflowKey } from "../api"
-import { useMyQueue } from "../hooks"
+import { useMyQueue, useWorkflows } from "../hooks"
 import { AI_AGENTS, TONE_CLASSES, type Tone } from "../labels"
 
 const TABS = [
@@ -49,6 +49,7 @@ export function LivePulse({
 export function PodTabs() {
   const { pathname } = useLocation()
   const { count } = useMyQueue()
+  const workflowCount = useWorkflows().data?.length ?? 0
   const active = (tab: (typeof TABS)[number]) =>
     tab.to === "/pod" ? !SHARED.some((to) => pathname.startsWith(to)) : pathname.startsWith(tab.to)
   return (
@@ -74,7 +75,10 @@ export function PodTabs() {
         ))}
       </nav>
       <div className="hidden sm:flex items-center gap-2 pb-1.5 text-xs text-muted-foreground">
-        <LivePulse color="emerald" label="5 AI Agents Active" className="text-emerald-700 font-semibold dark:text-emerald-300" />
+        <LivePulse
+          color="emerald"
+          label={`${workflowCount} Workflow${workflowCount === 1 ? "" : "s"} Active`}
+          className="text-emerald-700 font-semibold dark:text-emerald-300" />
       </div>
     </div>
   )

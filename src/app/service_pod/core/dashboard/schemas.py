@@ -90,6 +90,17 @@ class CashRunway(BaseModel):
     weeks: list[CashWeek]
 
 
+class BooksStatus(BaseModel):
+    """Where the books come from: QuickBooks connections and the latest imported source."""
+
+    quickbooks_connected: int  # companies authorized and syncing
+    quickbooks_attention: int  # need reconnecting or failed their last sync
+    snapshots: int  # sources in everyday use (not archived)
+    latest_as_of: date | None  # the books date of the newest source
+    latest_imported_at: datetime | None
+    latest_company: str | None
+
+
 class Dashboard(BaseModel):
     """The Service POD at a glance; every figure is counted from the cases, never estimated."""
 
@@ -104,3 +115,4 @@ class Dashboard(BaseModel):
     email: EmailHealth
     ai_activity: AiActivity
     cash: CashRunway | None
+    books: BooksStatus

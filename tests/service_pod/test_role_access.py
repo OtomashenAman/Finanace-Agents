@@ -9,8 +9,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.auth.models import User
-from tests.conftest import DEFAULT_PASSWORD, ClientFactory
-from tests.service_pod.conftest import CUSTOMER_EMAIL, act
+from tests.conftest import DEFAULT_PASSWORD, ClientFactory, FakeLLM
+from tests.service_pod.conftest import CUSTOMER_EMAIL, act, customer_replies
 
 USERS = "/api/v1/users"
 POD = "/api/v1/pod"
@@ -181,3 +181,31 @@ async def test_preparers_cannot_sign_off(
     assert (await pod.get(f"{POD}/cases/{case['id']}")).json()["allowed_actions"]["approve"] != (
         "Only a Finance Admin can sign off."
     )
+
+
+async def test_ai_activity_shows_only_their_workflows(
+    pod: AsyncClient, person: Any, ar_case: dict[str, Any], fake_llm: FakeLLM
+) -> None:
+    await customer_replies(pod, ar_case, fake_llm)  # AI activity on an AR case
+    admin_feed = (await pod.get(f"{POD}/dashboard")).json()["ai_activity"]
+    assert admin_feed["recent"]
+
+    _, accountant = await person("accountant")
+    _, ar = await person("ar_specialist")
+    assert (await accountant.get(f"{POD}/dashboard")).json()["ai_activity"]["recent"] == []
+    ar_feed = (await ar.get(f"{POD}/dashboard")).json()["ai_activity"]
+    assert ar_feed == admin_feed
+
+
+async def test_books_status_reports_the_latest_source(
+    pod: AsyncClient, snapshot: dict[str, Any]
+) -> None:
+    books = (await pod.get(f"{POD}/dashboard")).json()["books"]
+    assert books["snapshots"] == 1
+    assert books["latest_as_of"] == snapshot["as_of"]
+    assert books["quickbooks_connected"] == 0
+
+    r = await pod.post(f"{POD}/snapshots/{snapshot['id']}/archive", json={"reason": "wrong date"})
+    assert r.status_code == 200, r.text
+    books = (await pod.get(f"{POD}/dashboard")).json()["books"]
+    assert books["snapshots"] == 0 and books["latest_as_of"] is None

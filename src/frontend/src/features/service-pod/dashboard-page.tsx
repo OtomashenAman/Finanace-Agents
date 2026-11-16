@@ -1,15 +1,18 @@
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { Link } from "react-router"
-import { ArrowRight, Bot, CircleAlert, CircleCheck, FileText, Inbox, Mail, Sparkles, UserRound } from "lucide-react"
+import { useQueryClient } from "@tanstack/react-query"
+import { ArrowRight, Bot, CircleAlert, CircleCheck, FileText, Inbox, Mail, RefreshCw, Sparkles, UserRound } from "lucide-react"
 
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
-import type { AiKind, Dashboard, DashboardPhase, PromiseItem } from "./api"
+import type { AiKind, BooksStatus, Dashboard, DashboardPhase, PromiseItem } from "./api"
+import type { PodWorkflow } from "@/features/auth/api"
 import { useCurrentUser } from "@/features/auth/hooks"
 
 import { AiBadge, AiCard, Card, LivePulse, LoadError, Loading, Pill, PodTabs } from "./components/bits"
 import { fmt } from "./flows/shared"
-import { useDashboard, useMyQueue } from "./hooks"
+import { POD_TAG, useDashboard, useIsPodAdmin, useMyQueue } from "./hooks"
 import { CASE_PHASE, formatDateTime, REVIEW_KIND, WORKFLOW_SHORT } from "./labels"
 import { WorkflowCards } from "./workflows-page"
 import { PodPage } from "./components/pod-page"
@@ -33,6 +36,7 @@ function greeting(): string {
 /** Who you are, what waits on you, and what the AI did while you were away. */
 function Hero({ d, waiting }: { d: Dashboard | undefined; waiting: number }) {
   const { data: me } = useCurrentUser()
+  const admin = useIsPodAdmin()
   const done = d ? Object.values(d.ai_activity.last_7_days).reduce((a, b) => a + b, 0) : 0
   return (
     <section
@@ -53,7 +57,8 @@ function Hero({ d, waiting }: { d: Dashboard | undefined; waiting: number }) {
             <Link to="/pod/queue" className="font-semibold text-white underline-offset-4 hover:underline">
               {waiting} item{waiting === 1 ? "" : "s"} need{waiting === 1 ? "s" : ""} you
             </Link>{" "}
-            · the AI handled {done} thing{done === 1 ? "" : "s"} in the last 7 days · QuickBooks stays read-only
+            · the AI handled {done} thing{done === 1 ? "" : "s"} in the last 7 days ·{" "}
+            {admin ? "QuickBooks stays read-only" : "what you prepare goes to a Finance Admin for sign-off"}
           </p>
         </div>
         {d && (
@@ -167,87 +172,135 @@ function CashRunway({ d }: { d: Dashboard }) {
 }
 const PHASE_LABEL = (p: DashboardPhase) => (p === "closed" ? "Closed (30 days)" : CASE_PHASE[p][0])
 
-function DashboardKpis({
-  openCases,
-  waitingCount,
-  promised,
+const TILE =
+  "group flex flex-col justify-between rounded-xl border border-border/80 bg-card p-4 shadow-2xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
+
+function Tile({
+  to,
+  label,
+  value,
+  tag,
+  tagClass,
+  footer,
+  hover,
+  valueClass,
 }: {
-  openCases: number
-  waitingCount: number
-  promised: string
+  to: string
+  label: string
+  value: ReactNode
+  tag: string
+  tagClass: string
+  footer: string
+  hover: string
+  valueClass?: string
 }) {
   return (
+    <Link to={to} className={cn(TILE, hover)}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">{label}</span>
+          <div className={cn("mt-1 truncate text-2xl font-bold tracking-tight tabular-nums", valueClass)}>{value}</div>
+        </div>
+        <span className={cn("shrink-0 rounded-md px-2 py-0.5 text-[10px] font-semibold", tagClass)}>{tag}</span>
+      </div>
+      <span className="mt-3 flex items-center gap-1 text-xs font-medium text-primary group-hover:underline">
+        {footer} <ArrowRight className="size-3 transition-transform group-hover:translate-x-0.5" />
+      </span>
+    </Link>
+  )
+}
+
+/** The books behind every figure: QuickBooks connections and the newest imported source */
+function BooksTile({ books }: { books: BooksStatus | undefined }) {
+  const attention = (books?.quickbooks_attention ?? 0) > 0
+  const connected = books?.quickbooks_connected ?? 0
+  const [status, tone, pulse]: [string, string, "emerald" | "amber"] = attention
+    ? ["Needs reconnecting", "text-red-700", "amber"]
+    : connected
+      ? [`${connected} connected · read-only`, "text-foreground", "emerald"]
+      : books?.snapshots
+        ? ["Imported files only", "text-foreground", "amber"]
+        : ["No books yet", "text-muted-foreground", "amber"]
+  return (
+    <Link to="/pod/sources" className={cn(TILE, "hover:border-emerald-400/80")}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">QuickBooks &amp; books</span>
+          <div className="mt-1.5 flex items-center gap-2">
+            <LivePulse color={pulse} />
+            <span className={cn("truncate text-sm font-bold", tone)}>{status}</span>
+          </div>
+        </div>
+        <span className="shrink-0 rounded-md bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300">
+          Governed
+        </span>
+      </div>
+      <span className="mt-3 truncate text-xs text-muted-foreground" title={books?.latest_company ?? undefined}>
+        {books?.latest_as_of
+          ? `Latest books: ${books.latest_company} as of ${books.latest_as_of} (${books.snapshots} source${books.snapshots === 1 ? "" : "s"})`
+          : "Import a source to start a case →"}
+      </span>
+    </Link>
+  )
+}
+
+function DashboardKpis({
+  d,
+  waitingCount,
+  workflows,
+}: {
+  d: Dashboard | undefined
+  waitingCount: number
+  workflows: PodWorkflow[]
+}) {
+  const promised = d?.promised.length ? d.promised.map((t) => fmt(t.amount, t.currency)).join(" + ") : "None yet"
+  return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <Link
+      <Tile
         to="/pod/queue"
-        className="group flex flex-col justify-between rounded-xl border border-border/80 bg-card p-4 shadow-2xs transition-all duration-200 hover:-translate-y-0.5 hover:border-amber-400/80 hover:shadow-md"
-      >
-        <div className="flex items-start justify-between">
-          <div>
-            <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Needs You Now</span>
-            <p className="mt-1 text-2xl font-bold tracking-tight text-amber-600 dark:text-amber-400 tabular-nums">
-              {waitingCount}
-            </p>
-          </div>
-          <span className="rounded-md bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-950/50 dark:text-amber-300">
-            Action
-          </span>
-        </div>
-        <span className="mt-3 flex items-center gap-1 text-xs font-medium text-amber-700 dark:text-amber-300 group-hover:underline">
-          Go to queue <ArrowRight className="size-3 transition-transform group-hover:translate-x-0.5" />
-        </span>
-      </Link>
-
-      <Link
+        label="Needs You Now"
+        value={waitingCount}
+        valueClass="text-amber-600 dark:text-amber-400"
+        tag="Action"
+        tagClass="bg-amber-50 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300"
+        footer="Go to queue"
+        hover="hover:border-amber-400/80"
+      />
+      <Tile
         to="/pod/cases"
-        className="group flex flex-col justify-between rounded-xl border border-border/80 bg-card p-4 shadow-2xs transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/80 hover:shadow-md"
-      >
-        <div className="flex items-start justify-between">
-          <div>
-            <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Open Cases</span>
-            <p className="mt-1 text-2xl font-bold tracking-tight text-foreground tabular-nums">
-              {openCases}
-            </p>
-          </div>
-          <span className="rounded-md bg-sky-50 px-2 py-0.5 text-[10px] font-semibold text-sky-800 dark:bg-sky-950/50 dark:text-sky-300">
-            Categorized
-          </span>
-        </div>
-        <span className="mt-3 flex items-center gap-1 text-xs font-medium text-primary group-hover:underline">
-          View all cases <ArrowRight className="size-3 transition-transform group-hover:translate-x-0.5" />
-        </span>
-      </Link>
-
-      <div className="flex flex-col justify-between rounded-xl border border-border/80 bg-card p-4 shadow-2xs transition-all duration-200 hover:shadow-xs">
-        <div className="flex items-start justify-between">
-          <div>
-            <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Payment Promises</span>
-            <p className="mt-1 text-xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400 tabular-nums truncate" title={promised}>
-              {promised}
-            </p>
-          </div>
-          <span className="rounded-md bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300">
-            Commitments
-          </span>
-        </div>
-        <span className="mt-3 text-xs text-muted-foreground">Approved customer promises</span>
-      </div>
-
-      <div className="flex flex-col justify-between rounded-xl border border-border/80 bg-card p-4 shadow-2xs transition-all duration-200 hover:shadow-xs">
-        <div className="flex items-start justify-between">
-          <div>
-            <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">QuickBooks Status</span>
-            <div className="mt-1.5 flex items-center gap-2">
-              <LivePulse color="emerald" />
-              <span className="text-sm font-bold text-foreground">Read-Only Live</span>
-            </div>
-          </div>
-          <span className="rounded-md bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300">
-            Governed
-          </span>
-        </div>
-        <span className="mt-3 text-xs text-muted-foreground">5 Autonomous Workflows Active</span>
-      </div>
+        label="Open Cases"
+        value={d?.open_cases ?? 0}
+        tag={`${d?.closed_30d ?? 0} closed · 30 d`}
+        tagClass="bg-sky-50 text-sky-800 dark:bg-sky-950/50 dark:text-sky-300"
+        footer="View all cases"
+        hover="hover:border-primary/80"
+      />
+      {workflows.includes("ar_collections") ? (
+        <Tile
+          to="/pod/ar"
+          label="Payment Promises"
+          value={<span className="text-xl text-emerald-600 dark:text-emerald-400" title={promised}>{promised}</span>}
+          tag={`${d?.overdue_promises.length ?? 0} overdue`}
+          tagClass={
+            d?.overdue_promises.length
+              ? "bg-red-50 text-red-800 dark:bg-red-950/50 dark:text-red-300"
+              : "bg-emerald-50 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300"
+          }
+          footer="Open AR Collections"
+          hover="hover:border-emerald-400/80"
+        />
+      ) : (
+        <Tile
+          to="/pod/cases?status=closed"
+          label="Closed (30 days)"
+          value={d?.closed_30d ?? 0}
+          tag="Done"
+          tagClass="bg-emerald-50 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300"
+          footer="See closed cases"
+          hover="hover:border-emerald-400/80"
+        />
+      )}
+      <BooksTile books={d?.books} />
     </div>
   )
 }
@@ -409,6 +462,7 @@ function EmailHealth({ d }: { d: Dashboard }) {
 
 function NeedsYou() {
   const q = useMyQueue()
+  const admin = useIsPodAdmin()
   const items = [
     ...q.signoffs.map((c) => ({ key: c.id, to: `/pod/cases/${c.id}`, tag: "Sign-off", tone: "good" as const, ref: c.reference, text: c.title })),
     ...q.reviews.map((r) => ({
@@ -425,7 +479,11 @@ function NeedsYou() {
   return (
     <Card
       title="Human-in-the-Loop: Needs You Now"
-      hint="Authorized human sign-offs, email draft checks, and posting confirmations"
+      hint={
+        admin
+          ? "Authorized human sign-offs, email draft checks, and posting confirmations"
+          : "Review tasks on your cases. Sign-offs, sending and postings go to a Finance Admin."
+      }
       actions={
         q.count > 5 ? (
           <Link to="/pod/queue" className="text-xs font-semibold text-primary hover:underline flex items-center gap-1">
@@ -438,7 +496,7 @@ function NeedsYou() {
       {!q.isPending && items.length === 0 && (
         <div className="py-6 text-center text-xs text-muted-foreground">
           <p className="font-semibold text-emerald-600 dark:text-emerald-400">All caught up! ✨</p>
-          <p className="mt-0.5">No tasks currently require human sign-off.</p>
+          <p className="mt-0.5">{admin ? "No tasks currently require human sign-off." : "No review task is waiting on you."}</p>
         </div>
       )}
       <ul className="divide-y">
@@ -488,11 +546,38 @@ function Aging({ d }: { d: Dashboard }) {
   )
 }
 
-/** The Service POD at a glance: money at stake, where the cases stand, what needs you. */
+function sinceUpdate(at: number): string {
+  const secs = Math.max(0, Math.round((Date.now() - at) / 1000))
+  return secs < 60 ? "just now" : `${Math.round(secs / 60)} min ago`
+}
+
+/** Refresh every Service POD figure now (they also refresh by themselves every minute). */
+function RefreshBar({ updatedAt, fetching }: { updatedAt: number; fetching: boolean }) {
+  const client = useQueryClient()
+  return (
+    <div className="flex items-center justify-end gap-2 text-xs text-muted-foreground">
+      {updatedAt > 0 && <span>Updated {sinceUpdate(updatedAt)} · refreshes every minute</span>}
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={fetching}
+        onClick={() => void client.invalidateQueries({ queryKey: [POD_TAG] })}
+        aria-label="Refresh the dashboard"
+      >
+        <RefreshCw className={cn(fetching && "animate-spin")} aria-hidden /> Refresh
+      </Button>
+    </div>
+  )
+}
+
+/** The Service POD at a glance: money at stake, where the cases stand, what needs you.
+ *  Shows only the workflows this person works in. */
 export function DashboardPage() {
-  const { data: d, isPending, isError } = useDashboard()
+  const { data: d, isPending, isError, isFetching, dataUpdatedAt } = useDashboard()
+  const { data: me } = useCurrentUser()
   const q = useMyQueue()
-  const promised = d?.promised.length ? d.promised.map((t) => fmt(t.amount, t.currency)).join(" + ") : "None yet"
+  const workflows = me?.pod_workflows ?? []
+  const has = (w: PodWorkflow) => workflows.includes(w)
 
   return (
     <PodPage
@@ -501,20 +586,19 @@ export function DashboardPage() {
     >
       <PodTabs />
       <div className="space-y-6">
+        <RefreshBar updatedAt={dataUpdatedAt} fetching={isFetching} />
         <Hero d={d} waiting={q.count} />
 
-        <DashboardKpis
-          openCases={d?.open_cases ?? 0}
-          waitingCount={q.count}
-          promised={promised}
-        />
+        <DashboardKpis d={d} waitingCount={q.count} workflows={workflows} />
 
         <section aria-label="Workflows" className="space-y-2.5">
           <div className="flex items-center justify-between">
             <h2 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-              Workflows
+              {workflows.length === 5 ? "Workflows" : "Your workflows"}
             </h2>
-            <span className="text-xs text-muted-foreground">5 active workflows</span>
+            <span className="text-xs text-muted-foreground">
+              {workflows.length} active workflow{workflows.length === 1 ? "" : "s"}
+            </span>
           </div>
           <WorkflowCards />
         </section>
@@ -525,9 +609,9 @@ export function DashboardPage() {
           <div className="grid items-start gap-6 xl:grid-cols-2">
             <NeedsYou />
             <AiActivityFeed d={d} />
-            <CashRunway d={d} />
+            {has("treasury") && <CashRunway d={d} />}
             <Stages d={d} />
-            <Promises d={d} />
+            {has("ar_collections") && <Promises d={d} />}
             <div className="space-y-6">
               <EmailHealth d={d} />
               <Aging d={d} />
