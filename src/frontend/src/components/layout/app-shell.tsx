@@ -90,7 +90,9 @@ const NAV: NavGroup[] = [
         badge: "worklist",
       },
       { label: "Audit Trail", icon: History, to: "/audit" },
-      { label: "Data Sources", icon: Database, to: "/data-sources" },
+      // QuickBooks connections and uploads: the Finance Admin's. Everyone else works on the
+      // shared snapshots, refreshed from the admin's connection every night
+      { label: "Data Sources", icon: Database, to: "/data-sources", adminOnly: true },
     ],
   },
   {

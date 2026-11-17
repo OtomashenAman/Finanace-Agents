@@ -9,20 +9,30 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.auth.models import User
+from src.app.entities.models import LegalEntity
 from tests.conftest import DEFAULT_PASSWORD, ClientFactory, FakeLLM
-from tests.service_pod.conftest import CUSTOMER_EMAIL, act, customer_replies
+from tests.service_pod.conftest import (
+    CUSTOMER_EMAIL,
+    act,
+    customer_replies,
+    import_snapshot,
+    snapshot_payload,
+)
 
 USERS = "/api/v1/users"
 POD = "/api/v1/pod"
 
 
 @pytest.fixture
-def person(pod: AsyncClient, signed_in_client: ClientFactory, db: AsyncSession) -> Any:
-    """`await person(role, **body)`: create someone through user management (as the admin)
-    and sign them in."""
+def person(
+    pod: AsyncClient, signed_in_client: ClientFactory, db: AsyncSession, entity: LegalEntity
+) -> Any:
+    """`await person(role, **body)`: create someone through user management (as the admin),
+    working for the test entity unless `entity_ids` says otherwise, and sign them in."""
 
     async def _make(role: str, **body: Any) -> tuple[dict[str, Any], AsyncClient]:
         email = f"{role}@example.com"
+        body.setdefault("entity_ids", [str(entity.id)])
         r = await pod.post(
             USERS,
             json={
@@ -209,3 +219,66 @@ async def test_books_status_reports_the_latest_source(
     assert r.status_code == 200, r.text
     books = (await pod.get(f"{POD}/dashboard")).json()["books"]
     assert books["snapshots"] == 0 and books["latest_as_of"] is None
+
+
+# --- legal entities: people see only the books and cases of the entities they work for ----
+
+
+@pytest.fixture
+async def other_entity(db: AsyncSession) -> LegalEntity:
+    e = LegalEntity(code="UK01", name="UK Operations")
+    db.add(e)
+    await db.commit()
+    return e
+
+
+async def test_people_see_only_their_entities_books_and_cases(
+    pod: AsyncClient,
+    person: Any,
+    entity: LegalEntity,
+    other_entity: LegalEntity,
+    snapshot: dict[str, Any],
+    ar_case: dict[str, Any],
+) -> None:
+    # An AR Specialist working for the UK only: the US books and case don't exist for them
+    _, uk = await person("ar_specialist", entity_ids=[str(other_entity.id)])
+    assert (await uk.get(f"{POD}/snapshots")).json() == []
+    assert (await uk.get(f"{POD}/snapshots/{snapshot['id']}")).status_code == 404
+    assert (await uk.get(f"{POD}/cases")).json() == []
+    assert (await uk.get(f"{POD}/cases/{ar_case['id']}")).status_code == 404
+    dash = (await uk.get(f"{POD}/dashboard")).json()
+    assert dash["open_cases"] == 0 and dash["books"]["snapshots"] == 0
+    # ...they can't open a case on the US books, nor import into the US entity
+    r = await uk.post(
+        f"{POD}/cases",
+        json={
+            "workflow": "ar_collections",
+            "snapshot_id": snapshot["id"],
+            "title": "x",
+            "selection": {"customer_id": "C1", "invoice_ids": ["I101"]},
+        },
+    )
+    assert r.status_code == 404
+    assert (await import_snapshot(uk, entity)).status_code == 422
+
+    # Books the admin imports for the UK appear for them
+    r = await import_snapshot(
+        pod,
+        other_entity,
+        snapshot_payload(source_reference="uk books", entity="UK01", company_id="QB-UK-1"),
+    )
+    assert r.status_code == 201, r.text
+    uk_snapshot = r.json()["snapshot"]
+    assert [s["id"] for s in (await uk.get(f"{POD}/snapshots")).json()] == [uk_snapshot["id"]]
+    assert (await uk.get(f"{POD}/ar/portfolio")).json()["snapshot"]["id"] == uk_snapshot["id"]
+
+    # The admin sees both entities' books
+    assert len((await pod.get(f"{POD}/snapshots")).json()) == 2
+
+
+async def test_no_entity_no_books(
+    pod: AsyncClient, person: Any, snapshot: dict[str, Any], ar_case: dict[str, Any]
+) -> None:
+    _, nobody = await person("ar_specialist", entity_ids=[])
+    assert (await nobody.get(f"{POD}/snapshots")).json() == []
+    assert (await nobody.get(f"{POD}/cases")).json() == []

@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.core.config import get_settings
+from src.app.service_pod.core.access.service import case_scope
 from src.app.service_pod.core.cases.models import PodCase
 from src.app.service_pod.core.snapshots import service as snapshots
 from src.app.service_pod.core.snapshots.models import PodSnapshot
@@ -54,7 +55,7 @@ async def report_months(session: AsyncSession) -> ReportMonths:
         )
     cases = await session.scalars(
         select(PodCase)
-        .where(PodCase.workflow == WorkflowKey.REPORTING)
+        .where(PodCase.workflow == WorkflowKey.REPORTING, *case_scope())
         .order_by(PodCase.created_at.desc())
         .limit(50)
     )

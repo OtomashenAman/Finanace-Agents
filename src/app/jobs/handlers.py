@@ -11,4 +11,5 @@ import src.app.finance_pod.billing.delivery  # fpod.monthly_statements (daily)
 import src.app.service_pod.core.messaging.extraction_job  # pod.extract_reply
 import src.app.service_pod.core.messaging.jobs  # pod.send_message
 import src.app.service_pod.core.messaging.mailbox_job  # pod.read_mailbox (periodic)
+import src.app.service_pod.core.snapshots.refresh_job  # pod.refresh_snapshots (daily)
 import src.app.service_pod.flows  # the workflows' hooks the jobs call

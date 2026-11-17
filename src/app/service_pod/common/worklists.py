@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.app.service_pod.core.access.service import snapshot_scope
 from src.app.service_pod.core.cases.models import (
     LOCKED_STATUSES,
     CaseStatus,
@@ -45,7 +46,7 @@ async def latest_snapshot(
         return await snapshots.load_snapshot(session, snapshot_id)
     query = (
         select(PodSnapshot)
-        .where(PodSnapshot.id.not_in(snapshots.archived_ids()))
+        .where(PodSnapshot.id.not_in(snapshots.archived_ids()), *snapshot_scope())
         .order_by(PodSnapshot.created_at.desc())
         .limit(50)
     )

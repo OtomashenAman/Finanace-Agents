@@ -7,6 +7,7 @@ import uuid
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.app.service_pod.core.access.service import case_scope
 from src.app.service_pod.core.cases.access import load_case
 from src.app.service_pod.core.cases.exceptions import CaseNotFoundError, CaseSelectionError
 from src.app.service_pod.core.cases.models import (
@@ -64,7 +65,7 @@ async def sources(session: AsyncSession) -> TreasurySources:
         )
     cases = await session.scalars(
         select(PodCase)
-        .where(PodCase.workflow == WorkflowKey.TREASURY)
+        .where(PodCase.workflow == WorkflowKey.TREASURY, *case_scope())
         .order_by(PodCase.created_at.desc())
         .limit(50)
     )

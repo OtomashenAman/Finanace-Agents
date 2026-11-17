@@ -23,7 +23,10 @@ async def load_case(
     case = await session.scalar(query)
     access = current_access()
     # A case outside the person's workflows is reported as missing, never shown
-    if case is None or (access is not None and not access.allows(case.workflow)):
+    if case is None or (
+        access is not None
+        and not (access.allows(case.workflow) and access.allows_entity(case.entity_id))
+    ):
         raise CaseNotFoundError
     if expected_version is not None and case.version != expected_version:
         raise StaleVersionError

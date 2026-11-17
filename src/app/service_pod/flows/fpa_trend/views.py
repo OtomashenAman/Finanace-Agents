@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.service_pod.common.canonical import plain
-from src.app.service_pod.core.access.service import PodAccess
+from src.app.service_pod.core.access.service import PodAccess, case_scope
 from src.app.service_pod.core.cases.access import load_case
 from src.app.service_pod.core.cases.exceptions import CaseActionError, CaseNotFoundError
 from src.app.service_pod.core.cases.models import CaseStatus, PodCase
@@ -45,7 +45,7 @@ async def periods(session: AsyncSession) -> FpaPeriods:
         )
     cases = await session.scalars(
         select(PodCase)
-        .where(PodCase.workflow == WorkflowKey.FPA_TREND)
+        .where(PodCase.workflow == WorkflowKey.FPA_TREND, *case_scope())
         .order_by(PodCase.created_at.desc())
         .limit(50)
     )

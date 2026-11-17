@@ -10,7 +10,7 @@ interface EntitiesEditorProps {
   disabled?: boolean
 }
 
-/** Which legal entities a user files runs for (and sees runs of). */
+/** Which legal entities a user works for: they see only these entities' books and cases. */
 export function EntitiesEditor({ value, onChange, disabled }: EntitiesEditorProps) {
   const { data: entities, isPending, isError } = useEntities()
 
@@ -28,25 +28,31 @@ export function EntitiesEditor({ value, onChange, disabled }: EntitiesEditorProp
     )
   }
 
-  const toggle = (id: string, checked: boolean) =>
-    onChange(checked ? [...value, id] : value.filter((v) => v !== id))
+  const toggle = (id: string, checked: boolean) => onChange(checked ? [...value, id] : value.filter((v) => v !== id))
 
   return (
-    <div className="grid gap-2 sm:grid-cols-2">
-      {entities.map((e) => (
-        <label key={e.id} className="flex items-center gap-2.5 rounded-md border px-3 py-2 text-sm">
-          <input
-            type="checkbox"
-            className="size-4 accent-primary"
-            checked={value.includes(e.id)}
-            onChange={(ev) => toggle(e.id, ev.target.checked)}
-            disabled={disabled}
-          />
-          <span className="font-mono text-xs font-semibold">{e.code}</span>
-          <span className="truncate">{e.name}</span>
-          {!e.is_active && <span className="text-xs text-muted-foreground">(inactive)</span>}
-        </label>
-      ))}
+    <div className="space-y-2">
+      <div className="grid gap-2 sm:grid-cols-2">
+        {entities.map((e) => (
+          <label key={e.id} className="flex items-center gap-2.5 rounded-md border px-3 py-2 text-sm">
+            <input
+              type="checkbox"
+              className="size-4 accent-primary"
+              checked={value.includes(e.id)}
+              onChange={(ev) => toggle(e.id, ev.target.checked)}
+              disabled={disabled}
+            />
+            <span className="font-mono text-xs font-semibold">{e.code}</span>
+            <span className="truncate">{e.name}</span>
+            {!e.is_active && <span className="text-xs text-muted-foreground">(inactive)</span>}
+          </label>
+        ))}
+      </div>
+      {value.length === 0 && (
+        <p className="text-xs font-medium text-amber-800">
+          With no legal entity ticked they see no books and no cases. Tick the entities whose books they work on.
+        </p>
+      )}
     </div>
   )
 }

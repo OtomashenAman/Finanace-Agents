@@ -18,7 +18,12 @@ from src.app.common.context import RequestContext
 from src.app.core.errors import AppError
 from src.app.service_pod.common.canonical import plain
 from src.app.service_pod.common.people import DELETED, name_of, names
-from src.app.service_pod.core.access.service import PodAccess, current_access, require_admin
+from src.app.service_pod.core.access.service import (
+    PodAccess,
+    case_scope,
+    current_access,
+    require_admin,
+)
 from src.app.service_pod.core.cases.access import load_case
 from src.app.service_pod.core.cases.exceptions import StaleVersionError
 from src.app.service_pod.core.cases.models import LOCKED_STATUSES, CaseStatus, PodCase
@@ -124,7 +129,7 @@ async def list_tasks(
     query = (
         select(PodPostingTask)
         .join(PodCase, PodCase.id == PodPostingTask.case_id)
-        .where(PodCase.workflow.in_(access.workflows))
+        .where(*case_scope())
         .order_by(PodPostingTask.updated_at.desc())
         .limit(300)
     )

@@ -37,7 +37,7 @@ const PAGES: { title: string; link: string; adminOnly?: boolean; words: string }
   { title: "My Worklist", link: "/worklist", words: "todo tasks" },
   // { title: "Approvals", link: "/approvals", words: "review approve" },
   { title: "Audit Trail", link: "/audit", words: "history log events" },
-  { title: "Data Sources", link: "/data-sources", words: "quickbooks upload csv" },
+  { title: "Data Sources", link: "/data-sources", adminOnly: true, words: "quickbooks upload csv" },
   { title: "My account", link: "/account", words: "password profile" },
   { title: "Help", link: "/help", words: "guide how" },
   { title: "Users", link: "/admin/users", adminOnly: true, words: "admin people roles" },

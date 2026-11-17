@@ -97,7 +97,6 @@ const router = createBrowserRouter([
           { path: "/help", element: <HelpPage /> },
           { path: "/approvals", element: <ApprovalsPage /> },
           { path: "/audit", element: <AuditPage /> },
-          { path: "/data-sources", element: <DataSourcesPage /> },
           {
             element: <RequireArea area="service_pod" />,
             children: [
@@ -122,6 +121,8 @@ const router = createBrowserRouter([
               { path: "/admin/entities", element: <EntitiesPage /> },
               { path: "/admin/governance", element: <GovernancePage /> },
               { path: "/admin/data-sources", element: <AdminDataSourcesPage /> },
+              // QuickBooks connections and uploads: Finance Admins only (others share snapshots)
+              { path: "/data-sources", element: <DataSourcesPage /> },
               { path: "/admin/ai-monitoring", element: <AiMonitoringPage /> },
             ],
           },

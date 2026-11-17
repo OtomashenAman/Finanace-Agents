@@ -16,7 +16,7 @@ from src.app.audit.models import AuditEvent
 from src.app.common.clock import utcnow
 from src.app.core.config import get_settings
 from src.app.data_sources.models import DataSource, SourceKind, SourceStatus
-from src.app.service_pod.core.access.service import PodAccess
+from src.app.service_pod.core.access.service import PodAccess, case_scope, snapshot_scope
 from src.app.service_pod.core.cases.models import (
     LOCKED_STATUSES,
     CaseStatus,
@@ -120,6 +120,7 @@ async def _promises(session: AsyncSession) -> tuple[list[MoneyTotal], list[Promi
             .where(
                 PodCommitment.status == CommitmentStatus.APPROVED,
                 PodCase.status != CaseStatus.CANCELLED,
+                *case_scope(),
             )
             .order_by(PodCommitment.expected_date)
         )
@@ -192,10 +193,8 @@ AI_EVENTS: dict[str, AiKind] = {
 async def _ai_activity(session: AsyncSession, access: PodAccess) -> AiActivity:
     since = utcnow() - timedelta(days=7)
     events = [AuditEvent.event_type.in_(AI_EVENTS)]
-    if not access.is_admin:  # only events on cases of the person's workflows
-        own_cases = select(sql_cast(PodCase.id, String)).where(
-            PodCase.workflow.in_(access.workflows)
-        )
+    if not access.is_admin:  # only events on cases the person may see
+        own_cases = select(sql_cast(PodCase.id, String)).where(*case_scope())
         events.append(AuditEvent.details["case_id"].astext.in_(own_cases))
     grouped = await session.execute(
         select(AuditEvent.event_type, func.count())
@@ -231,7 +230,7 @@ async def _books(session: AsyncSession) -> BooksStatus:
         ).all()
     )
     in_use = select(PodSnapshot).where(
-        PodSnapshot.id.not_in(select(PodSnapshotArchive.snapshot_id))
+        PodSnapshot.id.not_in(select(PodSnapshotArchive.snapshot_id)), *snapshot_scope()
     )
     latest = await session.scalar(in_use.order_by(PodSnapshot.created_at.desc()).limit(1))
     count = await session.scalar(select(func.count()).select_from(in_use.subquery()))
@@ -249,7 +248,11 @@ async def _books(session: AsyncSession) -> BooksStatus:
 async def _cash(session: AsyncSession) -> CashRunway | None:
     case = await session.scalar(
         select(PodCase)
-        .where(PodCase.workflow == WorkflowKey.TREASURY, PodCase.status != CaseStatus.CANCELLED)
+        .where(
+            PodCase.workflow == WorkflowKey.TREASURY,
+            PodCase.status != CaseStatus.CANCELLED,
+            *case_scope(),
+        )
         .order_by(PodCase.updated_at.desc())
         .limit(1)
     )
@@ -273,11 +276,7 @@ async def dashboard(session: AsyncSession, access: PodAccess) -> Dashboard:
     today = now.date()
     # Only the workflows this person works in (every one for a Finance Admin)
     cases = list(
-        await session.scalars(
-            select(PodCase)
-            .where(PodCase.workflow.in_(access.workflows))
-            .order_by(PodCase.created_at)
-        )
+        await session.scalars(select(PodCase).where(*case_scope()).order_by(PodCase.created_at))
     )
     phase_of = await _phases(session, access, cases)
     open_cases = [c for c in cases if c.status not in LOCKED_STATUSES]

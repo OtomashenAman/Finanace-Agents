@@ -26,7 +26,7 @@ from src.app.core.llm.factory import get_llm_provider
 from src.app.jobs import queue
 from src.app.service_pod.common.canonical import fingerprint
 from src.app.service_pod.common.people import DELETED, name_of, names
-from src.app.service_pod.core.access.service import PodAccess, require_admin
+from src.app.service_pod.core.access.service import PodAccess, case_scope, require_admin
 from src.app.service_pod.core.cases import system
 from src.app.service_pod.core.cases.access import load_case
 from src.app.service_pod.core.cases.exceptions import CaseActionError, StaleVersionError
@@ -164,7 +164,7 @@ async def list_messages(
     query = (
         select(PodMessage)
         .join(PodCase, PodCase.id == PodMessage.case_id)
-        .where(PodCase.workflow.in_(access.workflows))
+        .where(*case_scope())
         .order_by(PodMessage.updated_at.desc())
         .limit(300)
     )

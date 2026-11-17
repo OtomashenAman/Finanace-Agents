@@ -23,7 +23,7 @@ from src.app.service_pod.common.canonical import canonical, fingerprint, plain
 from src.app.service_pod.common.people import DELETED, name_of, names
 from src.app.service_pod.core.access.service import (
     PodAccess,
-    current_access,
+    case_scope,
     require_admin,
     require_workflow,
 )
@@ -690,12 +690,7 @@ async def list_cases(
     status: CaseStatus | None,
     entity_id: uuid.UUID | None,
 ) -> list[CaseSummary]:
-    query = (
-        select(PodCase)
-        .where(PodCase.workflow.in_(access.workflows))
-        .order_by(PodCase.updated_at.desc())
-        .limit(300)
-    )
+    query = select(PodCase).where(*case_scope()).order_by(PodCase.updated_at.desc()).limit(300)
     if workflow is not None:
         query = query.where(PodCase.workflow == workflow)
     if status is not None:
@@ -790,7 +785,6 @@ async def related_cases(session: AsyncSession, case: PodCase) -> list[RelatedCas
     customer_id = case.selection.get("customer_id")
     if not customer_id:
         return []
-    access = current_access()
     others = list(
         await session.scalars(
             select(PodCase)
@@ -800,7 +794,7 @@ async def related_cases(session: AsyncSession, case: PodCase) -> list[RelatedCas
                 PodCase.workflow != case.workflow,
                 PodCase.selection["customer_id"].astext == str(customer_id),
                 PodCase.status != CaseStatus.CANCELLED,
-                *([PodCase.workflow.in_(access.workflows)] if access is not None else []),
+                *case_scope(),
             )
             .order_by(PodCase.created_at.desc())
             .limit(20)
@@ -848,7 +842,7 @@ async def review_queue(session: AsyncSession, access: PodAccess) -> list[ReviewQ
             .where(
                 PodReviewTask.status == ReviewTaskStatus.OPEN,
                 PodCase.status.not_in(LOCKED_STATUSES),
-                PodCase.workflow.in_(access.workflows),
+                *case_scope(),
             )
             .order_by(PodReviewTask.created_at)
             .limit(300)

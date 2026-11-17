@@ -21,7 +21,7 @@ from src.app.entities.models import LegalEntity
 from src.app.entities.schemas import EntityRef
 from src.app.service_pod.common.canonical import fingerprint, plain
 from src.app.service_pod.common.people import DELETED, names
-from src.app.service_pod.core.access.service import PodAccess
+from src.app.service_pod.core.access.service import PodAccess, current_access, snapshot_scope
 from src.app.service_pod.core.cases.models import PodCase
 from src.app.service_pod.core.snapshots import importers
 from src.app.service_pod.core.snapshots.contract import (
@@ -125,7 +125,13 @@ async def summary(session: AsyncSession, snapshot: PodSnapshot) -> SnapshotSumma
 
 async def _entity(session: AsyncSession, entity_id: uuid.UUID) -> LegalEntity:
     entity = await session.get(LegalEntity, entity_id)
-    if entity is None or not entity.is_active:
+    access = current_access()
+    # An entity outside the person's legal entities is reported as unknown, never named
+    if (
+        entity is None
+        or not entity.is_active
+        or (access is not None and not access.allows_entity(entity.id))
+    ):
         raise SnapshotInvalidError("Unknown or inactive legal entity.")
     return entity
 
@@ -288,7 +294,9 @@ async def _read_pnl(
 
 async def load_snapshot(session: AsyncSession, snapshot_id: uuid.UUID) -> PodSnapshot:
     snapshot = await session.get(PodSnapshot, snapshot_id)
-    if snapshot is None:
+    access = current_access()
+    # Books of a legal entity the person doesn't work for are reported as missing
+    if snapshot is None or (access is not None and not access.allows_entity(snapshot.entity_id)):
         raise SnapshotNotFoundError
     return snapshot
 
@@ -321,7 +329,12 @@ def archived_ids() -> Select[tuple[uuid.UUID]]:
 async def list_snapshots(
     session: AsyncSession, entity_id: uuid.UUID | None, include_archived: bool = False
 ) -> list[SnapshotSummary]:
-    query = select(PodSnapshot).order_by(PodSnapshot.created_at.desc()).limit(200)
+    query = (
+        select(PodSnapshot)
+        .where(*snapshot_scope())
+        .order_by(PodSnapshot.created_at.desc())
+        .limit(200)
+    )
     if not include_archived:
         query = query.where(PodSnapshot.id.not_in(archived_ids()))
     if entity_id is not None:

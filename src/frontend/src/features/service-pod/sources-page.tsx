@@ -351,6 +351,7 @@ function Removal({ snapshot }: { snapshot: Snapshot }) {
 
 /** Immutable source snapshots: what every case calculates from. */
 export function SourcesPage() {
+  const admin = useIsPodAdmin()
   const [showArchived, setShowArchived] = useState(false)
   const snapshots = useSnapshots(showArchived)
   const [openId, setOpenId] = useState<string | null>(null)
@@ -385,7 +386,16 @@ export function SourcesPage() {
         >
           {snapshots.isPending && <Loading what="snapshots" />}
           {snapshots.isError && <LoadError what="snapshots" />}
-          {snapshots.data?.length === 0 && <Empty>No snapshots yet.</Empty>}
+          <p className="mb-3 rounded-md bg-secondary/60 px-3 py-2 text-xs text-muted-foreground">
+            Fresh books arrive by themselves: every night each QuickBooks company is synced and frozen again, like its latest
+            snapshot.{" "}
+            {admin
+              ? "Freeze a company once below to start its nightly refresh."
+              : "You don't need a QuickBooks connection of your own."}
+          </p>
+          {snapshots.data?.length === 0 && (
+            <Empty>{admin ? "No snapshots yet." : "No books for your legal entities yet: a Finance Admin adds them."}</Empty>
+          )}
           <ul className="divide-y">
             {rows.map(({ s, key, older, first }) => {
               const hasReceipts = s.coverage.includes("bank_receipts")
@@ -484,9 +494,11 @@ export function SourcesPage() {
           <Card title="Import an export">
             <JsonImport />
           </Card>
-          <Card title="From QuickBooks Online">
-            <QuickBooksImport />
-          </Card>
+          {admin && (
+            <Card title="From QuickBooks Online">
+              <QuickBooksImport />
+            </Card>
+          )}
         </div>
       </div>
     </PodPage>
