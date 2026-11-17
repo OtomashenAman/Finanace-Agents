@@ -2,6 +2,7 @@ import { useState } from "react"
 import { NavLink, Outlet } from "react-router"
 import {
   Database,
+  FileSignature,
   FileStack,
   FolderKanban,
   History,
@@ -17,6 +18,7 @@ import {
 import type { Area } from "@/features/auth/api"
 import { useCurrentUser } from "@/features/auth/hooks"
 import { canUse, isAdmin, ROLE_LABELS } from "@/features/auth/roles"
+import { useAwaitingMe } from "@/features/esign/hooks"
 import { useMyQueue } from "@/features/service-pod/hooks"
 import { useWorklist } from "@/features/worklist/hooks"
 import { cn } from "@/lib/utils"
@@ -29,7 +31,7 @@ interface NavItem {
   area?: Area // shown only to people given this area
   /** Active only on this exact path (the dashboard, not every /pod page under it) */
   end?: boolean
-  badge?: "queue" | "worklist"
+  badge?: "queue" | "worklist" | "esign"
 }
 
 interface NavGroup {
@@ -89,6 +91,7 @@ const NAV: NavGroup[] = [
         to: "/worklist",
         badge: "worklist",
       },
+      { label: "E-Signature", icon: FileSignature, to: "/esign", badge: "esign" },
       { label: "Audit Trail", icon: History, to: "/audit" },
       // QuickBooks connections and uploads: the Finance Admin's. Everyone else works on the
       // shared snapshots, refreshed from the admin's connection every night
@@ -147,6 +150,12 @@ function WorklistBadge() {
   return <CountBadge count={count} what={`item${count === 1 ? "" : "s"} need you`} />
 }
 
+/** Documents waiting for my countersignature */
+function EsignBadge() {
+  const count = useAwaitingMe() ?? 0
+  return <CountBadge count={count} what={`document${count === 1 ? "" : "s"} to countersign`} />
+}
+
 function Nav({ onNavigate }: { onNavigate?: () => void }) {
   const { data: user } = useCurrentUser()
   const groups = NAV.map((group) => ({
@@ -183,6 +192,7 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
               <span className="truncate">{label}</span>
               {badge === "queue" && <QueueBadge />}
               {badge === "worklist" && <WorklistBadge />}
+              {badge === "esign" && <EsignBadge />}
             </NavLink>
           ))}
         </div>

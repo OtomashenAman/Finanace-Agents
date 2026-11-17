@@ -8,6 +8,7 @@ from src.app.auth.router import router as auth_router
 from src.app.data_sources.router import admin_router as data_sources_admin_router
 from src.app.data_sources.router import router as data_sources_router
 from src.app.entities.router import router as entities_router
+from src.app.esign.router import router as esign_router
 from src.app.finance_pod.billing.router import invoice_link_router, lab_router
 from src.app.finance_pod.clients.router import portal_router as client_portal_router
 from src.app.finance_pod.invoices.router import receipt_portal_router
@@ -41,6 +42,7 @@ api_router.include_router(governance_router)
 api_router.include_router(worklist_router)
 api_router.include_router(search_router)
 api_router.include_router(service_pod_router)
+api_router.include_router(esign_router)
 api_router.include_router(finance_pod_router)
 api_router.include_router(vendor_portal_router)
 api_router.include_router(receipt_portal_router)

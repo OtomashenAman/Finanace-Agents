@@ -15,6 +15,7 @@ import { ApprovalsPage } from "@/features/approvals/approvals-page"
 import { AccountPage } from "@/features/auth/account-page"
 import { HelpPage } from "@/features/help/help-page"
 import { AuditPage } from "@/features/audit/audit-page"
+import { EsignPage } from "@/features/esign/esign-page"
 import { WorklistPage } from "@/features/worklist/worklist-page"
 import { GuestOnly, HomeRedirect, RequireAdmin, RequireArea, RequireAuth } from "@/features/auth/route-guards"
 import { DataSourcesPage } from "@/features/data-sources/data-sources-page"
@@ -97,6 +98,8 @@ const router = createBrowserRouter([
           { path: "/help", element: <HelpPage /> },
           { path: "/approvals", element: <ApprovalsPage /> },
           { path: "/audit", element: <AuditPage /> },
+          // E-signature (PandaDoc): everyone, each person sees only what they sent
+          { path: "/esign", element: <EsignPage /> },
           {
             element: <RequireArea area="service_pod" />,
             children: [

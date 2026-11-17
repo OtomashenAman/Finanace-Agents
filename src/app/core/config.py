@@ -137,6 +137,29 @@ class Settings(BaseSettings):
     # Clients' links to view an invoice online stay valid this long
     invoice_link_days: int = 120
 
+    # E-signature through PandaDoc. API key: PandaDoc Dev Center -> API keys (a sandbox key
+    # only sends to the account's own addresses). Webhook key: the shared key of the webhook
+    # subscription pointed at {PUBLIC_BASE_URL}/api/v1/esign/webhook; unset: every webhook
+    # call is refused (statuses can still be refreshed by hand)
+    pandadoc_api_key: SecretStr | None = None
+    pandadoc_webhook_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("PANDADOC_WEBHOOK_KEY", "PANDADOC_WEBHOOK_SHARED_KEY"),
+    )
+    pandadoc_api_url: str = Field(
+        default="https://api.pandadoc.com",
+        validation_alias=AliasChoices("PANDADOC_API_URL", "PANDADOC_BASE_URL"),
+    )
+    pandadoc_timeout_seconds: float = 30
+    # Where a template's signature box goes unless it uses field tags ({signature:signer1}):
+    # page (1-based), offsets from the page's top-left corner and size, in points. Each
+    # further signer's box goes below the previous one
+    pandadoc_signature_page: int = Field(default=1, ge=1)
+    pandadoc_signature_x: float = Field(default=100, ge=0)
+    pandadoc_signature_y: float = Field(default=100, ge=0)
+    pandadoc_signature_width: float = Field(default=200, gt=0)
+    pandadoc_signature_height: float = Field(default=50, gt=0)
+
     # Demo seed user (uv run poe seed)
     demo_admin_email: str = "finance.admin@example.com"
     demo_admin_name: str = "Finance Admin"
@@ -160,11 +183,19 @@ class Settings(BaseSettings):
         "workday_client_id",
         "workday_client_secret",
         "workday_refresh_token",
+        "pandadoc_api_key",
+        "pandadoc_webhook_key",
         mode="before",
     )
     @classmethod
     def _blank_is_unset(cls, value: object) -> object:
         return None if value == "" else value
+
+    @field_validator("pandadoc_api_url", mode="after")
+    @classmethod
+    def _pandadoc_host(cls, value: str) -> str:
+        """https://api.pandadoc.com, also when given with its /public/v1 path."""
+        return value.rstrip("/").removesuffix("/public/v1").rstrip("/")
 
     @property
     def is_production(self) -> bool:

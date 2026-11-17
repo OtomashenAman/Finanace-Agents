@@ -16,6 +16,7 @@ class AuditCategory(StrEnum):
     AUDIT = "audit"
     SERVICE_POD = "service_pod"
     FINANCE_POD = "finance_pod"
+    ESIGN = "esign"
 
 
 # event_type prefix -> category
@@ -32,6 +33,7 @@ _PREFIXES: dict[str, AuditCategory] = {
     "jobs.": AuditCategory.AUDIT,
     "pod.": AuditCategory.SERVICE_POD,
     "fpod.": AuditCategory.FINANCE_POD,
+    "esign.": AuditCategory.ESIGN,
 }
 
 FAILURE_EVENTS = frozenset(
@@ -47,6 +49,7 @@ FAILURE_EVENTS = frozenset(
         "run.writeback_failed",
         "pod.message_send_failed",
         "pod.message_send_unknown",
+        "esign.send_failed",
     }
 )
 
@@ -178,7 +181,7 @@ _TEXT: dict[str, Describe] = {
 def describe(event_type: str, details: Mapping[str, Any], subject: str | None) -> str:
     text = _TEXT.get(event_type)
     if text is None:
-        # Service POD and Finance POD events carry their own sentence
+        # Service POD, Finance POD and e-signature events carry their own sentence
         summary = details.get("summary")
         return summary if isinstance(summary, str) else event_type
     try:

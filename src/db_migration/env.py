@@ -15,6 +15,7 @@ import src.app.audit.models
 import src.app.auth.models
 import src.app.data_sources.models
 import src.app.entities.models
+import src.app.esign.models
 import src.app.finance_pod.approvals.models
 import src.app.finance_pod.billing.models
 import src.app.finance_pod.clients.models
